@@ -166,3 +166,8 @@ três modos de captura (RF-01…RF-03), editor com 5 ferramentas (RF-04), config
 com efeito imediato (RF-05), bandeja (RF-06), nomeação/salvamento com colisões (RF-07)
 e instância única (RF-08); requisitos não funcionais RNF-01…RNF-08 (exe único ≤ 15 MB,
 DPI Per-Monitor V2, event-driven, sem privilégios de administrador, sem console).
+
+
+---
+
+https://github.com/mBarony/printscreen-windows11-rust/raw/main/dist/rustshot.exe

@@ -1,0 +1,33 @@
+// Recursos embutidos no rustshot.exe: ícone do aplicativo, manifesto DPI
+// (Per-Monitor V2) e bloco de versão exibido nas propriedades do arquivo.
+
+#define RT_MANIFEST 24
+
+1 ICON "icon.ico"
+1 RT_MANIFEST "rustshot.exe.manifest"
+
+1 VERSIONINFO
+FILEVERSION     1,0,0,0
+PRODUCTVERSION  1,0,0,0
+FILEOS          0x40004L // VOS_NT_WINDOWS32
+FILETYPE        0x1L     // VFT_APP
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0" // en-US, Unicode
+        BEGIN
+            VALUE "CompanyName",      "RustShot"
+            VALUE "FileDescription",  "RustShot - captura de tela para Windows 11"
+            VALUE "FileVersion",      "1.0.0"
+            VALUE "InternalName",     "rustshot"
+            VALUE "OriginalFilename", "rustshot.exe"
+            VALUE "ProductName",      "RustShot"
+            VALUE "ProductVersion",   "1.0.0"
+            VALUE "LegalCopyright",   "Licenca BSD-3-Clause"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0409, 0x04B0
+    END
+END

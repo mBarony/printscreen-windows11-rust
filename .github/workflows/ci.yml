@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows:
+    name: Build & test (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust toolchain (stable-msvc)
+        run: rustup toolchain install stable --profile minimal --component clippy && rustup default stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Clippy (deny warnings)
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Testes
+        run: cargo test
+
+      - name: Build release
+        run: cargo build --release
+
+      - name: Tamanho do artefato (alvo RNF-01 ≤ 15 MB)
+        shell: pwsh
+        run: |
+          $exe = Get-Item target/release/rustshot.exe
+          $mb = [math]::Round($exe.Length / 1MB, 2)
+          Write-Host "rustshot.exe: $mb MB"
+          if ($exe.Length -gt 15MB) { Write-Warning "Acima do alvo de 15 MB (RNF-01)" }
+
+      - name: Publicar artefato
+        uses: actions/upload-artifact@v4
+        with:
+          name: rustshot-windows-x64
+          path: target/release/rustshot.exe

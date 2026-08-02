@@ -43,7 +43,23 @@ recursos Win32 quando o alvo é Windows).
 Local padrão: `config.json` — criado no mesmo diretório que o executável com padrões na primeira execução.
 
 ```json
-{ "version": 1, "output_dir": "C:\\Users\\voce\\Pictures\\RustShot", "filename_template": "screenshot_{date}_{time}", "image_format": "jpg", "fullscreen_scope": "all_monitors", "hotkeys": {   "fullscreen": { "modifiers": ["CTRL"], "code": "PrintScreen" },   "region":     { "modifiers": ["SHIFT"], "code": "PrintScreen" },   "edit":       { "modifiers": ["CTRL", "SHIFT"], "code": "PrintScreen" } }, "editor": {   "default_color": "#FF3B30",   "default_stroke_width": 3,   "default_font_size": 24 }, "start_with_windows": false
+{
+  "version": 1,
+  "output_dir": "C:\\Users\\voce\\Pictures\\RustShot",
+  "filename_template": "screenshot_{date}_{time}",
+  "image_format": "png",
+  "fullscreen_scope": "all_monitors",
+  "hotkeys": {
+    "fullscreen": { "modifiers": ["CTRL"], "code": "PrintScreen" },
+    "region":     { "modifiers": ["SHIFT"], "code": "PrintScreen" },
+    "edit":       { "modifiers": ["CTRL", "SHIFT"], "code": "PrintScreen" }
+  },
+  "editor": {
+    "default_color": "#FF3B30",
+    "default_stroke_width": 3,
+    "default_font_size": 24
+  },
+  "start_with_windows": false
 }
 ```
 

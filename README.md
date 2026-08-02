@@ -112,6 +112,39 @@ embutida** (Inter) do preview — o que você vê é o que sai no PNG.
 | `settings.rs` | janela de configurações (RF-05) |
 | `clipboard.rs` / `storage.rs` / `tray.rs` / `notify.rs` | cópia, salvamento, bandeja, toasts |
 
+## Dependências
+
+Diretas (versões completas travadas no `Cargo.lock`):
+
+| Crate | Versão | Papel |
+|---|---|---|
+| [eframe](https://crates.io/crates/eframe) / [egui](https://crates.io/crates/egui) | 0.32 | GUI: event loop, overlay de seleção, editor e configurações |
+| [global-hotkey](https://crates.io/crates/global-hotkey) | 0.7 | Atalhos de teclado globais (RF-01…RF-03) |
+| [tray-icon](https://crates.io/crates/tray-icon) | 0.21 | Ícone e menu da bandeja do sistema (RF-06) |
+| [xcap](https://crates.io/crates/xcap) | 0.6 | Enumeração de monitores e captura de tela (pixels físicos) |
+| [arboard](https://crates.io/crates/arboard) | 3.5 | Área de transferência de imagem (`Ctrl+C` no editor) |
+| [image](https://crates.io/crates/image) | 0.25 | Codificação PNG/JPG, crop e composição |
+| [tiny-skia](https://crates.io/crates/tiny-skia) | 0.11 | Rasterização vetorial das anotações na exportação |
+| [ab_glyph](https://crates.io/crates/ab_glyph) | 0.2 | Rasterização da fonte Inter na exportação de texto |
+| [serde](https://crates.io/crates/serde) / [serde_json](https://crates.io/crates/serde_json) | 1 | Leitura/gravação do `config.json` |
+| [chrono](https://crates.io/crates/chrono) | 0.4 | Data/hora no nome dos arquivos (RF-07) |
+| [dirs](https://crates.io/crates/dirs) | 6 | Resolução de `%APPDATA%` e da pasta Imagens |
+| [rfd](https://crates.io/crates/rfd) | 0.15 | Diálogo nativo de seleção de pasta (configurações) |
+| [notify-rust](https://crates.io/crates/notify-rust) | 4 | Toasts de notificação do Windows |
+| [auto-launch](https://crates.io/crates/auto-launch) | 0.5 | "Iniciar com o Windows" (`HKCU\...\Run`) |
+| [single-instance](https://crates.io/crates/single-instance) | 0.3 | Garantia de instância única via mutex (RF-08) |
+| [anyhow](https://crates.io/crates/anyhow) | 1 | Propagação de erros com contexto |
+| [log](https://crates.io/crates/log) / [simplelog](https://crates.io/crates/simplelog) | 0.4 / 0.12 | Log em `%APPDATA%\RustShot\rustshot.log` |
+| [windows-sys](https://crates.io/crates/windows-sys) | 0.59 | APIs Win32 (somente alvo Windows) |
+| [embed-resource](https://crates.io/crates/embed-resource) | 3 | *(build)* Embute ícone e manifesto Per-Monitor V2 no exe |
+
+> **Nota sobre alertas de segurança em dependências transitivas**: o `Cargo.lock`
+> registra dependências de todas as plataformas. A pilha GTK3 (`gtk`/`glib`/
+> `libappindicator`, via `tray-icon`) é usada apenas no Linux e **não é compilada
+> no binário Windows** — alertas do Dependabot sobre esses crates (ex.: `glib`
+> < 0.20) não afetam o `rustshot.exe` e podem ser dispensados como
+> "vulnerable code is not actually used".
+
 ## Decisões de implementação
 
 Pontos em que a especificação era ambígua ou citava versões indisponíveis:

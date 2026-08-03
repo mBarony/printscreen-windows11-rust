@@ -12,9 +12,14 @@ mod capture;
 mod clipboard;
 mod config;
 mod editor;
+mod error;
 mod hotkeys;
+mod imgbuf;
+mod jpeg;
+mod json;
 mod notify;
 mod overlay;
+mod platform;
 mod settings;
 mod storage;
 mod theme;
@@ -33,19 +38,12 @@ const LOG_ROTATE_BYTES: u64 = 2 * 1024 * 1024;
 fn main() {
     // RF-08 primeiro: a segunda instância não deve tocar (nem rotacionar) o
     // log que a instância em execução mantém aberto.
-    let _instance = match single_instance::SingleInstance::new(SINGLE_INSTANCE_NAME) {
-        Ok(instance) => {
-            if !instance.is_single() {
-                notify::toast_blocking(
-                    "RustShot já está em execução",
-                    "Use o ícone na bandeja do sistema.",
-                );
-                return;
-            }
-            Some(instance)
-        }
-        // Sem o mutex seguimos mesmo assim — pior caso, duas instâncias.
-        Err(_) => None,
+    let Some(_instance) = platform::instance::acquire(SINGLE_INSTANCE_NAME) else {
+        notify::toast_blocking(
+            "RustShot já está em execução",
+            "Use o ícone na bandeja do sistema.",
+        );
+        return;
     };
 
     init_logging();
@@ -121,20 +119,14 @@ fn init_logging() {
 
     let file = std::fs::OpenOptions::new().create(true).append(true).open(&path);
     if let Ok(file) = file {
-        let config = simplelog::ConfigBuilder::new()
-            .set_time_format_rfc3339()
-            // Módulos gráficos são ruidosos (naga chega a despejar código de
-            // shader no Info) — o log é do app, não do renderizador.
-            .add_filter_ignore_str("naga")
-            .add_filter_ignore_str("wgpu")
-            .add_filter_ignore_str("egui_wgpu")
-            .build();
         // Build debug loga em nível Debug (diagnóstico de geometria/DPI).
+        // O logger próprio já filtra os módulos gráficos ruidosos
+        // (naga/wgpu/egui_wgpu — ver platform::logger).
         let level = if cfg!(debug_assertions) {
             log::LevelFilter::Debug
         } else {
             log::LevelFilter::Info
         };
-        let _ = simplelog::WriteLogger::init(level, config, file);
+        platform::logger::init(file, level);
     }
 }

@@ -1,25 +1,24 @@
-//! Rasterização final para exportação (§8): formas vetoriais com `tiny-skia`
-//! (stroke com espessura real e anti-aliasing) e texto com `ab_glyph`, sobre
-//! a captura em resolução nativa.
+//! Rasterização final para exportação (§8): formas vetoriais com o
+//! rasterizador próprio (`raster`) e texto com `ab_glyph`, sobre a captura
+//! em resolução nativa.
 //!
 //! A fonte usada aqui é a mesma TTF embutida carregada no egui
 //! (`crate::editor::FONT_BYTES`), e o cálculo de escala/baseline espelha o do
 //! epaint (`as_scaled(px)`, baseline = topo + ascent) — garantindo WYSIWYG
-//! entre o editor e o JPG final (CA-04).
+//! entre o editor e o JPG final (CA-04). O `ab_glyph` já é parte do epaint
+//! (egui); usá-lo aqui não adiciona dependência nova à árvore.
 
 use ab_glyph::{Font as _, FontRef, ScaleFont as _};
-use anyhow::{anyhow, Context as _, Result};
-use image::RgbaImage;
-use tiny_skia::{
-    FillRule, LineCap, LineJoin, Paint, Path, PathBuilder, PixmapMut, Stroke, Transform,
-};
 
+use crate::error::{Context as _, Result};
+use crate::imgbuf::RgbaImage;
+
+use super::raster;
 use super::shapes::{arrow_geometry, Point, Shape};
 use super::FONT_BYTES;
 
 /// Rasteriza `captura + formas` e retorna a imagem final RGBA.
 pub fn render(base: &RgbaImage, shapes: &[Shape]) -> Result<RgbaImage> {
-    let (w, h) = (base.width(), base.height());
     let mut buffer = base.clone();
     if shapes.is_empty() {
         return Ok(buffer);
@@ -30,53 +29,49 @@ pub fn render(base: &RgbaImage, shapes: &[Shape]) -> Result<RgbaImage> {
     for shape in shapes {
         match shape {
             Shape::Line { a, b, style } => {
-                let mut pb = PathBuilder::new();
-                pb.move_to(a.x, a.y);
-                pb.line_to(b.x, b.y);
-                if let Some(path) = pb.finish() {
-                    stroke_path(&mut buffer, w, h, &path, style.color, style.stroke_width)?;
-                }
+                raster::stroke_line(
+                    &mut buffer,
+                    (a.x, a.y),
+                    (b.x, b.y),
+                    style.stroke_width,
+                    style.color,
+                );
             }
             Shape::Arrow { a, b, style } => {
                 let geo = arrow_geometry(*a, *b, style.stroke_width);
-                let mut pb = PathBuilder::new();
-                pb.move_to(geo.shaft_a.x, geo.shaft_a.y);
-                pb.line_to(geo.shaft_b.x, geo.shaft_b.y);
-                if let Some(path) = pb.finish() {
-                    stroke_path(&mut buffer, w, h, &path, style.color, style.stroke_width)?;
-                }
-
-                let mut tri = PathBuilder::new();
-                tri.move_to(geo.head[0].x, geo.head[0].y);
-                tri.line_to(geo.head[1].x, geo.head[1].y);
-                tri.line_to(geo.head[2].x, geo.head[2].y);
-                tri.close();
-                if let Some(path) = tri.finish() {
-                    fill_path(&mut buffer, w, h, &path, style.color)?;
-                }
+                raster::stroke_line(
+                    &mut buffer,
+                    (geo.shaft_a.x, geo.shaft_a.y),
+                    (geo.shaft_b.x, geo.shaft_b.y),
+                    style.stroke_width,
+                    style.color,
+                );
+                raster::fill_triangle(
+                    &mut buffer,
+                    (geo.head[0].x, geo.head[0].y),
+                    (geo.head[1].x, geo.head[1].y),
+                    (geo.head[2].x, geo.head[2].y),
+                    style.color,
+                );
             }
             Shape::Rect { min, max, style } => {
-                if let Some(rect) = tiny_skia::Rect::from_ltrb(
-                    min.x,
-                    min.y,
-                    max.x.max(min.x + 0.1),
-                    max.y.max(min.y + 0.1),
-                ) {
-                    let path = PathBuilder::from_rect(rect);
-                    stroke_path(&mut buffer, w, h, &path, style.color, style.stroke_width)?;
-                }
+                raster::stroke_rect(
+                    &mut buffer,
+                    (min.x, min.y),
+                    (max.x.max(min.x + 0.1), max.y.max(min.y + 0.1)),
+                    style.stroke_width,
+                    style.color,
+                );
             }
             Shape::Ellipse { center, rx, ry, style } => {
-                if let Some(oval) = tiny_skia::Rect::from_ltrb(
-                    center.x - rx,
-                    center.y - ry,
-                    center.x + rx.max(0.1),
-                    center.y + ry.max(0.1),
-                ) {
-                    if let Some(path) = PathBuilder::from_oval(oval) {
-                        stroke_path(&mut buffer, w, h, &path, style.color, style.stroke_width)?;
-                    }
-                }
+                raster::stroke_ellipse(
+                    &mut buffer,
+                    (center.x, center.y),
+                    rx.max(0.1),
+                    ry.max(0.1),
+                    style.stroke_width,
+                    style.color,
+                );
             }
             Shape::Text { anchor, content, style } => {
                 draw_text(&mut buffer, &font, *anchor, content, style.color, style.font_size);
@@ -84,57 +79,6 @@ pub fn render(base: &RgbaImage, shapes: &[Shape]) -> Result<RgbaImage> {
         }
     }
     Ok(buffer)
-}
-
-fn pixmap_of<'a>(buffer: &'a mut RgbaImage, w: u32, h: u32) -> Result<PixmapMut<'a>> {
-    // A captura é opaca (alfa 255) e as cores das formas também; com fundo
-    // opaco, RGBA "straight" e pré-multiplicado coincidem, então o buffer
-    // pode ser usado direto como pixmap.
-    PixmapMut::from_bytes(buffer.as_mut(), w, h).ok_or_else(|| anyhow!("pixmap inválido"))
-}
-
-fn paint_for(color: [u8; 4]) -> Paint<'static> {
-    let mut paint = Paint::default();
-    paint.set_color_rgba8(color[0], color[1], color[2], color[3]);
-    paint.anti_alias = true;
-    paint
-}
-
-fn stroke_path(
-    buffer: &mut RgbaImage,
-    w: u32,
-    h: u32,
-    path: &Path,
-    color: [u8; 4],
-    width: f32,
-) -> Result<()> {
-    let mut pixmap = pixmap_of(buffer, w, h)?;
-    let stroke = Stroke {
-        width: width.max(0.5),
-        line_cap: LineCap::Round,
-        line_join: LineJoin::Round,
-        ..Stroke::default()
-    };
-    pixmap.stroke_path(path, &paint_for(color), &stroke, Transform::identity(), None);
-    Ok(())
-}
-
-fn fill_path(
-    buffer: &mut RgbaImage,
-    w: u32,
-    h: u32,
-    path: &Path,
-    color: [u8; 4],
-) -> Result<()> {
-    let mut pixmap = pixmap_of(buffer, w, h)?;
-    pixmap.fill_path(
-        path,
-        &paint_for(color),
-        FillRule::Winding,
-        Transform::identity(),
-        None,
-    );
-    Ok(())
 }
 
 /// Desenha texto ancorado pelo canto superior esquerdo (como o
@@ -191,13 +135,13 @@ fn blend_pixel(buffer: &mut RgbaImage, x: i64, y: i64, color: [u8; 4], coverage:
     if alpha <= 0.0 {
         return;
     }
-    let pixel = buffer.get_pixel_mut(x as u32, y as u32);
-    for (channel, src) in pixel.0.iter_mut().zip(color).take(3) {
+    let pixel = buffer.pixel_mut(x as u32, y as u32);
+    for (channel, src) in pixel.iter_mut().zip(color).take(3) {
         let dst = *channel as f32;
         *channel = (src as f32 * alpha + dst * (1.0 - alpha)).round() as u8;
     }
-    let dst_a = pixel.0[3] as f32 / 255.0;
-    pixel.0[3] = ((alpha + dst_a * (1.0 - alpha)) * 255.0).round() as u8;
+    let dst_a = pixel[3] as f32 / 255.0;
+    pixel[3] = ((alpha + dst_a * (1.0 - alpha)) * 255.0).round() as u8;
 }
 
 #[cfg(test)]
@@ -206,7 +150,7 @@ mod tests {
     use crate::editor::shapes::{shape_from_drag, Style, Tool};
 
     fn base() -> RgbaImage {
-        RgbaImage::from_pixel(64, 64, image::Rgba([10, 20, 30, 255]))
+        RgbaImage::filled(64, 64, [10, 20, 30, 255])
     }
 
     fn style() -> Style {
@@ -234,8 +178,8 @@ mod tests {
         let out = render(&img, &[line]).unwrap();
         assert_ne!(img.as_raw(), out.as_raw());
         // O pixel do meio da diagonal deve ter ficado avermelhado.
-        let p = out.get_pixel(32, 32);
-        assert!(p.0[0] > 100, "esperava traço vermelho, obtido {:?}", p.0);
+        let p = out.pixel(32, 32);
+        assert!(p[0] > 100, "esperava traço vermelho, obtido {p:?}");
     }
 
     #[test]
@@ -263,5 +207,21 @@ mod tests {
         .unwrap();
         let out = render(&img, &[rect]).unwrap();
         assert_eq!((out.width(), out.height()), (64, 64));
+    }
+
+    #[test]
+    fn arrow_head_is_filled() {
+        let img = base();
+        let arrow = shape_from_drag(
+            Tool::Arrow,
+            Point::new(8.0, 32.0),
+            Point::new(56.0, 32.0),
+            false,
+            style(),
+        )
+        .unwrap();
+        let out = render(&img, &[arrow]).unwrap();
+        // Perto da ponta (x=54, y=32) deve haver vermelho.
+        assert!(out.pixel(53, 32)[0] > 150);
     }
 }

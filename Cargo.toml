@@ -1,19 +1,27 @@
 [package]
 name = "rustshot"
-version = "1.2.0"
+version = "1.3.0"
 edition = "2021"
 description = "Captura de tela para Windows 11 — tela cheia, região e edição com anotações"
 license = "BSD-3-Clause"
 repository = "https://github.com/mBarony/printscreen-windows11-rust"
 build = "build.rs"
 
+# v1.3 "standalone": além do núcleo GUI (eframe/egui + wgpu, que É a
+# plataforma do app e não faz sentido incorporar), tudo o mais é código
+# próprio chamando Win32 direto via windows-sys. Substituídos por módulos
+# internos: tray-icon/muda/notify-rust/global-hotkey (platform::shell),
+# xcap (platform::capture), arboard (platform::clipboard), auto-launch,
+# single-instance, rfd, dirs, chrono, simplelog, anyhow, serde/serde_json
+# (json.rs), image (imgbuf.rs + jpeg/ vendorizado do image-rs) e tiny-skia
+# (editor::raster). O ab_glyph já vem dentro do epaint (egui): usá-lo na
+# exportação não adiciona crate novo à árvore.
 [dependencies]
-# GUI (egui): editor, overlay, configurações. Renderizador wgpu (D3D12/DXGI
-# no Windows): o backend glow (OpenGL) fazia o driver NVIDIA tirar o overlay
-# de tela cheia da composição do DWM (unredirection), apagando o monitor por
-# ~1 s ao criar/destruir a janela de seleção.
+# GUI (egui) com renderizador wgpu (D3D12/DXGI no Windows): o backend
+# glow (OpenGL) fazia o driver NVIDIA tirar o overlay de tela cheia da
+# composição do DWM (unredirection), apagando o monitor por ~1 s.
 eframe = { version = "0.32", default-features = false, features = [
-    "accesskit",
+    "accesskit",       # acessibilidade (leitores de tela)
     "default_fonts",
     "wgpu",
 ] }
@@ -21,34 +29,30 @@ eframe = { version = "0.32", default-features = false, features = [
 # nenhum): D3D12, o mesmo caminho DXGI/DWM dos apps nativos do Windows.
 wgpu = { version = "25", default-features = false, features = ["dx12"] }
 egui = "0.32"
-global-hotkey = "0.7"      # atalhos globais
-tray-icon = "0.21"         # bandeja do sistema
-xcap = "0.6"               # captura de tela multi-monitor
-arboard = "3.5"            # área de transferência (imagem)
-image = "0.25"             # JPG, crop, composição
-tiny-skia = "0.11"         # rasterização vetorial na exportação
-ab_glyph = "0.2"           # rasterização de texto na exportação
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-chrono = "0.4"             # data/hora no nome do arquivo
-dirs = "6"                 # pasta Imagens (destino padrão)
-rfd = "0.15"               # diálogo nativo de seleção de pasta
-notify-rust = "4"          # toasts do Windows
-auto-launch = "0.5"        # iniciar com o Windows (HKCU\...\Run)
-single-instance = "0.3"    # instância única
-anyhow = "1"
-log = "0.4"
-simplelog = "0.12"         # rustshot.log na pasta do executável
+ab_glyph = "0.2"           # rasterização de texto na exportação (já é dep. do epaint)
+log = "0.4"                # fachada usada também por eframe/wgpu
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_Security",
+    "Win32_System_Com",
+    "Win32_System_DataExchange",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
     "Win32_System_Registry",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
+    "Win32_UI_Shell_Common",
     "Win32_UI_WindowsAndMessaging",
 ] }
 
 [build-dependencies]
-embed-resource = "3"
+embed-resource = "3"       # (build) embute ícone + manifesto Per-Monitor V2
 
 [profile.release]
 opt-level = 3

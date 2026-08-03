@@ -2,7 +2,7 @@
 
 Aplicação standalone de captura de tela para **Windows 11 (x64)**, escrita em Rust. Um único `rustshot.exe`, sem instalador e sem runtime externo: roda em segundo plano na bandeja do sistema e oferece três modos de captura por atalhos globais configuráveis.
 
-> Implementação da [Especificação Técnica v1.0](#especificação) (RustShot v1.2).
+> Implementação da [Especificação Técnica v1.0](#especificação) (RustShot v1.3).
 
 ## Funcionalidades
 
@@ -74,7 +74,7 @@ Local padrão: `config.json` — criado no mesmo diretório que o executável co
 - `output_dir` vazio ⇒ padrão `Imagens\RustShot` (respeita redirecionamento do OneDrive). Se a pasta configurada não puder ser criada, a aplicação usa o padrão e notifica.
 - Formato de saída: **JPG (qualidade 90), sempre** — não há campo de formato; um `image_format` legado (v1.0) no arquivo é ignorado.
 - `fullscreen_scope`: `"all_monitors"` | `"primary"` | `"monitor_under_cursor"`.
-- `modifiers`/`code` usam os nomes dos tipos do crate `global-hotkey` (`CTRL`, `SHIFT`, `ALT`, `WIN` e códigos W3C como `PrintScreen`, `KeyA`, `F5`…).
+- `modifiers`/`code` usam `CTRL`/`SHIFT`/`ALT`/`WIN` e os nomes de tecla do padrão W3C (`PrintScreen`, `KeyA`, `F5`…) — mesmo formato desde a v1.0.
 - Campos ausentes assumem o padrão; a janela de Configurações (menu da bandeja) edita tudo isso com validação e aviso de conflito entre os três atalhos.
 
 `PrtScr` **sem modificador** não é usado como padrão: desde o Windows 11 22H2 a tecla
@@ -85,10 +85,11 @@ abre a Ferramenta de Captura nativa, e `Win+Shift+S` é reservado pelo sistema.
 Processo único, event loop único (`eframe`/`egui` com o viewport principal de 1×1 px fora da área visível — visível para o SO, imperceptível para o usuário);
 overlay de seleção (uma janela por monitor, sempre no topo, com a captura congelada e
 véu escuro) e editor abrem como viewports adicionais sob demanda. Atalhos globais
-(`global-hotkey`) e menu da bandeja (`tray-icon`) acordam a UI via fila de eventos +
-`request_repaint`. Codificação e escrita de JPG rodam em threads de trabalho.
-Exportação do editor rasteriza com `tiny-skia` + `ab_glyph` usando a **mesma fonte
-embutida** (Inter) do preview — o que você vê é o que sai no JPG.
+(`WM_HOTKEY`) e menu da bandeja chegam pela janela de shell própria
+(`platform/shell.rs`) e acordam a UI via fila de eventos + `request_repaint`.
+Codificação e escrita de JPG rodam em threads de trabalho. Exportação do editor
+rasteriza com o rasterizador próprio (`editor/raster.rs`) + `ab_glyph` usando a
+**mesma fonte embutida** (Inter) do preview — o que você vê é o que sai no JPG.
 
 | Módulo | Responsabilidade |
 |---|---|
@@ -96,51 +97,66 @@ embutida** (Inter) do preview — o que você vê é o que sai no JPG.
 | `app.rs` | estado global, máquina de estados `Idle → Selecting → Editing` |
 | `config.rs` | load/save/validação do `config.json` |
 | `hotkeys.rs` | registro/re-registro dos atalhos globais |
-| `capture.rs` | enumeração de monitores (`xcap`), captura, composição, crop |
+| `capture.rs` | enumeração de monitores e captura (GDI), composição, crop |
 | `overlay.rs` | viewports de seleção de região |
 | `editor/` | `ui.rs` (janela), `shapes.rs` (modelo + undo), `render.rs` (exportação) |
 | `settings.rs` | janela de configurações (RF-05) |
 | `theme.rs` | tema Fluent (Win11): paleta claro/escuro, cor de destaque, fontes, widgets |
-| `clipboard.rs` / `storage.rs` / `tray.rs` / `notify.rs` | cópia, salvamento, bandeja, toasts |
+| `clipboard.rs` / `storage.rs` / `tray.rs` / `notify.rs` | cópia, salvamento, bandeja, notificações |
+| `platform/` | camada Win32 própria (shell/bandeja/atalhos, captura GDI, clipboard, registro, diálogos…) |
+| `jpeg/` / `imgbuf.rs` / `json.rs` / `error.rs` | codificador JPEG incorporado, buffer de imagem, JSON e erro próprios |
 
 ## Dependências
 
-Diretas (versões completas travadas no `Cargo.lock`):
+A v1.3 tornou o código **standalone**: fora o núcleo de GUI, tudo é código
+próprio chamando Win32 diretamente. Dependências diretas:
 
 | Crate | Versão | Papel |
 |---|---|---|
-| [eframe](https://crates.io/crates/eframe) / [egui](https://crates.io/crates/egui) | 0.32 | GUI: event loop, overlay de seleção, editor e configurações |
-| [global-hotkey](https://crates.io/crates/global-hotkey) | 0.7 | Atalhos de teclado globais (RF-01…RF-03) |
-| [tray-icon](https://crates.io/crates/tray-icon) | 0.21 | Ícone e menu da bandeja do sistema (RF-06) |
-| [xcap](https://crates.io/crates/xcap) | 0.6 | Enumeração de monitores e captura de tela (pixels físicos) |
-| [arboard](https://crates.io/crates/arboard) | 3.5 | Área de transferência de imagem (`Ctrl+C` na seleção de região e no editor) |
-| [image](https://crates.io/crates/image) | 0.25 | Codificação JPG, crop e composição |
-| [tiny-skia](https://crates.io/crates/tiny-skia) | 0.11 | Rasterização vetorial das anotações na exportação |
-| [ab_glyph](https://crates.io/crates/ab_glyph) | 0.2 | Rasterização da fonte Inter na exportação de texto |
-| [serde](https://crates.io/crates/serde) / [serde_json](https://crates.io/crates/serde_json) | 1 | Leitura/gravação do `config.json` |
-| [chrono](https://crates.io/crates/chrono) | 0.4 | Data/hora no nome dos arquivos (RF-07) |
-| [dirs](https://crates.io/crates/dirs) | 6 | Resolução da pasta Imagens |
-| [rfd](https://crates.io/crates/rfd) | 0.15 | Diálogo nativo de seleção de pasta (configurações) |
-| [notify-rust](https://crates.io/crates/notify-rust) | 4 | Toasts de notificação do Windows |
-| [auto-launch](https://crates.io/crates/auto-launch) | 0.5 | "Iniciar com o Windows" (`HKCU\...\Run`) |
-| [single-instance](https://crates.io/crates/single-instance) | 0.3 | Garantia de instância única via mutex (RF-08) |
-| [anyhow](https://crates.io/crates/anyhow) | 1 | Propagação de erros com contexto |
-| [log](https://crates.io/crates/log) / [simplelog](https://crates.io/crates/simplelog) | 0.4 / 0.12 | Log em `rustshot.log` no mesmo diretório do executável |
-| [windows-sys](https://crates.io/crates/windows-sys) | 0.59 | APIs Win32 (somente alvo Windows) |
+| [eframe](https://crates.io/crates/eframe) / [egui](https://crates.io/crates/egui) | 0.32 | Núcleo de GUI: event loop, janelas, overlay, editor, configurações |
+| [wgpu](https://crates.io/crates/wgpu) | 25 (só `dx12`) | Renderização D3D12/DXGI (composição DWM, sem unredirection) |
+| [windows-sys](https://crates.io/crates/windows-sys) | 0.59 | Bindings Win32 gerados oficialmente (só declarações `extern`) |
+| [ab_glyph](https://crates.io/crates/ab_glyph) | 0.2 | Rasterização da fonte na exportação — **já é dependência interna do egui/epaint**; usá-la não adiciona crate novo |
+| [log](https://crates.io/crates/log) | 0.4 | Fachada de log (usada também pelo eframe/wgpu) |
 | [embed-resource](https://crates.io/crates/embed-resource) | 3 | *(build)* Embute ícone e manifesto Per-Monitor V2 no exe |
 
-> **Nota sobre alertas de segurança em dependências transitivas**: o `Cargo.lock`
-> registra dependências de todas as plataformas. A pilha GTK3 (`gtk`/`glib`/
-> `libappindicator`, via `tray-icon`) é usada apenas no Linux e **não é compilada
-> no binário Windows** — alertas do Dependabot sobre esses crates (ex.: `glib`
-> < 0.20) não afetam o `rustshot.exe` e podem ser dispensados como
-> "vulnerable code is not actually used".
+**Código incorporado/próprio** (substituindo os crates da v1.x, somente o
+necessário para o Windows 11):
+
+| Módulo | Substitui | O que faz |
+|---|---|---|
+| `platform/shell.rs` | tray-icon + muda + notify-rust + global-hotkey | Janela oculta com WndProc: bandeja (`Shell_NotifyIconW`), menu (`TrackPopupMenu`), notificações em balão e atalhos globais (`RegisterHotKey`/`WM_HOTKEY`) |
+| `platform/capture.rs` | xcap | `EnumDisplayMonitors` + `BitBlt`/`CAPTUREBLT` em px físicos, DPI por monitor |
+| `platform/clipboard.rs` | arboard | Imagem no clipboard via `CF_DIB` |
+| `platform/autostart.rs` | auto-launch | `HKCU\...\Run` direto no registro |
+| `platform/instance.rs` | single-instance | Mutex nomeado (`CreateMutexW`) |
+| `platform/dialog.rs` | rfd | `SHBrowseForFolderW` (estilo novo) |
+| `platform/folders.rs` | dirs | `SHGetKnownFolderPath(FOLDERID_Pictures)` |
+| `platform/time.rs` | chrono | `GetLocalTime` para os nomes de arquivo |
+| `platform/logger.rs` | simplelog | Logger em arquivo com filtro dos módulos gráficos |
+| `json.rs` | serde + serde_json | Parser/escritor JSON mínimo do `config.json` |
+| `imgbuf.rs` | image (tipo `RgbaImage`) | Buffer RGBA com crop/colagem/conversão RGB |
+| `jpeg/` | image (codificador JPEG) | **Incorporado e reduzido do [image-rs](https://github.com/image-rs/image)** (MIT/Apache-2.0), com o FDCT do Independent JPEG Group — avisos de licença preservados nos arquivos |
+| `editor/raster.rs` | tiny-skia | Rasterizador anti-aliased (linha/seta/retângulo/elipse) da exportação |
+| `error.rs` | anyhow | Erro encadeável mínimo |
+
+O eframe/egui + wgpu **não** foram incorporados de propósito: são a
+plataforma de GUI inteira (janelas, entrada, composição, render D3D12) —
+incorporá-los seria "incorporar tudo". Em hosts não-Windows os módulos de
+plataforma compilam como stubs, só para rodar os testes de lógica.
+
+> **Nota sobre alertas de segurança em dependências transitivas**: o
+> `Cargo.lock` registra dependências de todas as plataformas. O que sobra de
+> Linux/macOS ali (`zbus`/`atspi` via acessibilidade do winit, `objc2`…)
+> **não é compilado no binário Windows** — alertas do Dependabot sobre esses
+> crates não afetam o `rustshot.exe`.
 
 ## Decisões de implementação
 
 - **Widget de atalho**: a tecla `PrtScr` não chega como evento de teclado do egui, então o "clique e pressione a combinação" é complementado por seletores explícitos de modificadores + tecla (único caminho para `PrintScreen`, que já vem nos padrões).
 - **Módulo extra** `settings.rs` para a janela de configurações.
 - **v1.1**: saída fixa em JPG (qualidade 90) e todo o estado ao lado do exe — a v1.0 usava PNG por padrão e `%APPDATA%\RustShot`. O retângulo preto que aparecia no canto do monitor era o viewport-raiz "oculto" do eframe: uma janela realmente invisível não recebe `WM_PAINT` e mataria os atalhos, então a solução é o oposto — a janela fica **visível para o SO**, mas com 1×1 px, fora da área da tela (-32000,-32000), sem ativação, sem redimensionar/maximizar, fora do Alt-Tab (`WS_EX_TOOLWINDOW`) e imune a Alt+F4.
+- **v1.3 (standalone)**: dependências de conveniência substituídas por código próprio chamando Win32 (tabela acima). Efeitos visíveis: as notificações passam de toasts WinRT (que apareciam como "Windows PowerShell") para **balões da bandeja com o nome e o ícone do RustShot**, e o seletor de pasta usa o diálogo clássico do shell. Formatos e comportamento do `config.json` permanecem idênticos.
 - **v1.2**: a captura de região deixou de concluir ao soltar o mouse — a seleção fica **pendente na tela** e o destino é escolhido pelo teclado (`Ctrl+C` copia, `Ctrl+S` salva, novo arrasto refaz, `Esc` cancela); no editor, `Ctrl+C` passou a **fechar a janela** depois de copiar, espelhando o `Ctrl+S`. Detalhe de plataforma: `Ctrl+C` chega ao egui como `Event::Copy` (não como tecla), e é assim que overlay e editor o detectam.
 
 

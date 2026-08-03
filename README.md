@@ -9,10 +9,10 @@ Aplicação standalone de captura de tela para **Windows 11 (x64)**, escrita em 
 | Modo | Atalho padrão | Comportamento |
 |---|---|---|
 | **Tela cheia** | `Ctrl+PrtScr` | Captura e salva automaticamente na pasta configurada |
-| **Região** | `Shift+PrtScr` | Congela a tela, você arrasta um retângulo; ao soltar, salva e copia para a área de transferência |
+| **Região** | `Shift+PrtScr` | Congela a tela, você arrasta um retângulo; a seleção fica na tela até você decidir: `Ctrl+C` copia para a área de transferência, `Ctrl+S` salva como arquivo (arrastar de novo refaz; `Esc` cancela) |
 | **Região + edição** | `Ctrl+Shift+PrtScr` | Como acima, mas abre o editor de anotações |
 
-- **Editor de anotações**: linha, seta, retângulo, elipse e texto; 8 cores + seletor livre, espessura 1–12 px, fonte 12–72 px; `Ctrl+Z`/`Ctrl+Y` desfaz/refaz; `Shift` restringe a forma (45°/quadrado/círculo); `Ctrl+scroll` dá zoom (25–400%) e o botão do meio faz pan; `Ctrl+C` copia a imagem anotada para a área de transferência (o editor continua aberto); `Ctrl+S` salva e fecha; `Esc` descarta (confirmando se houver anotações).
+- **Editor de anotações**: linha, seta, retângulo, elipse e texto; 8 cores + seletor livre, espessura 1–12 px, fonte 12–72 px; `Ctrl+Z`/`Ctrl+Y` desfaz/refaz; `Shift` restringe a forma (45°/quadrado/círculo); `Ctrl+scroll` dá zoom (25–400%) e o botão do meio faz pan; `Ctrl+C` copia a imagem anotada para a área de transferência e fecha o editor; `Ctrl+S` salva como arquivo e fecha; `Esc` descarta (confirmando se houver anotações).
 - **Multi-monitor e DPI alto**: capturas em pixels físicos, manifesto **Per-Monitor V2** embutido, suporte a escalas mistas (100–300%) e coordenadas negativas. Escopo da tela cheia configurável: todos os monitores compostos, apenas o principal, ou o monitor sob o cursor.
 - **Bandeja do sistema**: a aplicação não tem janela principal — menu com os três modos, abrir pasta de capturas, configurações, "Iniciar com o Windows" e Sair.
 - **Configuração persistente** em `config.json` (leitura tolerante; arquivo corrompido é renomeado para `.bak` e recriado). Alterações têm efeito imediato, sem reiniciar.
@@ -113,7 +113,7 @@ Diretas (versões completas travadas no `Cargo.lock`):
 | [global-hotkey](https://crates.io/crates/global-hotkey) | 0.7 | Atalhos de teclado globais (RF-01…RF-03) |
 | [tray-icon](https://crates.io/crates/tray-icon) | 0.21 | Ícone e menu da bandeja do sistema (RF-06) |
 | [xcap](https://crates.io/crates/xcap) | 0.6 | Enumeração de monitores e captura de tela (pixels físicos) |
-| [arboard](https://crates.io/crates/arboard) | 3.5 | Área de transferência de imagem (`Ctrl+C` no editor) |
+| [arboard](https://crates.io/crates/arboard) | 3.5 | Área de transferência de imagem (`Ctrl+C` na seleção de região e no editor) |
 | [image](https://crates.io/crates/image) | 0.25 | Codificação JPG, crop e composição |
 | [tiny-skia](https://crates.io/crates/tiny-skia) | 0.11 | Rasterização vetorial das anotações na exportação |
 | [ab_glyph](https://crates.io/crates/ab_glyph) | 0.2 | Rasterização da fonte Inter na exportação de texto |

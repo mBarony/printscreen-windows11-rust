@@ -2,6 +2,12 @@
 //! bordas, sempre no topo, fora do Alt-Tab, exibindo a captura congelada
 //! daquele monitor com véu escuro (~60%).
 //!
+//! Fluxo "Capturar região" (v1.2): soltar o arrasto **não** conclui nada — a
+//! seleção permanece na tela (`pending`) até o usuário decidir o destino:
+//! `Ctrl+C` copia a região para a área de transferência, `Ctrl+S` salva como
+//! arquivo; um novo arrasto refaz a seleção e `Esc`/botão direito cancela.
+//! Fluxo "Capturar e editar": soltar o arrasto abre o editor imediatamente.
+//!
 //! Coordenadas: cada janela cobre exatamente o seu monitor, então
 //! `pontos × pixels_per_point` == px físicos do monitor == px da imagem
 //! congelada. A seleção é armazenada em px da imagem do monitor onde o
@@ -28,10 +34,21 @@ const MIN_SELECTION_PX: f32 = 3.0;
 /// O que fazer com a região confirmada.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Purpose {
-    /// RF-02: recorta e salva direto.
+    /// RF-02: a seleção fica pendente até Ctrl+C (copiar) ou Ctrl+S (salvar).
     SaveDirect,
-    /// RF-03: recorta e abre o editor.
+    /// RF-03: recorta e abre o editor ao soltar o arrasto.
     Edit,
+}
+
+/// Destino escolhido para a região confirmada.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SelectedAction {
+    /// `Ctrl+C` na seleção pendente: copiar para a área de transferência.
+    CopyToClipboard,
+    /// `Ctrl+S` na seleção pendente: salvar como arquivo.
+    SaveToFile,
+    /// Fluxo "capturar e editar": abrir o editor com o recorte.
+    OpenEditor,
 }
 
 /// Resultado terminal de uma sessão de seleção.
@@ -41,6 +58,7 @@ pub enum Outcome {
         monitor: usize,
         /// (x, y, largura, altura) em px da imagem do monitor.
         rect: (u32, u32, u32, u32),
+        action: SelectedAction,
     },
 }
 
@@ -49,6 +67,13 @@ struct Drag {
     monitor: usize,
     start: (f32, f32),
     current: (f32, f32),
+}
+
+/// Seleção confirmada aguardando o destino (Ctrl+C/Ctrl+S), fluxo região.
+struct Pending {
+    monitor: usize,
+    /// (x, y, largura, altura) em px da imagem do monitor.
+    rect: (u32, u32, u32, u32),
 }
 
 /// Um monitor participando do overlay.
@@ -63,6 +88,7 @@ pub struct SelectSession {
     pub purpose: Purpose,
     pub monitors: Vec<OverlayMonitor>,
     drag: Option<Drag>,
+    pending: Option<Pending>,
     pub outcome: Option<Outcome>,
 }
 
@@ -92,6 +118,7 @@ impl SelectSession {
                 })
                 .collect(),
             drag: None,
+            pending: None,
             outcome: None,
         }
     }
@@ -140,6 +167,35 @@ pub fn overlay_ui(ctx: &egui::Context, session: &mut SelectSession, idx: usize) 
         session.outcome = Some(Outcome::Cancelled);
         ctx.request_repaint_of(egui::ViewportId::ROOT);
         return;
+    }
+
+    // Seleção pendente (fluxo região): Ctrl+C copia, Ctrl+S salva. As teclas
+    // chegam ao viewport com foco — o do monitor onde o usuário clicou.
+    if session.pending.is_some() {
+        let (copy, save) = ctx.input_mut(|i| {
+            // O egui-winit converte Ctrl+C em `Event::Copy` (sem emitir
+            // `Event::Key`); o `consume_key` fica como retaguarda.
+            let copy_event = i.events.iter().any(|e| matches!(e, egui::Event::Copy));
+            (
+                copy_event || i.consume_key(egui::Modifiers::COMMAND, egui::Key::C),
+                i.consume_key(egui::Modifiers::COMMAND, egui::Key::S),
+            )
+        });
+        if copy || save {
+            let pending = session.pending.take().expect("checado acima");
+            let action = if copy {
+                SelectedAction::CopyToClipboard
+            } else {
+                SelectedAction::SaveToFile
+            };
+            session.outcome = Some(Outcome::Selected {
+                monitor: pending.monitor,
+                rect: pending.rect,
+                action,
+            });
+            ctx.request_repaint_of(egui::ViewportId::ROOT);
+            return;
+        }
     }
 
     ctx.output_mut(|o| o.cursor_icon = CursorIcon::Crosshair);
@@ -216,6 +272,8 @@ pub fn overlay_ui(ctx: &egui::Context, session: &mut SelectSession, idx: usize) 
                     );
                     if p.0 >= 0.0 && p.1 >= 0.0 && p.0 <= img_w && p.1 <= img_h {
                         let p = clamp(p);
+                        // Novo arrasto substitui a seleção pendente anterior.
+                        session.pending = None;
                         session.drag = Some(Drag { monitor: idx, start: p, current: p });
                     }
                 }
@@ -241,19 +299,33 @@ pub fn overlay_ui(ctx: &egui::Context, session: &mut SelectSession, idx: usize) 
                             let y = y0.floor().max(0.0) as u32;
                             let w = ((x1 - x0).round() as u32).max(1).min(img_w as u32 - x);
                             let h = ((y1 - y0).round() as u32).max(1).min(img_h as u32 - y);
-                            session.outcome =
-                                Some(Outcome::Selected { monitor: idx, rect: (x, y, w, h) });
-                            ctx.request_repaint_of(egui::ViewportId::ROOT);
-                            return;
+                            match session.purpose {
+                                // Capturar e editar: abre o editor ao soltar.
+                                Purpose::Edit => {
+                                    session.outcome = Some(Outcome::Selected {
+                                        monitor: idx,
+                                        rect: (x, y, w, h),
+                                        action: SelectedAction::OpenEditor,
+                                    });
+                                    ctx.request_repaint_of(egui::ViewportId::ROOT);
+                                    return;
+                                }
+                                // Capturar região: a seleção fica na tela até
+                                // Ctrl+C (copiar) ou Ctrl+S (salvar).
+                                Purpose::SaveDirect => {
+                                    session.pending =
+                                        Some(Pending { monitor: idx, rect: (x, y, w, h) });
+                                }
+                            }
                         }
                         // Clique sem arrasto: continua selecionando.
                     }
                 }
             }
 
-            // --- Guias em cruz sob o cursor ---
+            // --- Guias em cruz sob o cursor (só antes de haver seleção) ---
             if let Some(p) = pointer_pts {
-                if session.drag.is_none() {
+                if session.drag.is_none() && session.pending.is_none() {
                     let guide = Stroke::new(1.0_f32, Color32::from_white_alpha(70));
                     painter.line_segment(
                         [Pos2::new(full.min.x, p.y), Pos2::new(full.max.x, p.y)],
@@ -271,25 +343,8 @@ pub fn overlay_ui(ctx: &egui::Context, session: &mut SelectSession, idx: usize) 
                 if drag.monitor == idx {
                     let (x0, x1) = ordered(drag.start.0, drag.current.0);
                     let (y0, y1) = ordered(drag.start.1, drag.current.1);
-                    let sel_pts = Rect::from_min_max(
-                        Pos2::new(full.min.x + x0 / ppp, full.min.y + y0 / ppp),
-                        Pos2::new(full.min.x + x1 / ppp, full.min.y + y1 / ppp),
-                    );
-
-                    // Reexibe o trecho selecionado sem véu.
-                    let uv = Rect::from_min_max(
-                        Pos2::new(x0 / img_w, y0 / img_h),
-                        Pos2::new(x1 / img_w, y1 / img_h),
-                    );
-                    painter.image(texture.id(), sel_pts, uv, Color32::WHITE);
-
-                    // Borda de 1 px físico (RF-02).
-                    painter.rect_stroke(
-                        sel_pts,
-                        CornerRadius::ZERO,
-                        Stroke::new(1.0 / ppp, Color32::WHITE),
-                        StrokeKind::Outside,
-                    );
+                    let sel_pts =
+                        draw_selection(painter, texture.id(), full, ppp, img_w, img_h, x0, y0, x1, y1);
 
                     // Badge "L × A px" junto ao cursor.
                     let w_px = (x1 - x0).round() as u32;
@@ -300,13 +355,67 @@ pub fn overlay_ui(ctx: &egui::Context, session: &mut SelectSession, idx: usize) 
                 }
             }
 
-            // Dica de uso enquanto nada foi arrastado.
+            // --- Seleção pendente aguardando Ctrl+C / Ctrl+S ---
+            if let Some(pending) = &session.pending {
+                if pending.monitor == idx {
+                    let (x, y, w, h) = pending.rect;
+                    let (x0, y0) = (x as f32, y as f32);
+                    let (x1, y1) = (x0 + w as f32, y0 + h as f32);
+                    let sel_pts =
+                        draw_selection(painter, texture.id(), full, ppp, img_w, img_h, x0, y0, x1, y1);
+
+                    // Badge fixo com as dimensões, no canto da seleção.
+                    let text = format!("{w} × {h} px");
+                    badge(painter, full, sel_pts.right_bottom() + Vec2::new(10.0, 10.0), &text);
+                }
+            }
+
+            // Dica de uso (fora do arrasto).
             if session.drag.is_none() {
-                let hint = "Arraste para selecionar • Esc ou botão direito cancela";
+                let hint = if session.pending.is_some() {
+                    "Ctrl+C copia • Ctrl+S salva • Esc cancela • Arraste para refazer"
+                } else {
+                    "Arraste para selecionar • Esc ou botão direito cancela"
+                };
                 let pos = Pos2::new(full.center().x, full.min.y + 32.0);
                 badge(painter, full, pos, hint);
             }
         });
+}
+
+/// Reexibe o trecho selecionado sem véu, com borda de 1 px físico (RF-02).
+/// Coordenadas em px da imagem do monitor; retorna o retângulo em pontos.
+#[allow(clippy::too_many_arguments)]
+fn draw_selection(
+    painter: &egui::Painter,
+    texture: egui::TextureId,
+    full: Rect,
+    ppp: f32,
+    img_w: f32,
+    img_h: f32,
+    x0: f32,
+    y0: f32,
+    x1: f32,
+    y1: f32,
+) -> Rect {
+    let sel_pts = Rect::from_min_max(
+        Pos2::new(full.min.x + x0 / ppp, full.min.y + y0 / ppp),
+        Pos2::new(full.min.x + x1 / ppp, full.min.y + y1 / ppp),
+    );
+
+    let uv = Rect::from_min_max(
+        Pos2::new(x0 / img_w, y0 / img_h),
+        Pos2::new(x1 / img_w, y1 / img_h),
+    );
+    painter.image(texture, sel_pts, uv, Color32::WHITE);
+
+    painter.rect_stroke(
+        sel_pts,
+        CornerRadius::ZERO,
+        Stroke::new(1.0 / ppp, Color32::WHITE),
+        StrokeKind::Outside,
+    );
+    sel_pts
 }
 
 /// Confere posição/tamanho físicos e corrige via comandos de viewport.

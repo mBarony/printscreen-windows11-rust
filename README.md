@@ -48,6 +48,15 @@ target\release\rustshot.exe
 
 Distribuição portátil: copie o exe. Todo o estado fica no mesmo diretório que o executável (`config.json` + `rustshot.log`); desinstalar = apagar o exe e esses arquivos.
 
+**Publicar uma versão**: atualize a versão em `Cargo.toml` e em
+`assets/rustshot.rc`, descreva a mudança no `CHANGELOG.md` e crie a tag —
+`git tag v1.3.1 && git push origin v1.3.1`. O workflow *Release* compila no
+`windows-latest`, valida que tag/`Cargo.toml`/VersionInfo do exe coincidem e
+publica o `rustshot.exe` + `SHA256SUMS.txt` como assets, com as notas
+extraídas do CHANGELOG. Também dá para disparar pela aba *Actions* →
+*Release* → *Run workflow*, informando a tag (útil quando não se quer criar
+a tag localmente).
+
 > Um exe não assinado pode disparar o SmartScreen na primeira execução em outras
 > máquinas; assinatura de código (OV/EV) é opcional e recomendada para distribuição ampla.
 
@@ -207,16 +216,20 @@ Código sob [BSD 3-Clause](LICENSE). A fonte embutida
 
 ## Download
 
-**Binário pronto** (v1.3.0, sem instalação, sem dependências):
-[`dist/rustshot.exe`](https://github.com/mBarony/printscreen-windows11-rust/raw/main/dist/rustshot.exe)
-— baixe, coloque em uma pasta gravável e execute (o `config.json` e o
-`rustshot.log` ficam ao lado dele). Procedência e SHA-256 em
-[dist/README.md](dist/README.md); é um build de conveniência com ABI GNU.
+**[⬇ Baixar a versão mais recente](https://github.com/mBarony/printscreen-windows11-rust/releases/latest/download/rustshot.exe)**
+— link permanente: aponta sempre para o `rustshot.exe` da última release.
 
-**Build canônico (MSVC)**, o que o CI compila e testa a cada commit:
-artefato **`rustshot-windows-x64`** na aba *Actions* → run mais recente da
-`main` → *Artifacts*; ou compile você mesmo com `.\build.ps1`
-(seção [Build](#build)).
+Sem instalador e sem runtime: baixe, coloque em uma pasta gravável e execute.
+O `config.json` e o `rustshot.log` são criados ao lado do executável;
+desinstalar = apagar esses arquivos.
+
+O binário é compilado pelo CI no `windows-latest` com o toolchain **MSVC**
+(o alvo canônico do projeto) e publicado com `SHA256SUMS.txt` para
+conferência — veja [todas as releases](https://github.com/mBarony/printscreen-windows11-rust/releases).
+Também dá para compilar você mesmo com `.\build.ps1` (seção [Build](#build)).
+
+> Um exe não assinado pode disparar o SmartScreen na primeira execução:
+> "Mais informações" → "Executar assim mesmo".
 
 ## Histórico de versões
 

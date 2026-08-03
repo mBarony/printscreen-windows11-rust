@@ -1,6 +1,6 @@
 [package]
 name = "rustshot"
-version = "1.1.0"
+version = "1.2.0"
 edition = "2021"
 description = "Captura de tela para Windows 11 — tela cheia, região e edição com anotações"
 license = "BSD-3-Clause"
@@ -59,10 +59,10 @@ panic = "abort"
 
 # Build scripts/proc-macros do release com flags IDÊNTICAS às do perfil dev:
 # com o mesmo -Cmetadata (.cargo/config.toml), o rustc determinístico gera
-# binários byte-idênticos aos do debug — que o Smart App Control já avaliou
-# e aprovou nesta máquina. Sem isso, cada build release re-sorteia vereditos
-# de reputação para ~200 exes intermediários e algum acaba bloqueado
-# (os error 4551). Não afeta o rustshot.exe final, só artefatos temporários.
+# binários byte-idênticos aos do debug — que o Smart App Control da máquina
+# de build já avaliou e aprovou. Sem isso, cada build release re-sorteia
+# vereditos de reputação para ~200 exes intermediários e algum acaba
+# bloqueado (os error 4551). Não afeta o rustshot.exe final, só temporários.
 [profile.release.build-override]
 opt-level = 0
 debug = false

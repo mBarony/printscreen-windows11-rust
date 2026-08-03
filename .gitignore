@@ -26,3 +26,4 @@ rustshot.log
 rustshot.log.old
 config.json.bak
 config.json.tmp
+dist/

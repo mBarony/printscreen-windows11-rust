@@ -1,5 +1,5 @@
-# -Cmetadata fixo: nesta máquina o Smart App Control avalia cada artefato de
-# build por hash (veredito cacheado permanentemente). Quando um build script
+# -Cmetadata fixo: em máquinas com Smart App Control ativo, cada artefato de
+# build é avaliado por hash (veredito cacheado permanentemente). Quando um build script
 # ou proc-macro recém-compilado cai no bloqueio (os error 4551 / E0463), a
 # saída é re-rolar os hashes de TODOS os artefatos mudando o rótulo abaixo
 # (sacfresh3, sacfresh4, …) — nunca desative o SAC por causa disso.

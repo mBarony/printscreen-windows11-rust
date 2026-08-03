@@ -2,7 +2,7 @@
 
 Aplicação standalone de captura de tela para **Windows 11 (x64)**, escrita em Rust. Um único `rustshot.exe`, sem instalador e sem runtime externo: roda em segundo plano na bandeja do sistema e oferece três modos de captura por atalhos globais configuráveis.
 
-> Implementação da [Especificação Técnica v1.0](#especificação) (RustShot v1.1).
+> Implementação da [Especificação Técnica v1.0](#especificação) (RustShot v1.2).
 
 ## Funcionalidades
 
@@ -141,6 +141,7 @@ Diretas (versões completas travadas no `Cargo.lock`):
 - **Widget de atalho**: a tecla `PrtScr` não chega como evento de teclado do egui, então o "clique e pressione a combinação" é complementado por seletores explícitos de modificadores + tecla (único caminho para `PrintScreen`, que já vem nos padrões).
 - **Módulo extra** `settings.rs` para a janela de configurações.
 - **v1.1**: saída fixa em JPG (qualidade 90) e todo o estado ao lado do exe — a v1.0 usava PNG por padrão e `%APPDATA%\RustShot`. O retângulo preto que aparecia no canto do monitor era o viewport-raiz "oculto" do eframe: uma janela realmente invisível não recebe `WM_PAINT` e mataria os atalhos, então a solução é o oposto — a janela fica **visível para o SO**, mas com 1×1 px, fora da área da tela (-32000,-32000), sem ativação, sem redimensionar/maximizar, fora do Alt-Tab (`WS_EX_TOOLWINDOW`) e imune a Alt+F4.
+- **v1.2**: a captura de região deixou de concluir ao soltar o mouse — a seleção fica **pendente na tela** e o destino é escolhido pelo teclado (`Ctrl+C` copia, `Ctrl+S` salva, novo arrasto refaz, `Esc` cancela); no editor, `Ctrl+C` passou a **fechar a janela** depois de copiar, espelhando o `Ctrl+S`. Detalhe de plataforma: `Ctrl+C` chega ao egui como `Event::Copy` (não como tecla), e é assim que overlay e editor o detectam.
 
 
 ## Limitações conhecidas (v1)
@@ -157,11 +158,11 @@ Diretas (versões completas travadas no `Cargo.lock`):
 
 ```bash
 cargo test  # testes de unidade (lógica pura)
-cargo clippy --tests --target x86_64-pc-windows-msvc
+cargo clippy --all-targets --target x86_64-pc-windows-msvc -- -D warnings
 cargo check --target x86_64-pc-windows-msvc
 ```
 
-O CI (GitHub Actions) compila em `windows-latest`, roda clippy + testes e publica o `rustshot.exe` como artefato.
+O CI (GitHub Actions) compila em `windows-latest`, roda `clippy --all-targets -- -D warnings` + testes e publica o `rustshot.exe` como artefato.
 
 Relatório de testes da v1.1 (método e resultados, incluindo auditoria de
 segurança): [docs/relatorio-de-testes-v1.1.md](docs/relatorio-de-testes-v1.1.md).
@@ -172,11 +173,14 @@ Código sob [BSD 3-Clause](LICENSE). A fonte embutida
 [Inter](https://github.com/rsms/inter) é distribuída sob a
 [SIL Open Font License 1.1](assets/Inter-LICENSE.txt).
 
+## Download
+
+O `rustshot.exe` é publicado como artefato **`rustshot-windows-x64`** em cada
+execução do CI: aba **Actions** → run mais recente da `main` → seção
+*Artifacts*. Alternativa: compile localmente com `cargo build --release`
+(seção [Build](#build)).
+
 ## Especificação
 
 Este repositório implementa a "RustShot — Especificação Técnica v1.0" (02/08/2026):
 três modos de captura (RF-01…RF-03), editor com 5 ferramentas (RF-04), configurações com efeito imediato (RF-05), bandeja (RF-06), nomeação/salvamento com colisões (RF-07) e instância única (RF-08); requisitos não funcionais RNF-01…RNF-08 (exe único ≤ 15 MB, DPI Per-Monitor V2, event-driven, sem privilégios de administrador, sem console).
-
----
-
-https://github.com/mBarony/printscreen-windows11-rust/raw/main/dist/rustshot.exe

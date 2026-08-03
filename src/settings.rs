@@ -73,127 +73,138 @@ pub fn show(ctx: &egui::Context, state: &mut SettingsState) {
 
     egui::CentralPanel::default().show(ctx, |ui| {
         egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.heading("Atalhos de teclado");
-            ui.add_space(4.0);
-            egui::Grid::new("hotkeys_grid")
-                .num_columns(2)
-                .spacing([12.0, 8.0])
-                .show(ui, |ui| {
-                    for action in [
-                        HotkeyAction::Fullscreen,
-                        HotkeyAction::Region,
-                        HotkeyAction::Edit,
-                    ] {
-                        ui.label(action.label());
-                        hotkey_editor(ui, state, action);
-                        ui.end_row();
+            crate::theme::card(ui, |ui| {
+                ui.heading("Atalhos de teclado");
+                ui.add_space(6.0);
+                egui::Grid::new("hotkeys_grid")
+                    .num_columns(2)
+                    .spacing([12.0, 8.0])
+                    .show(ui, |ui| {
+                        for action in [
+                            HotkeyAction::Fullscreen,
+                            HotkeyAction::Region,
+                            HotkeyAction::Edit,
+                        ] {
+                            ui.label(action.label());
+                            hotkey_editor(ui, state, action);
+                            ui.end_row();
+                        }
+                    });
+
+                if !conflicts.is_empty() {
+                    ui.add_space(4.0);
+                    for (a, b) in &conflicts {
+                        ui.label(
+                            RichText::new(format!(
+                                "⚠ Conflito: \"{}\" e \"{}\" usam o mesmo atalho.",
+                                a.label(),
+                                b.label()
+                            ))
+                            .color(Color32::from_rgb(230, 80, 70)),
+                        );
+                    }
+                }
+                for failure in &state.last_failures {
+                    ui.label(RichText::new(failure).color(Color32::from_rgb(235, 150, 60)));
+                }
+            });
+
+            ui.add_space(10.0);
+            crate::theme::card(ui, |ui| {
+                ui.heading("Capturas");
+                ui.add_space(6.0);
+                ui.label("Pasta de destino:");
+                ui.horizontal(|ui| {
+                    let mut shown = if state.draft.output_dir.trim().is_empty() {
+                        crate::config::default_output_dir().display().to_string()
+                    } else {
+                        state.draft.output_dir.clone()
+                    };
+                    if ui
+                        .add(egui::TextEdit::singleline(&mut shown).desired_width(330.0))
+                        .changed()
+                    {
+                        state.draft.output_dir = shown;
+                    }
+                    if ui.button("Procurar…").clicked() {
+                        let start = state.draft.effective_output_dir();
+                        let dialog = rfd::FileDialog::new().set_directory(start);
+                        if let Some(dir) = dialog.pick_folder() {
+                            state.draft.output_dir = dir.display().to_string();
+                        }
                     }
                 });
 
-            if !conflicts.is_empty() {
-                ui.add_space(4.0);
-                for (a, b) in &conflicts {
-                    ui.label(
-                        RichText::new(format!(
-                            "⚠ Conflito: \"{}\" e \"{}\" usam o mesmo atalho.",
-                            a.label(),
-                            b.label()
-                        ))
-                        .color(Color32::from_rgb(230, 80, 70)),
-                    );
-                }
-            }
-            for failure in &state.last_failures {
-                ui.label(RichText::new(failure).color(Color32::from_rgb(235, 150, 60)));
-            }
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    ui.label("Escopo da tela cheia:");
+                    egui::ComboBox::from_id_salt("fullscreen_scope")
+                        .selected_text(state.draft.fullscreen_scope.label())
+                        .show_ui(ui, |ui| {
+                            for scope in [
+                                crate::config::FullscreenScope::AllMonitors,
+                                crate::config::FullscreenScope::Primary,
+                                crate::config::FullscreenScope::MonitorUnderCursor,
+                            ] {
+                                ui.selectable_value(
+                                    &mut state.draft.fullscreen_scope,
+                                    scope,
+                                    scope.label(),
+                                );
+                            }
+                        });
+                });
+            });
 
-            ui.add_space(12.0);
-            ui.separator();
-            ui.heading("Capturas");
-            ui.add_space(4.0);
-
-            ui.label("Pasta de destino:");
-            ui.horizontal(|ui| {
-                let mut shown = if state.draft.output_dir.trim().is_empty() {
-                    crate::config::default_output_dir().display().to_string()
-                } else {
-                    state.draft.output_dir.clone()
-                };
-                if ui
-                    .add(egui::TextEdit::singleline(&mut shown).desired_width(320.0))
-                    .changed()
-                {
-                    state.draft.output_dir = shown;
-                }
-                if ui.button("Procurar…").clicked() {
-                    let start = state.draft.effective_output_dir();
-                    let dialog = rfd::FileDialog::new().set_directory(start);
-                    if let Some(dir) = dialog.pick_folder() {
-                        state.draft.output_dir = dir.display().to_string();
+            ui.add_space(10.0);
+            crate::theme::card(ui, |ui| {
+                ui.heading("Editor");
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    ui.label("Cor padrão:");
+                    let rgba = crate::config::parse_color(&state.draft.editor.default_color);
+                    let mut rgb = [rgba[0], rgba[1], rgba[2]];
+                    if ui.color_edit_button_srgb(&mut rgb).changed() {
+                        state.draft.editor.default_color =
+                            crate::config::format_color([rgb[0], rgb[1], rgb[2], 255]);
                     }
-                }
+                    ui.add_space(12.0);
+                    ui.label("Traço:");
+                    ui.add(
+                        egui::DragValue::new(&mut state.draft.editor.default_stroke_width)
+                            .range(crate::editor::STROKE_MIN..=crate::editor::STROKE_MAX)
+                            .speed(0.2),
+                    );
+                    ui.add_space(12.0);
+                    ui.label("Fonte:");
+                    ui.add(
+                        egui::DragValue::new(&mut state.draft.editor.default_font_size)
+                            .range(crate::editor::FONT_MIN..=crate::editor::FONT_MAX)
+                            .speed(0.5),
+                    );
+                });
             });
 
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                ui.label("Escopo da tela cheia:");
-                egui::ComboBox::from_id_salt("fullscreen_scope")
-                    .selected_text(state.draft.fullscreen_scope.label())
-                    .show_ui(ui, |ui| {
-                        for scope in [
-                            crate::config::FullscreenScope::AllMonitors,
-                            crate::config::FullscreenScope::Primary,
-                            crate::config::FullscreenScope::MonitorUnderCursor,
-                        ] {
-                            ui.selectable_value(
-                                &mut state.draft.fullscreen_scope,
-                                scope,
-                                scope.label(),
-                            );
-                        }
+            ui.add_space(10.0);
+            crate::theme::card(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Iniciar com o Windows").strong());
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        crate::theme::toggle_switch(ui, &mut state.draft.start_with_windows);
                     });
+                });
             });
 
-            ui.add_space(12.0);
-            ui.separator();
-            ui.heading("Editor");
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                ui.label("Cor padrão:");
-                let rgba = crate::config::parse_color(&state.draft.editor.default_color);
-                let mut rgb = [rgba[0], rgba[1], rgba[2]];
-                if ui.color_edit_button_srgb(&mut rgb).changed() {
-                    state.draft.editor.default_color =
-                        crate::config::format_color([rgb[0], rgb[1], rgb[2], 255]);
-                }
-                ui.add_space(12.0);
-                ui.label("Traço:");
-                ui.add(
-                    egui::DragValue::new(&mut state.draft.editor.default_stroke_width)
-                        .range(crate::editor::STROKE_MIN..=crate::editor::STROKE_MAX)
-                        .speed(0.2),
-                );
-                ui.add_space(12.0);
-                ui.label("Fonte:");
-                ui.add(
-                    egui::DragValue::new(&mut state.draft.editor.default_font_size)
-                        .range(crate::editor::FONT_MIN..=crate::editor::FONT_MAX)
-                        .speed(0.5),
-                );
-            });
-
-            ui.add_space(12.0);
-            ui.separator();
-            ui.checkbox(
-                &mut state.draft.start_with_windows,
-                "Iniciar com o Windows",
-            );
-
-            ui.add_space(16.0);
+            ui.add_space(14.0);
             ui.horizontal(|ui| {
                 let can_save = conflicts.is_empty();
+                let accent = ui.visuals().selection.bg_fill;
+                let save = egui::Button::new(
+                    RichText::new("Salvar").color(ui.visuals().selection.stroke.color),
+                )
+                .fill(accent);
                 if ui
-                    .add_enabled(can_save, egui::Button::new("Salvar"))
+                    .add_enabled(can_save, save)
                     .on_hover_text("Aplica imediatamente e grava no config.json")
                     .clicked()
                 {

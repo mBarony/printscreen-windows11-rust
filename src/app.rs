@@ -84,7 +84,8 @@ pub struct RustShotApp {
 
 impl RustShotApp {
     pub fn new(cc: &eframe::CreationContext<'_>, loaded: config::LoadedConfig) -> Self {
-        install_fonts(&cc.egui_ctx);
+        crate::theme::install_fonts(&cc.egui_ctx);
+        crate::theme::apply(&cc.egui_ctx);
 
         let config = loaded.config;
 
@@ -150,6 +151,15 @@ impl RustShotApp {
             },
         ));
 
+        // Hook de desenvolvimento (builds debug): abre a janela de
+        // configurações direto, para inspeção visual sem passar pela bandeja.
+        #[cfg(debug_assertions)]
+        let settings = std::env::var_os("RUSTSHOT_OPEN")
+            .is_some_and(|v| v == "settings")
+            .then(|| SettingsState::new(config.clone()));
+        #[cfg(not(debug_assertions))]
+        let settings = None;
+
         if loaded.created {
             notify::toast(
                 "RustShot em execução",
@@ -169,7 +179,7 @@ impl RustShotApp {
             shared: Arc::new(Mutex::new(AppShared {
                 config,
                 flow: Flow::Idle,
-                settings: None,
+                settings,
                 quit: false,
             })),
             hotkeys,
@@ -183,7 +193,7 @@ impl RustShotApp {
     // Disparo dos fluxos de captura
     // -----------------------------------------------------------------------
 
-    fn trigger(&mut self, action: HotkeyAction) {
+    fn trigger(&mut self, ctx: &egui::Context, action: HotkeyAction) {
         // O fluxo só inicia a partir de Idle (§5).
         {
             let shared = self.shared.lock().unwrap();
@@ -222,12 +232,10 @@ impl RustShotApp {
                 // conteúdo antes do overlay aparecer (§7, Fluxo B).
                 match capture::capture_all_monitors() {
                     Ok(shots) => {
+                        let session =
+                            SelectSession::new(ctx, next_serial(), shots, purpose);
                         let mut shared = self.shared.lock().unwrap();
-                        shared.flow = Flow::Selecting(SelectSession::new(
-                            next_serial(),
-                            shots,
-                            purpose,
-                        ));
+                        shared.flow = Flow::Selecting(session);
                     }
                     Err(err) => {
                         notify::toast_error("Falha na captura", &format!("{err:#}"));
@@ -251,11 +259,11 @@ impl RustShotApp {
         }
     }
 
-    fn handle_menu(&mut self, id: &str) {
+    fn handle_menu(&mut self, ctx: &egui::Context, id: &str) {
         match id {
-            tray::MENU_CAPTURE_FULLSCREEN => self.trigger(HotkeyAction::Fullscreen),
-            tray::MENU_CAPTURE_REGION => self.trigger(HotkeyAction::Region),
-            tray::MENU_CAPTURE_EDIT => self.trigger(HotkeyAction::Edit),
+            tray::MENU_CAPTURE_FULLSCREEN => self.trigger(ctx, HotkeyAction::Fullscreen),
+            tray::MENU_CAPTURE_REGION => self.trigger(ctx, HotkeyAction::Region),
+            tray::MENU_CAPTURE_EDIT => self.trigger(ctx, HotkeyAction::Edit),
             tray::MENU_OPEN_FOLDER => {
                 let dir = self.shared.lock().unwrap().config.effective_output_dir();
                 open_folder(&dir);
@@ -477,8 +485,8 @@ impl RustShotApp {
             let id = egui::ViewportId::from_hash_of("rustshot_settings");
             let builder = egui::ViewportBuilder::default()
                 .with_title("RustShot — Configurações")
-                .with_inner_size(egui::Vec2::new(560.0, 620.0))
-                .with_min_inner_size(egui::Vec2::new(480.0, 420.0))
+                .with_inner_size(egui::Vec2::new(680.0, 640.0))
+                .with_min_inner_size(egui::Vec2::new(600.0, 460.0))
                 .with_icon(self.window_icon.clone());
             let state = self.shared.clone();
             ctx.show_viewport_deferred(id, builder, move |ctx, _class| {
@@ -517,10 +525,10 @@ impl eframe::App for RustShotApp {
                     let action = self.hotkeys.as_ref().and_then(|h| h.action_for(id));
                     if let Some(action) = action {
                         log::info!("atalho global: {action:?}");
-                        self.trigger(action);
+                        self.trigger(ctx, action);
                     }
                 }
-                AppEvent::Menu(id) => self.handle_menu(&id),
+                AppEvent::Menu(id) => self.handle_menu(ctx, &id),
             }
         }
 
@@ -540,20 +548,6 @@ impl eframe::App for RustShotApp {
 // ---------------------------------------------------------------------------
 // Auxiliares
 // ---------------------------------------------------------------------------
-
-fn install_fonts(ctx: &egui::Context) {
-    let mut fonts = egui::FontDefinitions::default();
-    fonts.font_data.insert(
-        "Inter".into(),
-        Arc::new(egui::FontData::from_static(editor::FONT_BYTES)),
-    );
-    fonts
-        .families
-        .entry(egui::FontFamily::Proportional)
-        .or_default()
-        .insert(0, "Inter".into());
-    ctx.set_fonts(fonts);
-}
 
 pub fn app_icon_data() -> egui::IconData {
     let (rgba, width, height) = tray::app_icon_rgba(64);

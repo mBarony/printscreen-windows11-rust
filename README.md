@@ -207,9 +207,15 @@ Código sob [BSD 3-Clause](LICENSE). A fonte embutida
 
 ## Download
 
-O `rustshot.exe` é publicado como artefato **`rustshot-windows-x64`** em cada
-execução do CI: aba **Actions** → run mais recente da `main` → seção
-*Artifacts*. Alternativa: compile localmente com `cargo build --release`
+**Binário pronto** (v1.3.0, sem instalação, sem dependências):
+[`dist/rustshot.exe`](https://github.com/mBarony/printscreen-windows11-rust/raw/main/dist/rustshot.exe)
+— baixe, coloque em uma pasta gravável e execute (o `config.json` e o
+`rustshot.log` ficam ao lado dele). Procedência e SHA-256 em
+[dist/README.md](dist/README.md); é um build de conveniência com ABI GNU.
+
+**Build canônico (MSVC)**, o que o CI compila e testa a cada commit:
+artefato **`rustshot-windows-x64`** na aba *Actions* → run mais recente da
+`main` → *Artifacts*; ou compile você mesmo com `.\build.ps1`
 (seção [Build](#build)).
 
 ## Histórico de versões

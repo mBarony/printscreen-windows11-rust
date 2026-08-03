@@ -29,7 +29,7 @@ jobs:
     name: Compila e publica
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Rust toolchain (stable-msvc)
         run: rustup toolchain install stable --profile minimal && rustup default stable

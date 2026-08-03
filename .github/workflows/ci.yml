@@ -13,7 +13,7 @@ jobs:
     name: Build & test (Windows)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Rust toolchain (stable-msvc)
         run: rustup toolchain install stable --profile minimal --component clippy && rustup default stable
@@ -38,7 +38,7 @@ jobs:
           if ($exe.Length -gt 15MB) { Write-Warning "Acima do alvo de 15 MB (RNF-01)" }
 
       - name: Publicar artefato
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: rustshot-windows-x64
           path: target/release/rustshot.exe

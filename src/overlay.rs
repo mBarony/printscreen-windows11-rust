@@ -193,16 +193,27 @@ pub fn overlay_ui(ctx: &egui::Context, session: &mut SelectSession, idx: usize) 
             });
             let clamp = |(x, y): (f32, f32)| (x.clamp(0.0, img_w), y.clamp(0.0, img_h));
 
-            let (primary_pressed, primary_down, primary_released) = ctx.input(|i| {
+            let (primary_pressed, primary_down, primary_released, press_origin) = ctx.input(|i| {
                 (
                     i.pointer.primary_pressed(),
                     i.pointer.primary_down(),
                     i.pointer.primary_released(),
+                    i.pointer.press_origin(),
                 )
             });
 
             if primary_pressed && session.drag.is_none() {
-                if let Some(p) = pointer_px {
+                // Origem do próprio clique — `latest_pos()` pode estar
+                // obsoleto no frame do press logo após a janela nascer
+                // (cursor "teleportado" sem WM_MOUSEMOVE intermediário).
+                let origin = press_origin.or(pointer_pts).map(|p| {
+                    ((p.x - full.min.x) * ppp, (p.y - full.min.y) * ppp)
+                });
+                if let Some(p) = origin {
+                    log::debug!(
+                        "overlay {idx}: press origin={press_origin:?} pts={pointer_pts:?} \
+                         px={p:?} ppp={ppp} full={full:?} img={img_w}x{img_h}"
+                    );
                     if p.0 >= 0.0 && p.1 >= 0.0 && p.0 <= img_w && p.1 <= img_h {
                         let p = clamp(p);
                         session.drag = Some(Drag { monitor: idx, start: p, current: p });
@@ -218,6 +229,11 @@ pub fn overlay_ui(ctx: &egui::Context, session: &mut SelectSession, idx: usize) 
                     }
                     if primary_released {
                         let drag = session.drag.take().expect("drag presente");
+                        log::debug!(
+                            "overlay {idx}: release start={:?} current={:?} ppp={ppp}",
+                            drag.start,
+                            drag.current
+                        );
                         let (x0, x1) = ordered(drag.start.0, drag.current.0);
                         let (y0, y1) = ordered(drag.start.1, drag.current.1);
                         if x1 - x0 >= MIN_SELECTION_PX && y1 - y0 >= MIN_SELECTION_PX {

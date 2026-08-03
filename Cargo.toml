@@ -8,7 +8,18 @@ repository = "https://github.com/mBarony/printscreen-windows11-rust"
 build = "build.rs"
 
 [dependencies]
-eframe = "0.32"            # GUI (egui): editor, overlay, configurações
+# GUI (egui): editor, overlay, configurações. Renderizador wgpu (D3D12/DXGI
+# no Windows): o backend glow (OpenGL) fazia o driver NVIDIA tirar o overlay
+# de tela cheia da composição do DWM (unredirection), apagando o monitor por
+# ~1 s ao criar/destruir a janela de seleção.
+eframe = { version = "0.32", default-features = false, features = [
+    "accesskit",
+    "default_fonts",
+    "wgpu",
+] }
+# Backend de plataforma do wgpu (o feature "wgpu" do eframe não habilita
+# nenhum): D3D12, o mesmo caminho DXGI/DWM dos apps nativos do Windows.
+wgpu = { version = "25", default-features = false, features = ["dx12"] }
 egui = "0.32"
 global-hotkey = "0.7"      # atalhos globais
 tray-icon = "0.21"         # bandeja do sistema
@@ -45,3 +56,16 @@ lto = "thin"
 codegen-units = 1
 strip = "symbols"
 panic = "abort"
+
+# Build scripts/proc-macros do release com flags IDÊNTICAS às do perfil dev:
+# com o mesmo -Cmetadata (.cargo/config.toml), o rustc determinístico gera
+# binários byte-idênticos aos do debug — que o Smart App Control já avaliou
+# e aprovou nesta máquina. Sem isso, cada build release re-sorteia vereditos
+# de reputação para ~200 exes intermediários e algum acaba bloqueado
+# (os error 4551). Não afeta o rustshot.exe final, só artefatos temporários.
+[profile.release.build-override]
+opt-level = 0
+debug = false
+debug-assertions = true
+overflow-checks = true
+strip = "none"

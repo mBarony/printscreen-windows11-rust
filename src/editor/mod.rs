@@ -18,6 +18,16 @@ use shapes::{Point, ShapeStack, Style, Tool};
 /// exportação — garantindo WYSIWYG entre editor e JPG final (§8).
 pub static FONT_BYTES: &[u8] = include_bytes!("../../assets/Inter-Regular.ttf");
 
+/// Título da janela do editor — compartilhado entre o `ViewportBuilder`
+/// (app.rs) e a busca da janela para forçar o foco (`ui.rs`).
+pub const WINDOW_TITLE: &str = "RustShot — Editor";
+
+/// Frames em que o editor insiste em tomar o foco após nascer (§ v1.3.1).
+/// A janela surge logo depois de o overlay fechar, quando o Windows já
+/// devolveu o primeiro plano para outro app; sem isso o usuário teria de
+/// clicar antes de `Ctrl+C`/`Ctrl+S` funcionarem.
+pub const FOCUS_CLAIM_FRAMES: u8 = 12;
+
 pub const STROKE_MIN: f32 = 1.0;
 pub const STROKE_MAX: f32 = 12.0;
 pub const FONT_MIN: f32 = 12.0;
@@ -70,6 +80,8 @@ pub struct EditorSession {
     pub text_input: Option<TextInput>,
     /// Diálogo "descartar anotações?" visível.
     pub confirm_discard: bool,
+    /// Frames restantes de tentativa de tomar o foco (zera ao conseguir).
+    pub focus_frames: u8,
     /// Sessão terminou (salvou ou descartou); a janela fecha no próximo frame.
     pub finished: bool,
 }
@@ -90,6 +102,7 @@ impl EditorSession {
             drag: None,
             text_input: None,
             confirm_discard: false,
+            focus_frames: FOCUS_CLAIM_FRAMES,
             finished: false,
         }
     }

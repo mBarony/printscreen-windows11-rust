@@ -2,6 +2,20 @@
 
 Histórico de versões do RustShot. Datas em 2026.
 
+## v1.3.1 — 03/08
+
+- **O editor abre já com o foco do teclado**: depois de selecionar a região no
+  modo "Capturar e editar", `Ctrl+C` e `Ctrl+S` funcionam de imediato, sem
+  precisar clicar na janela antes. A janela nascia sem foco porque o Windows
+  devolve o primeiro plano ao app anterior quando o overlay fecha, e o
+  *foreground lock* recusa o pedido de foco de quem não está em primeiro
+  plano; a correção anexa a fila de entrada da thread em primeiro plano
+  (`AttachThreadInput`) durante os primeiros frames da janela.
+- Distribuição por **GitHub Releases**: o `rustshot.exe` passa a ser publicado
+  como asset a cada tag `v*`, compilado no CI com o toolchain MSVC. Link
+  permanente para a versão mais recente:
+  `.../releases/latest/download/rustshot.exe`.
+
 ## v1.3.0 — 03/08
 
 **Código standalone.** Fora o núcleo de GUI (`eframe`/`egui` + `wgpu`), todas

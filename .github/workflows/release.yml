@@ -1,0 +1,160 @@
+name: Release
+
+# Publica o rustshot.exe como asset de uma GitHub Release — o canal de
+# distribuição do projeto. O binário sai do windows-latest com o toolchain
+# MSVC (o alvo canônico), e o link
+# .../releases/latest/download/rustshot.exe aponta sempre para a versão mais
+# recente, sem versionar binários no git.
+#
+# Dispare com uma tag:      git tag v1.3.0 && git push origin v1.3.0
+# ou pela aba Actions:      "Release" -> Run workflow -> informe a tag.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag da release (ex.: v1.3.1). Criada no commit atual se ainda não existir."
+        required: true
+
+permissions:
+  contents: write # necessário para criar a release e anexar o exe
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    name: Compila e publica
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust toolchain (stable-msvc)
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      # A tag vem do ref (push) ou da entrada (dispatch). Passada por env
+      # para não interpolar entrada de usuário dentro do script.
+      - name: Resolver a versão
+        id: meta
+        shell: pwsh
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          $tag = if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') { $env:INPUT_TAG } else { $env:REF_NAME }
+          $tag = $tag.Trim()
+          if ($tag -notmatch '^v\d+\.\d+\.\d+') {
+            Write-Host "::error::Tag '$tag' fora do formato esperado (vX.Y.Z)."
+            exit 1
+          }
+          $version = $tag.TrimStart('v')
+
+          # A tag precisa casar com a versão do Cargo.toml — pega o caso de
+          # tag criada sem atualizar o pacote.
+          $cargoVersion = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"' |
+                           Select-Object -First 1).Matches[0].Groups[1].Value
+          if ($version -ne $cargoVersion) {
+            Write-Host "::error::Tag $tag nao casa com a versao do Cargo.toml ($cargoVersion). Atualize Cargo.toml e assets/rustshot.rc antes de taguear."
+            exit 1
+          }
+
+          "tag=$tag"         | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Publicando $tag (versao $version)"
+
+      - name: Testes
+        run: cargo test
+
+      - name: Build release
+        run: cargo build --release
+
+      - name: Verificar e empacotar o artefato
+        shell: pwsh
+        run: |
+          $exe = Get-Item target/release/rustshot.exe
+          $mb = [math]::Round($exe.Length / 1MB, 2)
+          Write-Host "rustshot.exe: $mb MB"
+          if ($exe.Length -gt 15MB) {
+            Write-Host "::warning::Acima do alvo de 15 MB (RNF-01): $mb MB"
+          }
+
+          # VersionInfo embutido tem que bater com a tag.
+          $fileVersion = $exe.VersionInfo.FileVersion
+          Write-Host "VersionInfo: $fileVersion"
+          if (-not $fileVersion.StartsWith('${{ steps.meta.outputs.version }}')) {
+            Write-Host "::error::VersionInfo ($fileVersion) nao casa com a tag — atualize assets/rustshot.rc."
+            exit 1
+          }
+
+          New-Item -ItemType Directory -Path release-assets -Force | Out-Null
+          Copy-Item $exe.FullName release-assets/rustshot.exe
+
+          $hash = (Get-FileHash release-assets/rustshot.exe -Algorithm SHA256).Hash.ToLower()
+          "$hash  rustshot.exe" | Out-File -FilePath release-assets/SHA256SUMS.txt -Encoding ascii
+          Write-Host "SHA-256: $hash"
+
+      - name: Montar as notas da release
+        shell: pwsh
+        run: |
+          $version = '${{ steps.meta.outputs.version }}'
+          $notes = @()
+
+          # Seção correspondente do CHANGELOG (do cabeçalho da versao ate' o proximo).
+          if (Test-Path CHANGELOG.md) {
+            $lines = Get-Content CHANGELOG.md
+            $start = -1
+            for ($i = 0; $i -lt $lines.Count; $i++) {
+              if ($lines[$i] -match "^##\s+v$([regex]::Escape($version))\b") { $start = $i; break }
+            }
+            if ($start -ge 0) {
+              for ($i = $start + 1; $i -lt $lines.Count; $i++) {
+                if ($lines[$i] -match '^##\s+v') { break }
+                $notes += $lines[$i]
+              }
+            }
+          }
+          if ($notes.Count -eq 0) {
+            $notes = @("RustShot v$version para Windows 11 x64.")
+          }
+
+          $notes += ''
+          $notes += '## Instalação'
+          $notes += ''
+          $notes += 'Baixe o `rustshot.exe`, coloque em uma pasta gravável e execute — sem instalador, sem runtime.'
+          $notes += 'O `config.json` e o `rustshot.log` são criados ao lado do executável; desinstalar = apagar esses arquivos.'
+          $notes += ''
+          $notes += 'Compilado no `windows-latest` com `stable-x86_64-pc-windows-msvc`. Confira a integridade com `SHA256SUMS.txt`:'
+          $notes += ''
+          $notes += '```powershell'
+          $notes += 'Get-FileHash .\rustshot.exe -Algorithm SHA256'
+          $notes += '```'
+          $notes += ''
+          $notes += 'Um exe não assinado pode disparar o SmartScreen na primeira execução ("Mais informações" → "Executar assim mesmo").'
+
+          $notes -join "`n" | Out-File -FilePath release-notes.md -Encoding utf8
+          Get-Content release-notes.md
+
+      - name: Publicar a release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = '${{ steps.meta.outputs.tag }}'
+          # Idempotente: se a release ja' existe (re-run), atualiza os assets.
+          gh release view $tag 2>$null | Out-Null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Release $tag ja existe; substituindo os assets."
+            gh release upload $tag release-assets/rustshot.exe release-assets/SHA256SUMS.txt --clobber
+          } else {
+            gh release create $tag `
+              release-assets/rustshot.exe `
+              release-assets/SHA256SUMS.txt `
+              --title "RustShot $tag" `
+              --notes-file release-notes.md
+          }
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Write-Host "Publicado: https://github.com/${{ github.repository }}/releases/tag/$tag"

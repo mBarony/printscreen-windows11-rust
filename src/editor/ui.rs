@@ -46,6 +46,8 @@ impl ToScreen {
 /// Corpo da janela do editor. Chamado dentro do viewport dedicado; `target`
 /// é o snapshot de configuração usado por Ctrl+S/Ctrl+C.
 pub fn show(ctx: &egui::Context, session: &mut EditorSession, target: &SaveTarget) {
+    claim_focus(ctx, session);
+
     // Atalhos globais da janela (ficam inativos com a caixa de texto aberta,
     // para não roubar o Ctrl+C/Esc da digitação).
     if session.text_input.is_none() && !session.confirm_discard {
@@ -91,6 +93,30 @@ pub fn show(ctx: &egui::Context, session: &mut EditorSession, target: &SaveTarge
     if session.confirm_discard {
         confirm_discard_modal(ctx, session);
     }
+}
+
+/// Garante que a janela nasça com o foco do teclado, para que `Ctrl+C` e
+/// `Ctrl+S` funcionem sem um clique antes.
+///
+/// O editor abre no instante em que o overlay de seleção fecha — momento em
+/// que o Windows já devolveu o primeiro plano ao app que estava atrás. Nesse
+/// estado o `SetForegroundWindow` do winit é recusado pelo foreground lock,
+/// então a janela aparece visível porém sem foco. A insistência dura poucos
+/// frames e para assim que o foco chega (ou se o usuário sair da janela por
+/// conta própria — nunca roubamos o foco de volta depois disso).
+fn claim_focus(ctx: &egui::Context, session: &mut EditorSession) {
+    if session.focus_frames == 0 {
+        return;
+    }
+    if ctx.input(|i| i.viewport().focused).unwrap_or(false) {
+        session.focus_frames = 0;
+        return;
+    }
+
+    session.focus_frames -= 1;
+    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+    crate::platform::shell::focus_window(super::WINDOW_TITLE);
+    ctx.request_repaint();
 }
 
 // ---------------------------------------------------------------------------

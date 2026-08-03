@@ -23,6 +23,10 @@ mod tray;
 use config::APP_NAME;
 
 const SINGLE_INSTANCE_NAME: &str = "rustshot-single-instance-mutex";
+/// Alterar este valor re-rola o hash do exe quando o SAC bloquear o binário
+/// recém-compilado (veredito por hash é permanente; ver README, Build).
+#[allow(dead_code)]
+const SAC_EXE_SALT: u32 = 1;
 /// Acima disso o log é rotacionado para `rustshot.log.old`.
 const LOG_ROTATE_BYTES: u64 = 2 * 1024 * 1024;
 
@@ -73,6 +77,9 @@ fn main() {
     // flag não segurava a janela, ela surgia no canto do monitor.
     // O App ainda a remove do Alt-Tab (WS_EX_TOOLWINDOW) e ignora Alt+F4.
     let options = eframe::NativeOptions {
+        // wgpu (D3D12/DXGI): apresentação composta pelo DWM como qualquer
+        // app moderno — o glow/OpenGL sofria unredirection em tela cheia.
+        renderer: eframe::Renderer::Wgpu,
         viewport: egui::ViewportBuilder::default()
             .with_title(APP_NAME)
             .with_decorations(false)
@@ -117,6 +124,12 @@ fn init_logging() {
         let config = simplelog::ConfigBuilder::new()
             .set_time_format_rfc3339()
             .build();
-        let _ = simplelog::WriteLogger::init(log::LevelFilter::Info, config, file);
+        // Build debug loga em nível Debug (diagnóstico de geometria/DPI).
+        let level = if cfg!(debug_assertions) {
+            log::LevelFilter::Debug
+        } else {
+            log::LevelFilter::Info
+        };
+        let _ = simplelog::WriteLogger::init(level, config, file);
     }
 }

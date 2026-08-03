@@ -339,7 +339,17 @@ impl RustShotApp {
                     let shot = &session.monitors[monitor].shot;
                     let cropped = capture::crop(&shot.image, x, y, w, h);
                     match session.purpose {
-                        Purpose::SaveDirect => storage::save_in_background(target, cropped),
+                        Purpose::SaveDirect => {
+                            // Além de salvar, a região vai para a área de
+                            // transferência (pedido do usuário, v1.1).
+                            let for_clipboard = cropped.clone();
+                            std::thread::spawn(move || {
+                                if let Err(err) = crate::clipboard::copy_image(&for_clipboard) {
+                                    log::warn!("cópia da região para o clipboard falhou: {err:#}");
+                                }
+                            });
+                            storage::save_in_background(target, cropped)
+                        }
                         Purpose::Edit => {
                             let mut shared = self.shared.lock().unwrap();
                             let defaults = shared.config.editor.clone();

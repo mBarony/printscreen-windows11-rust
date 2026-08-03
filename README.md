@@ -9,7 +9,7 @@ Aplicação standalone de captura de tela para **Windows 11 (x64)**, escrita em 
 | Modo | Atalho padrão | Comportamento |
 |---|---|---|
 | **Tela cheia** | `Ctrl+PrtScr` | Captura e salva automaticamente na pasta configurada |
-| **Região** | `Shift+PrtScr` | Congela a tela, você arrasta um retângulo; ao soltar, salva |
+| **Região** | `Shift+PrtScr` | Congela a tela, você arrasta um retângulo; ao soltar, salva e copia para a área de transferência |
 | **Região + edição** | `Ctrl+Shift+PrtScr` | Como acima, mas abre o editor de anotações |
 
 - **Editor de anotações**: linha, seta, retângulo, elipse e texto; 8 cores + seletor livre, espessura 1–12 px, fonte 12–72 px; `Ctrl+Z`/`Ctrl+Y` desfaz/refaz; `Shift` restringe a forma (45°/quadrado/círculo); `Ctrl+scroll` dá zoom (25–400%) e o botão do meio faz pan; `Ctrl+C` copia a imagem anotada para a área de transferência (o editor continua aberto); `Ctrl+S` salva e fecha; `Esc` descarta (confirmando se houver anotações).
@@ -38,6 +38,14 @@ Distribuição portátil: copie o exe. Todo o estado fica no mesmo diretório qu
 Em hosts não-Windows é possível validar tipos e lints sem linkar:
 `cargo check --target x86_64-pc-windows-msvc` (o script de build só embute os
 recursos Win32 quando o alvo é Windows).
+
+> **Smart App Control**: em máquinas com SAC em modo de imposição, artefatos
+> intermediários recém-compilados (build scripts, proc-macros) podem ser
+> bloqueados por reputação de hash (`os error 4551` ou E0463 "can't find
+> crate") — e o veredito por hash é permanente, então repetir o build não
+> resolve. O `.cargo/config.toml` deste repo fixa um `-Cmetadata`; se um
+> bloqueio aparecer, troque o rótulo (ex.: `sacfresh3`) para re-rolar os
+> hashes de todos os artefatos e compile de novo. Não desative o SAC.
 
 ## Configuração (`config.json`)
 

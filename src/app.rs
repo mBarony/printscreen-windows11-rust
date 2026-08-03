@@ -15,7 +15,7 @@ use crate::config::{self, Config, APP_NAME};
 use crate::editor::{self, EditorSession};
 use crate::hotkeys::{HotkeyAction, Hotkeys};
 use crate::notify;
-use crate::overlay::{self, Outcome, Purpose, SelectSession};
+use crate::overlay::{self, Outcome, Purpose, SelectSession, SelectedAction};
 use crate::settings::SettingsState;
 use crate::storage::{self, SaveTarget};
 use crate::tray::{self, Tray};
@@ -335,22 +335,30 @@ impl RustShotApp {
                 Outcome::Cancelled => {
                     log::info!("seleção de região cancelada");
                 }
-                Outcome::Selected { monitor, rect: (x, y, w, h) } => {
+                Outcome::Selected { monitor, rect: (x, y, w, h), action } => {
                     let shot = &session.monitors[monitor].shot;
                     let cropped = capture::crop(&shot.image, x, y, w, h);
-                    match session.purpose {
-                        Purpose::SaveDirect => {
-                            // Além de salvar, a região vai para a área de
-                            // transferência (pedido do usuário, v1.1).
-                            let for_clipboard = cropped.clone();
+                    match action {
+                        // Ctrl+C na seleção pendente: só copia (v1.2).
+                        SelectedAction::CopyToClipboard => {
                             std::thread::spawn(move || {
-                                if let Err(err) = crate::clipboard::copy_image(&for_clipboard) {
-                                    log::warn!("cópia da região para o clipboard falhou: {err:#}");
+                                match crate::clipboard::copy_image(&cropped) {
+                                    Ok(()) => notify::toast(
+                                        "Copiado para a área de transferência",
+                                        "A região selecionada está pronta para colar.",
+                                    ),
+                                    Err(err) => notify::toast_error(
+                                        "Falha ao copiar",
+                                        &format!("{err:#}"),
+                                    ),
                                 }
                             });
-                            storage::save_in_background(target, cropped)
                         }
-                        Purpose::Edit => {
+                        // Ctrl+S na seleção pendente: só salva (v1.2).
+                        SelectedAction::SaveToFile => {
+                            storage::save_in_background(target, cropped);
+                        }
+                        SelectedAction::OpenEditor => {
                             let mut shared = self.shared.lock().unwrap();
                             let defaults = shared.config.editor.clone();
                             shared.flow = Flow::Editing(EditorSession::new(

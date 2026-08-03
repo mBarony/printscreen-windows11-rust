@@ -69,7 +69,7 @@ pub fn show(ctx: &egui::Context, session: &mut EditorSession, target: &SaveTarge
             session.stack.redo();
         }
         if copy {
-            copy_to_clipboard(session);
+            copy_and_close(session);
         }
         if save {
             save_and_close(session, target);
@@ -187,10 +187,18 @@ fn toolbar(ctx: &egui::Context, session: &mut EditorSession, target: &SaveTarget
 
             ui.separator();
 
-            if ui.button("Copiar").on_hover_text("Ctrl+C").clicked() {
-                copy_to_clipboard(session);
+            if ui
+                .button("Copiar")
+                .on_hover_text("Ctrl+C — copia e fecha")
+                .clicked()
+            {
+                copy_and_close(session);
             }
-            if ui.button("Salvar").on_hover_text("Ctrl+S").clicked() {
+            if ui
+                .button("Salvar")
+                .on_hover_text("Ctrl+S — salva e fecha")
+                .clicked()
+            {
                 save_and_close(session, target);
             }
             if ui.button("Cancelar").on_hover_text("Esc").clicked() {
@@ -497,8 +505,11 @@ fn commit_text_input(session: &mut EditorSession) {
 // Ações: copiar, salvar, fechar
 // ---------------------------------------------------------------------------
 
-/// Ctrl+C: renderiza e copia; o editor permanece aberto (RF-04).
-fn copy_to_clipboard(session: &mut EditorSession) {
+/// Ctrl+C: renderiza, copia para a área de transferência e fecha o editor
+/// (v1.2 — antes o editor permanecia aberto). A renderização e a cópia
+/// acontecem em thread de trabalho; a janela fecha imediatamente e o toast
+/// confirma (ou reporta a falha) na sequência.
+fn copy_and_close(session: &mut EditorSession) {
     commit_text_input(session);
     let base = session.image.clone();
     let shapes = session.stack.shapes().to_vec();
@@ -512,6 +523,7 @@ fn copy_to_clipboard(session: &mut EditorSession) {
         },
         Err(err) => notify::toast_error("Falha ao renderizar anotações", &format!("{err:#}")),
     });
+    session.finished = true;
 }
 
 /// Ctrl+S: renderiza, salva na pasta configurada e fecha o editor (RF-04).

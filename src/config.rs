@@ -144,7 +144,7 @@ pub fn state_dir() -> PathBuf {
 /// config/log falharem em silêncio — o chamador avisa o usuário.
 pub fn state_dir_writable() -> bool {
     let probe = state_dir().join(".rustshot-write-probe");
-    match std::fs::OpenOptions::new().write(true).create(true).open(&probe) {
+    match std::fs::OpenOptions::new().write(true).create(true).truncate(true).open(&probe) {
         Ok(file) => {
             drop(file);
             let _ = std::fs::remove_file(&probe);

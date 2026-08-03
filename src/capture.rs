@@ -1,5 +1,5 @@
-//! Enumeração de monitores e captura de tela (`xcap`), composição
-//! multi-monitor e recorte (§9 da especificação).
+//! Enumeração de monitores e captura de tela (GDI via `platform::capture`),
+//! composição multi-monitor e recorte (§9 da especificação).
 //!
 //! Todas as coordenadas e dimensões são em **pixels físicos** do desktop
 //! virtual. Com o manifesto Per-Monitor V2 embutido, as APIs do Windows
@@ -7,9 +7,9 @@
 //! Coordenadas negativas (monitor à esquerda/acima do principal) são
 //! normalizadas na composição subtraindo o mínimo.
 
-use anyhow::{anyhow, Context as _, Result};
-use image::RgbaImage;
-use xcap::Monitor;
+use crate::error::{err, Result};
+use crate::imgbuf::RgbaImage;
+use crate::platform::capture as sys;
 
 use crate::config::FullscreenScope;
 
@@ -26,37 +26,22 @@ pub struct MonitorShot {
     pub image: RgbaImage,
 }
 
-impl MonitorShot {
-    fn from_monitor(monitor: &Monitor) -> Result<Self> {
-        let image = monitor
-            .capture_image()
-            .context("capturando imagem do monitor")?;
-        // Dimensões da própria captura são a fonte de verdade em px físicos;
-        // width()/height() do xcap são usados apenas como fallback.
-        let width = image.width();
-        let height = image.height();
-        Ok(Self {
-            x: monitor.x().unwrap_or(0),
-            y: monitor.y().unwrap_or(0),
-            width,
-            height,
-            scale: monitor.scale_factor().unwrap_or(1.0).max(0.5),
-            image,
-        })
+impl From<sys::CapturedMonitor> for MonitorShot {
+    fn from(m: sys::CapturedMonitor) -> Self {
+        Self {
+            x: m.x,
+            y: m.y,
+            width: m.width,
+            height: m.height,
+            scale: m.scale,
+            image: m.image,
+        }
     }
 }
 
 /// Captura todos os monitores (congela o conteúdo da tela para o overlay).
 pub fn capture_all_monitors() -> Result<Vec<MonitorShot>> {
-    let monitors = Monitor::all().context("enumerando monitores")?;
-    if monitors.is_empty() {
-        return Err(anyhow!("nenhum monitor encontrado"));
-    }
-    let mut shots = Vec::with_capacity(monitors.len());
-    for monitor in &monitors {
-        shots.push(MonitorShot::from_monitor(monitor)?);
-    }
-    Ok(shots)
+    Ok(sys::all_monitors()?.into_iter().map(MonitorShot::from).collect())
 }
 
 /// Compõe as capturas na área virtual completa (bounding box de todos os
@@ -64,29 +49,19 @@ pub fn capture_all_monitors() -> Result<Vec<MonitorShot>> {
 pub fn compose_virtual(shots: &[MonitorShot]) -> Result<RgbaImage> {
     let min_x = shots.iter().map(|s| s.x).min().unwrap_or(0);
     let min_y = shots.iter().map(|s| s.y).min().unwrap_or(0);
-    let max_x = shots
-        .iter()
-        .map(|s| s.x as i64 + s.width as i64)
-        .max()
-        .unwrap_or(0);
-    let max_y = shots
-        .iter()
-        .map(|s| s.y as i64 + s.height as i64)
-        .max()
-        .unwrap_or(0);
+    let max_x = shots.iter().map(|s| s.x as i64 + s.width as i64).max().unwrap_or(0);
+    let max_y = shots.iter().map(|s| s.y as i64 + s.height as i64).max().unwrap_or(0);
 
     let total_w = (max_x - min_x as i64) as u32;
     let total_h = (max_y - min_y as i64) as u32;
     if total_w == 0 || total_h == 0 {
-        return Err(anyhow!("área virtual vazia"));
+        return Err(err!("área virtual vazia"));
     }
 
     // Fundo preto opaco.
-    let mut canvas = RgbaImage::from_pixel(total_w, total_h, image::Rgba([0, 0, 0, 255]));
+    let mut canvas = RgbaImage::filled(total_w, total_h, [0, 0, 0, 255]);
     for shot in shots {
-        let dst_x = (shot.x - min_x) as i64;
-        let dst_y = (shot.y - min_y) as i64;
-        image::imageops::replace(&mut canvas, &shot.image, dst_x, dst_y);
+        canvas.paste(&shot.image, (shot.x - min_x) as i64, (shot.y - min_y) as i64);
     }
     Ok(canvas)
 }
@@ -99,54 +74,60 @@ pub fn capture_fullscreen(scope: FullscreenScope) -> Result<RgbaImage> {
             compose_virtual(&shots)
         }
         FullscreenScope::Primary => {
-            let monitors = Monitor::all().context("enumerando monitores")?;
-            let primary = monitors
-                .iter()
-                .find(|m| m.is_primary().unwrap_or(false))
-                .or_else(|| monitors.first())
-                .ok_or_else(|| anyhow!("nenhum monitor encontrado"))?;
-            primary.capture_image().context("capturando monitor principal")
+            let shots = sys::all_monitors()?;
+            let primary = shots
+                .into_iter()
+                .find(|m| m.is_primary)
+                .ok_or_else(|| err!("monitor principal não encontrado"))?;
+            Ok(primary.image)
         }
         FullscreenScope::MonitorUnderCursor => {
-            let monitor = match cursor_pos() {
-                Some((x, y)) => Monitor::from_point(x, y).or_else(|_| {
-                    // Cursor em área sem monitor (ex.: acabou de desconectar):
-                    // recua para o principal.
-                    primary_monitor()
-                })?,
-                None => primary_monitor()?,
+            let monitor = match sys::cursor_pos() {
+                Some((x, y)) => sys::monitor_at(x, y)?,
+                None => sys::all_monitors()?
+                    .into_iter()
+                    .find(|m| m.is_primary)
+                    .ok_or_else(|| err!("monitor principal não encontrado"))?,
             };
-            monitor.capture_image().context("capturando monitor sob o cursor")
+            Ok(monitor.image)
         }
     }
 }
 
-fn primary_monitor() -> Result<Monitor> {
-    let monitors = Monitor::all().context("enumerando monitores")?;
-    monitors
-        .into_iter()
-        .find(|m| m.is_primary().unwrap_or(false))
-        .ok_or_else(|| anyhow!("monitor principal não encontrado"))
-}
-
 /// Recorta `rect` (x, y, w, h em px da imagem) de uma captura.
 pub fn crop(image: &RgbaImage, x: u32, y: u32, w: u32, h: u32) -> RgbaImage {
-    image::imageops::crop_imm(image, x, y, w, h).to_image()
+    image.crop(x, y, w, h)
 }
 
-/// Posição física do cursor no desktop virtual.
-#[cfg(windows)]
-pub fn cursor_pos() -> Option<(i32, i32)> {
-    use windows_sys::Win32::Foundation::POINT;
-    use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    let mut point = POINT { x: 0, y: 0 };
-    // SAFETY: GetCursorPos escreve em um POINT válido; retorno 0 = falha.
-    let ok = unsafe { GetCursorPos(&mut point) };
-    (ok != 0).then_some((point.x, point.y))
-}
-
-#[cfg(not(windows))]
-pub fn cursor_pos() -> Option<(i32, i32)> {
-    None
+    #[test]
+    fn compose_normalizes_negative_origins() {
+        let shots = vec![
+            MonitorShot {
+                x: -4,
+                y: 0,
+                width: 4,
+                height: 2,
+                scale: 1.0,
+                image: RgbaImage::filled(4, 2, [10, 0, 0, 255]),
+            },
+            MonitorShot {
+                x: 0,
+                y: 0,
+                width: 3,
+                height: 3,
+                scale: 1.0,
+                image: RgbaImage::filled(3, 3, [0, 20, 0, 255]),
+            },
+        ];
+        let composed = compose_virtual(&shots).unwrap();
+        assert_eq!((composed.width(), composed.height()), (7, 3));
+        assert_eq!(composed.pixel(0, 0), [10, 0, 0, 255], "monitor à esquerda");
+        assert_eq!(composed.pixel(4, 0), [0, 20, 0, 255], "monitor principal");
+        // Área não coberta (layout em L): preta.
+        assert_eq!(composed.pixel(0, 2), [0, 0, 0, 255]);
+    }
 }

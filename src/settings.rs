@@ -127,9 +127,9 @@ pub fn show(ctx: &egui::Context, state: &mut SettingsState) {
                         state.draft.output_dir = shown;
                     }
                     if ui.button("Procurar…").clicked() {
-                        let start = state.draft.effective_output_dir();
-                        let dialog = rfd::FileDialog::new().set_directory(start);
-                        if let Some(dir) = dialog.pick_folder() {
+                        if let Some(dir) =
+                            crate::platform::dialog::pick_folder("Escolha a pasta de capturas")
+                        {
                             state.draft.output_dir = dir.display().to_string();
                         }
                     }

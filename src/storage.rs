@@ -6,11 +6,11 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context as _, Result};
-use image::RgbaImage;
-
 use crate::config::Config;
+use crate::error::{Context as _, Result};
+use crate::imgbuf::RgbaImage;
 use crate::notify;
+use crate::platform::time;
 
 /// Formato único de saída: JPG (sem alfa) com esta qualidade.
 const JPG_QUALITY: u8 = 90;
@@ -65,9 +65,9 @@ pub fn ensure_output_dir(target: &SaveTarget) -> Result<PathBuf> {
 /// (o formato é fixo, então `shot.jpg`/`nome.png` digitados no template não
 /// devem virar `shot.jpg.jpg`).
 fn expand_stem(template: &str) -> String {
-    let now = chrono::Local::now();
-    let date = now.format("%Y-%m-%d").to_string();
-    let time = now.format("%H-%M-%S").to_string();
+    let now = time::now();
+    let date = now.date();
+    let time = now.time();
     let stem = sanitize_filename(
         &template
             .replace("{date}", &date)
@@ -144,11 +144,10 @@ pub fn write_image(target: &SaveTarget, image: &RgbaImage) -> Result<PathBuf> {
 
     // JPG não tem alfa: converte para RGB antes de reservar o caminho, para
     // manter mínima a janela entre reserva e escrita.
-    let rgb = image::DynamicImage::ImageRgba8(image.clone()).to_rgb8();
+    let rgb = image.to_rgb();
     let (path, file) = claim_free_path(&dir, &target.filename_template)?;
-    let mut writer = std::io::BufWriter::new(file);
-    let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut writer, JPG_QUALITY);
-    rgb.write_with_encoder(encoder)
+    let writer = std::io::BufWriter::new(file);
+    crate::jpeg::encode_rgb(writer, &rgb, image.width(), image.height(), JPG_QUALITY)
         .with_context(|| format!("gravando {}", path.display()))?;
     Ok(path)
 }
@@ -165,7 +164,7 @@ pub fn save_in_background(target: SaveTarget, image: RgbaImage) {
             notify::toast("Captura salva", &name);
         }
         Err(err) => {
-            notify::toast_error("Falha ao salvar captura", &format!("{err:#}"));
+            notify::toast_error("Falha ao salvar captura", &format!("{err}"));
         }
     });
 }
@@ -192,6 +191,17 @@ mod tests {
     }
 
     #[test]
+    fn collision_suffixes() {
+        let dir = std::env::temp_dir().join(format!("rustshot-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let first = next_free_path(&dir, "fixed", "jpg");
+        std::fs::write(&first, b"x").unwrap();
+        let second = next_free_path(&dir, "fixed", "jpg");
+        assert_eq!(second.file_name().unwrap().to_str().unwrap(), "fixed_1.jpg");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn claim_is_atomic_and_sequential() {
         let dir = std::env::temp_dir().join(format!("rustshot-claim-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -204,13 +214,18 @@ mod tests {
     }
 
     #[test]
-    fn collision_suffixes() {
-        let dir = std::env::temp_dir().join(format!("rustshot-test-{}", std::process::id()));
+    fn write_image_produces_valid_jpeg() {
+        let dir = std::env::temp_dir().join(format!("rustshot-jpg-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let first = next_free_path(&dir, "fixed", "jpg");
-        std::fs::write(&first, b"x").unwrap();
-        let second = next_free_path(&dir, "fixed", "jpg");
-        assert_eq!(second.file_name().unwrap().to_str().unwrap(), "fixed_1.jpg");
+        let target = SaveTarget {
+            output_dir: dir.clone(),
+            filename_template: "sample".into(),
+        };
+        let image = RgbaImage::filled(40, 24, [200, 40, 40, 255]);
+        let path = write_image(&target, &image).unwrap();
+        let bytes = std::fs::read(&path).unwrap();
+        assert_eq!(&bytes[..3], &[0xFF, 0xD8, 0xFF], "assinatura JPEG");
+        assert_eq!(&bytes[bytes.len() - 2..], &[0xFF, 0xD9], "EOI");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

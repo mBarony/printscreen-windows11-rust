@@ -1,4 +1,5 @@
-//! Carga, validação e persistência do `config.json` (§6 da especificação).
+//! Carga, validação e persistência do `config.json` (§6 da especificação),
+//! serializado com o módulo próprio `json` (sem `serde`).
 //!
 //! Localização: todo o estado (`config.json` + `rustshot.log`) fica **na
 //! mesma pasta do executável** — a aplicação é portátil por definição;
@@ -10,8 +11,9 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context as _, Result};
-use serde::{Deserialize, Serialize};
+use crate::error::{Context as _, Result};
+use crate::json::{self, Value};
+use crate::platform::folders;
 
 pub const APP_NAME: &str = "RustShot";
 
@@ -19,8 +21,7 @@ pub const APP_NAME: &str = "RustShot";
 // Modelo
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Config {
     pub version: u32,
     /// Pasta de destino das capturas. Vazio = padrão (`Imagens\RustShot`).
@@ -47,8 +48,7 @@ impl Default for Config {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FullscreenScope {
     /// Área virtual completa: todos os monitores compostos em uma imagem.
     AllMonitors,
@@ -66,12 +66,29 @@ impl FullscreenScope {
             Self::MonitorUnderCursor => "Monitor sob o cursor",
         }
     }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::AllMonitors => "all_monitors",
+            Self::Primary => "primary",
+            Self::MonitorUnderCursor => "monitor_under_cursor",
+        }
+    }
+
+    fn from_str(text: &str) -> Option<Self> {
+        match text {
+            "all_monitors" => Some(Self::AllMonitors),
+            "primary" => Some(Self::Primary),
+            "monitor_under_cursor" => Some(Self::MonitorUnderCursor),
+            _ => None,
+        }
+    }
 }
 
-/// Um atalho serializado; `modifiers`/`code` mapeiam diretamente para os
-/// tipos do crate `global-hotkey` (`Modifiers`, `Code`), evitando parsing
-/// próprio de strings de atalho (§6).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Um atalho serializado; `modifiers` usa `CTRL`/`SHIFT`/`ALT`/`WIN` e
+/// `code` os nomes de tecla do padrão W3C (`PrintScreen`, `KeyA`, `F5`…) —
+/// formato idêntico ao das versões anteriores (§6).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HotkeyDef {
     pub modifiers: Vec<String>,
     pub code: String,
@@ -84,10 +101,39 @@ impl HotkeyDef {
             code: code.into(),
         }
     }
+
+    fn from_json(value: &Value, default: &HotkeyDef) -> HotkeyDef {
+        let modifiers = value
+            .get("modifiers")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_else(|| default.modifiers.clone());
+        let code = value
+            .get("code")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .unwrap_or_else(|| default.code.clone());
+        HotkeyDef { modifiers, code }
+    }
+
+    fn to_json(&self) -> Value {
+        json::obj(vec![
+            (
+                "modifiers",
+                json::arr(self.modifiers.iter().map(|m| json::s(m)).collect()),
+            ),
+            ("code", json::s(&self.code)),
+        ])
+    }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HotkeysConfig {
     pub fullscreen: HotkeyDef,
     pub region: HotkeyDef,
@@ -106,8 +152,7 @@ impl Default for HotkeysConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct EditorConfig {
     /// Cor padrão das anotações, `#RRGGBB` ou `#RRGGBBAA`.
     pub default_color: String,
@@ -122,6 +167,117 @@ impl Default for EditorConfig {
             default_stroke_width: 3.0,
             default_font_size: 24.0,
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// (De)serialização tolerante
+// ---------------------------------------------------------------------------
+
+impl Config {
+    /// Constrói a partir do JSON; o texto precisa ser um objeto JSON válido
+    /// (qualquer outra coisa conta como corrompido), mas cada campo ausente
+    /// ou com tipo errado cai no padrão individualmente.
+    pub fn from_json_text(text: &str) -> std::result::Result<Config, String> {
+        let root = json::parse(text)?;
+        if !matches!(root, Value::Object(_)) {
+            return Err("raiz do config.json não é um objeto".into());
+        }
+        let defaults = Config::default();
+
+        let str_field = |key: &str, fallback: &str| -> String {
+            root.get(key)
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .unwrap_or_else(|| fallback.to_string())
+        };
+        let f32_field = |value: Option<&Value>, fallback: f32| -> f32 {
+            value.and_then(Value::as_f64).map(|n| n as f32).unwrap_or(fallback)
+        };
+
+        let hotkeys_value = root.get("hotkeys");
+        let hotkeys = HotkeysConfig {
+            fullscreen: hotkeys_value
+                .and_then(|h| h.get("fullscreen"))
+                .map(|v| HotkeyDef::from_json(v, &defaults.hotkeys.fullscreen))
+                .unwrap_or_else(|| defaults.hotkeys.fullscreen.clone()),
+            region: hotkeys_value
+                .and_then(|h| h.get("region"))
+                .map(|v| HotkeyDef::from_json(v, &defaults.hotkeys.region))
+                .unwrap_or_else(|| defaults.hotkeys.region.clone()),
+            edit: hotkeys_value
+                .and_then(|h| h.get("edit"))
+                .map(|v| HotkeyDef::from_json(v, &defaults.hotkeys.edit))
+                .unwrap_or_else(|| defaults.hotkeys.edit.clone()),
+        };
+
+        let editor_value = root.get("editor");
+        let editor = EditorConfig {
+            default_color: editor_value
+                .and_then(|e| e.get("default_color"))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .unwrap_or_else(|| defaults.editor.default_color.clone()),
+            default_stroke_width: f32_field(
+                editor_value.and_then(|e| e.get("default_stroke_width")),
+                defaults.editor.default_stroke_width,
+            ),
+            default_font_size: f32_field(
+                editor_value.and_then(|e| e.get("default_font_size")),
+                defaults.editor.default_font_size,
+            ),
+        };
+
+        Ok(Config {
+            version: root
+                .get("version")
+                .and_then(Value::as_f64)
+                .map(|n| n as u32)
+                .unwrap_or(defaults.version),
+            output_dir: str_field("output_dir", &defaults.output_dir),
+            filename_template: str_field("filename_template", &defaults.filename_template),
+            fullscreen_scope: root
+                .get("fullscreen_scope")
+                .and_then(Value::as_str)
+                .and_then(FullscreenScope::from_str)
+                .unwrap_or(defaults.fullscreen_scope),
+            hotkeys,
+            editor,
+            start_with_windows: root
+                .get("start_with_windows")
+                .and_then(Value::as_bool)
+                .unwrap_or(defaults.start_with_windows),
+        })
+    }
+
+    pub fn to_json_text(&self) -> String {
+        let value = json::obj(vec![
+            ("version", json::n(self.version as f64)),
+            ("output_dir", json::s(&self.output_dir)),
+            ("filename_template", json::s(&self.filename_template)),
+            ("fullscreen_scope", json::s(self.fullscreen_scope.as_str())),
+            (
+                "hotkeys",
+                json::obj(vec![
+                    ("fullscreen", self.hotkeys.fullscreen.to_json()),
+                    ("region", self.hotkeys.region.to_json()),
+                    ("edit", self.hotkeys.edit.to_json()),
+                ]),
+            ),
+            (
+                "editor",
+                json::obj(vec![
+                    ("default_color", json::s(&self.editor.default_color)),
+                    (
+                        "default_stroke_width",
+                        json::n(self.editor.default_stroke_width as f64),
+                    ),
+                    ("default_font_size", json::n(self.editor.default_font_size as f64)),
+                ]),
+            ),
+            ("start_with_windows", json::b(self.start_with_windows)),
+        ]);
+        json::to_string_pretty(&value)
     }
 }
 
@@ -161,8 +317,8 @@ pub fn config_path() -> PathBuf {
 
 /// Pasta de destino padrão das capturas: `Imagens\RustShot`.
 pub fn default_output_dir() -> PathBuf {
-    dirs::picture_dir()
-        .unwrap_or_else(|| dirs::home_dir().unwrap_or_else(std::env::temp_dir))
+    folders::pictures_dir()
+        .unwrap_or_else(std::env::temp_dir)
         .join(APP_NAME)
 }
 
@@ -198,7 +354,7 @@ pub fn load() -> LoadedConfig {
             let _ = save(&config);
             LoadedConfig { config, created: true, recovered: false }
         }
-        Ok(text) => match serde_json::from_str::<Config>(&text) {
+        Ok(text) => match Config::from_json_text(&text) {
             Ok(config) => LoadedConfig { config, created: false, recovered: false },
             Err(err) => {
                 log::warn!("config.json inválido ({err}); recriando com padrões");
@@ -233,7 +389,7 @@ fn save_to(config: &Config, path: &Path) -> Result<()> {
         std::fs::create_dir_all(dir)
             .with_context(|| format!("criando pasta {}", dir.display()))?;
     }
-    let json = serde_json::to_string_pretty(config)?;
+    let json = config.to_json_text();
     // Escrita atômica: grava em arquivo temporário e renomeia por cima.
     let tmp = path.with_extension("json.tmp");
     std::fs::write(&tmp, json.as_bytes())
@@ -289,17 +445,58 @@ mod tests {
 
     #[test]
     fn config_defaults_survive_partial_json() {
-        let cfg: Config = serde_json::from_str(r#"{ "output_dir": "C:\\x" }"#).unwrap();
+        let cfg = Config::from_json_text(r#"{ "output_dir": "C:\\x" }"#).unwrap();
         assert_eq!(cfg.output_dir, "C:\\x");
         assert_eq!(cfg.filename_template, "screenshot_{date}_{time}");
         assert_eq!(cfg.hotkeys.fullscreen.code, "PrintScreen");
+        assert_eq!(cfg.editor.default_stroke_width, 3.0);
     }
 
     #[test]
     fn old_config_with_image_format_still_loads() {
         // Configs da v1.0 traziam "image_format"; o campo é ignorado hoje.
-        let cfg: Config =
-            serde_json::from_str(r#"{ "image_format": "png", "output_dir": "C:\\y" }"#).unwrap();
+        let cfg = Config::from_json_text(r#"{ "image_format": "png", "output_dir": "C:\\y" }"#)
+            .unwrap();
         assert_eq!(cfg.output_dir, "C:\\y");
+    }
+
+    #[test]
+    fn roundtrip_preserves_everything() {
+        let cfg = Config {
+            output_dir: "D:\\Capturas".into(),
+            fullscreen_scope: FullscreenScope::MonitorUnderCursor,
+            hotkeys: HotkeysConfig {
+                region: HotkeyDef::new(&["CTRL", "ALT"], "KeyR"),
+                ..HotkeysConfig::default()
+            },
+            editor: EditorConfig {
+                default_color: "#00FF00".into(),
+                default_stroke_width: 5.0,
+                ..EditorConfig::default()
+            },
+            start_with_windows: true,
+            ..Config::default()
+        };
+
+        let text = cfg.to_json_text();
+        let reparsed = Config::from_json_text(&text).unwrap();
+        assert_eq!(reparsed, cfg);
+    }
+
+    #[test]
+    fn garbage_root_is_rejected() {
+        assert!(Config::from_json_text("[1, 2, 3]").is_err());
+        assert!(Config::from_json_text("{ truncado").is_err());
+    }
+
+    #[test]
+    fn wrong_types_fall_back_to_defaults() {
+        let cfg = Config::from_json_text(
+            r#"{ "output_dir": 42, "start_with_windows": "sim", "editor": { "default_font_size": "grande" } }"#,
+        )
+        .unwrap();
+        assert_eq!(cfg.output_dir, "");
+        assert!(!cfg.start_with_windows);
+        assert_eq!(cfg.editor.default_font_size, 24.0);
     }
 }

@@ -3,15 +3,15 @@
 //! Submódulos: `shapes` (modelo de dados + undo), `ui` (janela/canvas/
 //! toolbar) e `render` (rasterização final para exportação).
 
+pub mod raster;
 pub mod render;
 pub mod shapes;
 pub mod ui;
 
 use std::sync::Arc;
 
-use image::RgbaImage;
-
 use crate::config::{self, EditorConfig};
+use crate::imgbuf::RgbaImage;
 use shapes::{Point, ShapeStack, Style, Tool};
 
 /// Fonte TTF embutida (Inter, licença SIL OFL), usada tanto no egui quanto na

@@ -16,21 +16,22 @@ use crate::editor::{self, EditorSession};
 use crate::hotkeys::{HotkeyAction, Hotkeys};
 use crate::notify;
 use crate::overlay::{self, Outcome, Purpose, SelectSession, SelectedAction};
+use crate::platform::shell::ShellEvent;
 use crate::settings::SettingsState;
 use crate::storage::{self, SaveTarget};
 use crate::tray::{self, Tray};
-use crate::{capture, hotkeys};
+use crate::{capture, hotkeys, platform};
 
 // ---------------------------------------------------------------------------
 // Fila de eventos externos
 // ---------------------------------------------------------------------------
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum AppEvent {
-    /// `GlobalHotKeyEvent::id` de um atalho pressionado.
-    Hotkey(u32),
-    /// Id do item de menu da bandeja clicado.
-    Menu(String),
+    /// Id do `WM_HOTKEY` de um atalho global pressionado.
+    Hotkey(i32),
+    /// Id do item de menu da bandeja clicado (constantes em `tray`).
+    Menu(u16),
 }
 
 pub mod events {
@@ -75,7 +76,7 @@ pub struct AppShared {
 
 pub struct RustShotApp {
     shared: Arc<Mutex<AppShared>>,
-    hotkeys: Option<Hotkeys>,
+    hotkeys: Hotkeys,
     /// Mantém o ícone/menu da bandeja vivos (RF-06).
     tray: Option<Tray>,
     window_icon: Arc<egui::IconData>,
@@ -107,49 +108,30 @@ impl RustShotApp {
         #[cfg(windows)]
         remove_root_from_alt_tab();
 
-        let mut hotkeys = match Hotkeys::new() {
-            Ok(h) => Some(h),
-            Err(err) => {
-                notify::toast_error(
-                    "Atalhos globais indisponíveis",
-                    &format!("Os atalhos de teclado não funcionarão: {err:#}"),
-                );
-                None
+        // Bandeja + janela de shell — a mesma janela recebe cliques do menu
+        // e os WM_HOTKEY. O handler roda no pump Win32 da própria thread do
+        // event loop: só enfileira o evento e acorda a UI.
+        let ctx = cc.egui_ctx.clone();
+        let tray = match Tray::new(config.start_with_windows, move |event| {
+            match event {
+                ShellEvent::Menu(id) => events::push(AppEvent::Menu(id)),
+                ShellEvent::Hotkey(id) => events::push(AppEvent::Hotkey(id)),
             }
-        };
-        if let Some(h) = &mut hotkeys {
-            toast_hotkey_failures(h.apply(&config.hotkeys));
-        }
-
-        let tray = match Tray::new(config.start_with_windows) {
+            ctx.request_repaint();
+        }) {
             Ok(tray) => Some(tray),
             Err(err) => {
                 notify::toast_error(
                     "Bandeja indisponível",
-                    &format!("O menu da bandeja não pôde ser criado: {err:#}"),
+                    &format!("O menu da bandeja não pôde ser criado: {err}"),
                 );
                 None
             }
         };
 
-        // Handlers: acordam a UI e enfileiram o evento. Rodam na própria
-        // thread do event loop (pump Win32), então só empurram e retornam.
-        let ctx = cc.egui_ctx.clone();
-        global_hotkey::GlobalHotKeyEvent::set_event_handler(Some(
-            move |event: global_hotkey::GlobalHotKeyEvent| {
-                if event.state() == global_hotkey::HotKeyState::Pressed {
-                    events::push(AppEvent::Hotkey(event.id()));
-                    ctx.request_repaint();
-                }
-            },
-        ));
-        let ctx = cc.egui_ctx.clone();
-        tray_icon::menu::MenuEvent::set_event_handler(Some(
-            move |event: tray_icon::menu::MenuEvent| {
-                events::push(AppEvent::Menu(event.id.0.clone()));
-                ctx.request_repaint();
-            },
-        ));
+        // Atalhos globais: registrados na janela de shell criada acima.
+        let mut hotkeys = Hotkeys::new();
+        toast_hotkey_failures(hotkeys.apply(&config.hotkeys));
 
         // Hook de desenvolvimento (builds debug): abre a janela de
         // configurações direto, para inspeção visual sem passar pela bandeja.
@@ -259,7 +241,7 @@ impl RustShotApp {
         }
     }
 
-    fn handle_menu(&mut self, ctx: &egui::Context, id: &str) {
+    fn handle_menu(&mut self, ctx: &egui::Context, id: u16) {
         match id {
             tray::MENU_CAPTURE_FULLSCREEN => self.trigger(ctx, HotkeyAction::Fullscreen),
             tray::MENU_CAPTURE_REGION => self.trigger(ctx, HotkeyAction::Region),
@@ -308,7 +290,7 @@ impl RustShotApp {
             tray::MENU_QUIT => {
                 self.shared.lock().unwrap().quit = true;
             }
-            other => log::debug!("item de menu desconhecido: {other}"),
+            other => log::debug!("item de menu desconhecido: {other:#06x}"),
         }
     }
 
@@ -401,10 +383,7 @@ impl RustShotApp {
 
     fn apply_config(&mut self, new_config: Config) {
         // Atalhos: re-registro imediato, sem reiniciar (RF-05).
-        let failures = match &mut self.hotkeys {
-            Some(h) => h.apply(&new_config.hotkeys),
-            None => Vec::new(),
-        };
+        let failures = self.hotkeys.apply(&new_config.hotkeys);
 
         if let Err(err) = apply_autostart(new_config.start_with_windows) {
             notify::toast_error(
@@ -550,13 +529,13 @@ impl eframe::App for RustShotApp {
         for event in events::drain() {
             match event {
                 AppEvent::Hotkey(id) => {
-                    let action = self.hotkeys.as_ref().and_then(|h| h.action_for(id));
+                    let action = self.hotkeys.action_for(id);
                     if let Some(action) = action {
                         log::info!("atalho global: {action:?}");
                         self.trigger(ctx, action);
                     }
                 }
-                AppEvent::Menu(id) => self.handle_menu(ctx, &id),
+                AppEvent::Menu(id) => self.handle_menu(ctx, id),
             }
         }
 
@@ -596,22 +575,13 @@ fn toast_hotkey_failures(failures: Vec<hotkeys::HotkeyFailure>) {
     }
 }
 
-/// Grava/remove a entrada em `HKCU\...\Run` (§13) via `auto-launch`.
-fn apply_autostart(enabled: bool) -> anyhow::Result<()> {
+/// Grava/remove a entrada em `HKCU\...\Run` (§13) via `platform::autostart`.
+fn apply_autostart(enabled: bool) -> crate::error::Result<()> {
     let exe = std::env::current_exe()?;
-    // Entre aspas: o crate grava o valor sem citar, e um caminho com espaços
-    // em entrada não-citada do Run é o clássico unquoted-path.
+    // Entre aspas: caminho com espaços em entrada não-citada do Run é o
+    // clássico unquoted-path.
     let quoted = format!("\"{}\"", exe.display());
-    let auto = auto_launch::AutoLaunchBuilder::new()
-        .set_app_name(APP_NAME)
-        .set_app_path(&quoted)
-        .build()?;
-    if enabled {
-        auto.enable()?;
-    } else if auto.is_enabled().unwrap_or(false) {
-        auto.disable()?;
-    }
-    Ok(())
+    platform::autostart::set(APP_NAME, &quoted, enabled)
 }
 
 /// Aplica `WS_EX_LAYERED` (alfa 255, opaco) a toda janela de overlay de

@@ -509,6 +509,16 @@ impl eframe::App for RustShotApp {
         #[cfg(windows)]
         remove_root_from_alt_tab();
 
+        // 0a'. Overlays de seleção como janelas em camadas (alfa 255): uma
+        // janela topo-de-tudo que cobre exatamente o monitor é promovida pelo
+        // DWM/driver a direct/independent flip, e a troca de modo de scanout
+        // apaga o monitor por ~1 s em algumas GPUs (visível a olho, invisível
+        // em gravações). Janela layered é sempre composta — nunca promovida.
+        #[cfg(windows)]
+        if matches!(self.shared.lock().unwrap().flow, Flow::Selecting(_)) {
+            make_overlays_layered();
+        }
+
         // 0b. Alt+F4 na janela-raiz (alcançável por engano) encerraria o app
         // inteiro, descartando bandeja e edição em andamento. Só o "Sair" do
         // menu (quit=true) pode fechar o viewport-raiz.
@@ -584,6 +594,38 @@ fn apply_autostart(enabled: bool) -> anyhow::Result<()> {
         auto.disable()?;
     }
     Ok(())
+}
+
+/// Aplica `WS_EX_LAYERED` (alfa 255, opaco) a toda janela de overlay de
+/// seleção. Idempotente: só escreve quando o estilo ainda não está aplicado.
+#[cfg(windows)]
+fn make_overlays_layered() {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        FindWindowExW, GetWindowLongPtrW, SetLayeredWindowAttributes, SetWindowLongPtrW,
+        GWL_EXSTYLE, LWA_ALPHA, WS_EX_LAYERED,
+    };
+
+    let title: Vec<u16> = "RustShot — seleção de região"
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    // SAFETY: enumeração de janelas top-level do próprio título; ponteiros
+    // válidos pelo escopo de `title`.
+    unsafe {
+        let mut prev = std::ptr::null_mut();
+        loop {
+            let hwnd = FindWindowExW(std::ptr::null_mut(), prev, std::ptr::null(), title.as_ptr());
+            if hwnd.is_null() {
+                break;
+            }
+            let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+            if ex & WS_EX_LAYERED as isize == 0 {
+                SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED as isize);
+                SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
+            }
+            prev = hwnd;
+        }
+    }
 }
 
 /// Remove a janela-raiz do Alt-Tab: `WS_EX_APPWINDOW` → `WS_EX_TOOLWINDOW`.

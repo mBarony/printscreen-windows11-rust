@@ -89,10 +89,22 @@ impl RustShotApp {
         let config = loaded.config;
 
         // Honra "Iniciar com o Windows" persistido (CA-07) — também corrige o
-        // caminho no registro caso o exe tenha sido movido.
-        if let Err(err) = apply_autostart(config.start_with_windows) {
-            log::warn!("não foi possível sincronizar autostart: {err:#}");
+        // caminho no registro caso o exe tenha sido movido. Só sincroniza
+        // quando o config veio de disco: se o arquivo não pôde ser lido ou
+        // gravado (pasta somente-leitura), o padrão `false` removeria do
+        // registro um autostart que o usuário ativou em sessão anterior.
+        if !loaded.created {
+            if let Err(err) = apply_autostart(config.start_with_windows) {
+                log::warn!("não foi possível sincronizar autostart: {err:#}");
+            }
         }
+
+        // A janela-raiz é visível para o SO (ver main.rs), mas não deve
+        // aparecer no Alt-Tab/Win-Tab: troca WS_EX_APPWINDOW por
+        // WS_EX_TOOLWINDOW — o `with_taskbar(false)` do winit remove apenas o
+        // botão da barra de tarefas (ITaskbarList::DeleteTab), não o switcher.
+        #[cfg(windows)]
+        remove_root_from_alt_tab();
 
         let mut hotkeys = match Hotkeys::new() {
             Ok(h) => Some(h),
@@ -484,6 +496,20 @@ impl RustShotApp {
 
 impl eframe::App for RustShotApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // 0a. Mantém a janela-raiz fora do Alt-Tab (o winit pode reescrever o
+        // estilo; a checagem é barata e só escreve quando necessário).
+        #[cfg(windows)]
+        remove_root_from_alt_tab();
+
+        // 0b. Alt+F4 na janela-raiz (alcançável por engano) encerraria o app
+        // inteiro, descartando bandeja e edição em andamento. Só o "Sair" do
+        // menu (quit=true) pode fechar o viewport-raiz.
+        if ctx.input(|i| i.viewport().close_requested())
+            && !self.shared.lock().unwrap().quit
+        {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        }
+
         // 1. Eventos externos (atalhos e bandeja).
         for event in events::drain() {
             match event {
@@ -551,9 +577,12 @@ fn toast_hotkey_failures(failures: Vec<hotkeys::HotkeyFailure>) {
 /// Grava/remove a entrada em `HKCU\...\Run` (§13) via `auto-launch`.
 fn apply_autostart(enabled: bool) -> anyhow::Result<()> {
     let exe = std::env::current_exe()?;
+    // Entre aspas: o crate grava o valor sem citar, e um caminho com espaços
+    // em entrada não-citada do Run é o clássico unquoted-path.
+    let quoted = format!("\"{}\"", exe.display());
     let auto = auto_launch::AutoLaunchBuilder::new()
         .set_app_name(APP_NAME)
-        .set_app_path(&exe.to_string_lossy())
+        .set_app_path(&quoted)
         .build()?;
     if enabled {
         auto.enable()?;
@@ -561,6 +590,32 @@ fn apply_autostart(enabled: bool) -> anyhow::Result<()> {
         auto.disable()?;
     }
     Ok(())
+}
+
+/// Remove a janela-raiz do Alt-Tab: `WS_EX_APPWINDOW` → `WS_EX_TOOLWINDOW`.
+/// Idempotente e barata (só escreve quando o estilo está errado): o winit
+/// reaplica as flags dele em operações como o `set_visible` pós-1º-frame,
+/// então a correção é verificada a cada `update` em vez de uma única vez.
+#[cfg(windows)]
+fn remove_root_from_alt_tab() {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        FindWindowW, GetWindowLongPtrW, SetWindowLongPtrW, GWL_EXSTYLE, WS_EX_APPWINDOW,
+        WS_EX_TOOLWINDOW,
+    };
+
+    let title: Vec<u16> = APP_NAME.encode_utf16().chain(std::iter::once(0)).collect();
+    // SAFETY: FindWindowW/Get/SetWindowLongPtrW com HWND da janela do próprio
+    // processo; ponteiros válidos pelo escopo de `title`.
+    unsafe {
+        let hwnd = FindWindowW(std::ptr::null(), title.as_ptr());
+        if !hwnd.is_null() {
+            let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+            let wanted = (ex & !(WS_EX_APPWINDOW as isize)) | WS_EX_TOOLWINDOW as isize;
+            if ex != wanted {
+                SetWindowLongPtrW(hwnd, GWL_EXSTYLE, wanted);
+            }
+        }
+    }
 }
 
 fn open_folder(dir: &std::path::Path) {

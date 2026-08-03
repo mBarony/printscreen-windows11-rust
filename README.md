@@ -2,7 +2,7 @@
 
 Aplicação standalone de captura de tela para **Windows 11 (x64)**, escrita em Rust. Um único `rustshot.exe`, sem instalador e sem runtime externo: roda em segundo plano na bandeja do sistema e oferece três modos de captura por atalhos globais configuráveis.
 
-> Implementação da [Especificação Técnica v1.0](#especificação) (RustShot v1.0).
+> Implementação da [Especificação Técnica v1.0](#especificação) (RustShot v1.1).
 
 ## Funcionalidades
 
@@ -17,7 +17,7 @@ Aplicação standalone de captura de tela para **Windows 11 (x64)**, escrita em 
 - **Bandeja do sistema**: a aplicação não tem janela principal — menu com os três modos, abrir pasta de capturas, configurações, "Iniciar com o Windows" e Sair.
 - **Configuração persistente** em `config.json` (leitura tolerante; arquivo corrompido é renomeado para `.bak` e recriado). Alterações têm efeito imediato, sem reiniciar.
 - **Instância única**: uma segunda instância notifica e encerra.
-- JPG por padrão; nomes `screenshot_2026-08-02_14-30-05.jpg` com sufixos `_1`, `_2`… em caso de colisão; toast de confirmação a cada captura salva.
+- Saída sempre em JPG (qualidade 90); nomes `screenshot_2026-08-02_14-30-05.jpg` com sufixos `_1`, `_2`… em caso de colisão; toast de confirmação a cada captura salva.
 
 ## Build
 
@@ -47,7 +47,6 @@ Local padrão: `config.json` — criado no mesmo diretório que o executável co
   "version": 1,
   "output_dir": "C:\\Users\\voce\\Pictures\\RustShot",
   "filename_template": "screenshot_{date}_{time}",
-  "image_format": "png",
   "fullscreen_scope": "all_monitors",
   "hotkeys": {
     "fullscreen": { "modifiers": ["CTRL"], "code": "PrintScreen" },
@@ -64,7 +63,7 @@ Local padrão: `config.json` — criado no mesmo diretório que o executável co
 ```
 
 - `output_dir` vazio ⇒ padrão `Imagens\RustShot` (respeita redirecionamento do OneDrive). Se a pasta configurada não puder ser criada, a aplicação usa o padrão e notifica.
-- `image_format`: `"jpg"` (padrão) ou `"jpg"` (qualidade 90).
+- Formato de saída: **JPG (qualidade 90), sempre** — não há campo de formato; um `image_format` legado (v1.0) no arquivo é ignorado.
 - `fullscreen_scope`: `"all_monitors"` | `"primary"` | `"monitor_under_cursor"`.
 - `modifiers`/`code` usam os nomes dos tipos do crate `global-hotkey` (`CTRL`, `SHIFT`, `ALT`, `WIN` e códigos W3C como `PrintScreen`, `KeyA`, `F5`…).
 - Campos ausentes assumem o padrão; a janela de Configurações (menu da bandeja) edita tudo isso com validação e aviso de conflito entre os três atalhos.
@@ -74,7 +73,7 @@ abre a Ferramenta de Captura nativa, e `Win+Shift+S` é reservado pelo sistema.
 
 ## Arquitetura (resumo)
 
-Processo único, event loop único (`eframe`/`egui` com o viewport principal oculto);
+Processo único, event loop único (`eframe`/`egui` com o viewport principal de 1×1 px fora da área visível — visível para o SO, imperceptível para o usuário);
 overlay de seleção (uma janela por monitor, sempre no topo, com a captura congelada e
 véu escuro) e editor abrem como viewports adicionais sob demanda. Atalhos globais
 (`global-hotkey`) e menu da bandeja (`tray-icon`) acordam a UI via fila de eventos +
@@ -131,6 +130,7 @@ Diretas (versões completas travadas no `Cargo.lock`):
 
 - **Widget de atalho**: a tecla `PrtScr` não chega como evento de teclado do egui, então o "clique e pressione a combinação" é complementado por seletores explícitos de modificadores + tecla (único caminho para `PrintScreen`, que já vem nos padrões).
 - **Módulo extra** `settings.rs` para a janela de configurações.
+- **v1.1**: saída fixa em JPG (qualidade 90) e todo o estado ao lado do exe — a v1.0 usava PNG por padrão e `%APPDATA%\RustShot`. O retângulo preto que aparecia no canto do monitor era o viewport-raiz "oculto" do eframe: uma janela realmente invisível não recebe `WM_PAINT` e mataria os atalhos, então a solução é o oposto — a janela fica **visível para o SO**, mas com 1×1 px, fora da área da tela (-32000,-32000), sem ativação, sem redimensionar/maximizar, fora do Alt-Tab (`WS_EX_TOOLWINDOW`) e imune a Alt+F4.
 
 
 ## Limitações conhecidas (v1)
@@ -140,6 +140,7 @@ Diretas (versões completas travadas no `Cargo.lock`):
 - A seleção de região fica contida no monitor onde o arrasto começou.
 - Formas não são editáveis/movíveis após criadas (undo/redo apenas).
 - Toasts aparecem com origem "Windows PowerShell" enquanto o exe não tem AUMID registrado (comportamento padrão de apps não instalados).
+- "Iniciar com o Windows" grava o caminho absoluto do exe em `HKCU\...\Run`: mover ou renomear a pasta quebra o autostart até o app ser aberto manualmente (ele então corrige o registro); apagar a pasta com o recurso ativo deixa uma entrada órfã (inofensiva) — desative antes de "desinstalar".
 - Interface em pt-BR (multi-idioma no roadmap).
 
 ## Desenvolvimento

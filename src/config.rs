@@ -1,11 +1,11 @@
 //! Carga, validação e persistência do `config.json` (§6 da especificação).
 //!
-//! Localização: por padrão o arquivo fica em `%APPDATA%\RustShot\config.json`
-//! (todo o estado da aplicação vive nessa pasta, §13). Modo portátil: se já
-//! existir um `config.json` ao lado do executável, ele tem precedência — crie
-//! um arquivo vazio ao lado do exe para optar por esse modo.
+//! Localização: todo o estado (`config.json` + `rustshot.log`) fica **na
+//! mesma pasta do executável** — a aplicação é portátil por definição;
+//! desinstalar = apagar a pasta.
 //!
-//! Leitura tolerante: campos ausentes assumem o padrão; JSON corrompido é
+//! Leitura tolerante: campos ausentes assumem o padrão e campos desconhecidos
+//! (ex.: `image_format` de versões antigas) são ignorados; JSON corrompido é
 //! renomeado para `config.json.bak` e um novo arquivo é criado com padrões.
 
 use std::path::{Path, PathBuf};
@@ -27,7 +27,6 @@ pub struct Config {
     pub output_dir: String,
     /// Template do nome do arquivo; tokens `{date}` e `{time}`.
     pub filename_template: String,
-    pub image_format: ImageFormat,
     pub fullscreen_scope: FullscreenScope,
     pub hotkeys: HotkeysConfig,
     pub editor: EditorConfig,
@@ -40,30 +39,10 @@ impl Default for Config {
             version: 1,
             output_dir: String::new(),
             filename_template: "screenshot_{date}_{time}".into(),
-            image_format: ImageFormat::Png,
             fullscreen_scope: FullscreenScope::AllMonitors,
             hotkeys: HotkeysConfig::default(),
             editor: EditorConfig::default(),
             start_with_windows: false,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ImageFormat {
-    /// PNG RGBA 8 bits — formato padrão (RF-07).
-    Png,
-    /// JPG qualidade 90 (aceito por compatibilidade; RF-01 menciona JPG).
-    #[serde(alias = "jpeg")]
-    Jpg,
-}
-
-impl ImageFormat {
-    pub fn extension(self) -> &'static str {
-        match self {
-            Self::Png => "png",
-            Self::Jpg => "jpg",
         }
     }
 }
@@ -150,26 +129,34 @@ impl Default for EditorConfig {
 // Caminhos
 // ---------------------------------------------------------------------------
 
-/// Pasta de estado da aplicação: `%APPDATA%\RustShot`.
-pub fn app_data_dir() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(std::env::temp_dir)
-        .join(APP_NAME)
+/// Pasta de estado da aplicação: a mesma pasta do executável (portátil).
+/// Fallback improvável (exe sem pasta-pai resolvível): subpasta própria no
+/// temp — nunca a raiz do temp, onde um `config.json` alheio poderia colidir.
+pub fn state_dir() -> PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf))
+        .unwrap_or_else(|| std::env::temp_dir().join(APP_NAME))
 }
 
-/// Caminho efetivo do `config.json` (modo portátil tem precedência).
-pub fn config_path() -> PathBuf {
-    if let Some(portable) = portable_config_path() {
-        if portable.exists() {
-            return portable;
+/// `true` se a pasta de estado aceita escrita (sonda criada e removida).
+/// Exe em pasta somente-leitura (ex.: `Program Files` sem elevação) faria
+/// config/log falharem em silêncio — o chamador avisa o usuário.
+pub fn state_dir_writable() -> bool {
+    let probe = state_dir().join(".rustshot-write-probe");
+    match std::fs::OpenOptions::new().write(true).create(true).open(&probe) {
+        Ok(file) => {
+            drop(file);
+            let _ = std::fs::remove_file(&probe);
+            true
         }
+        Err(_) => false,
     }
-    app_data_dir().join("config.json")
 }
 
-fn portable_config_path() -> Option<PathBuf> {
-    let exe = std::env::current_exe().ok()?;
-    Some(exe.parent()?.join("config.json"))
+/// Caminho do `config.json`, ao lado do executável.
+pub fn config_path() -> PathBuf {
+    state_dir().join("config.json")
 }
 
 /// Pasta de destino padrão das capturas: `Imagens\RustShot`.
@@ -206,7 +193,7 @@ pub fn load() -> LoadedConfig {
     let path = config_path();
     match std::fs::read_to_string(&path) {
         Ok(text) if text.trim().is_empty() => {
-            // Arquivo vazio (ex.: marcador de modo portátil): recria padrões.
+            // Arquivo vazio (criado manualmente ou truncado): recria padrões.
             let config = Config::default();
             let _ = save(&config);
             LoadedConfig { config, created: true, recovered: false }
@@ -222,10 +209,16 @@ pub fn load() -> LoadedConfig {
                 LoadedConfig { config, created: false, recovered: true }
             }
         },
-        Err(_) => {
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
             let config = Config::default();
             let _ = save(&config);
             LoadedConfig { config, created: true, recovered: false }
+        }
+        Err(err) => {
+            // Erro transitório (lock de antivírus/sync, ACL): NÃO sobrescreve
+            // o arquivo do usuário; usa padrões apenas nesta sessão.
+            log::warn!("config.json ilegível ({err}); usando padrões nesta sessão");
+            LoadedConfig { config: Config::default(), created: false, recovered: false }
         }
     }
 }
@@ -299,7 +292,14 @@ mod tests {
         let cfg: Config = serde_json::from_str(r#"{ "output_dir": "C:\\x" }"#).unwrap();
         assert_eq!(cfg.output_dir, "C:\\x");
         assert_eq!(cfg.filename_template, "screenshot_{date}_{time}");
-        assert_eq!(cfg.image_format, ImageFormat::Png);
         assert_eq!(cfg.hotkeys.fullscreen.code, "PrintScreen");
+    }
+
+    #[test]
+    fn old_config_with_image_format_still_loads() {
+        // Configs da v1.0 traziam "image_format"; o campo é ignorado hoje.
+        let cfg: Config =
+            serde_json::from_str(r#"{ "image_format": "png", "output_dir": "C:\\y" }"#).unwrap();
+        assert_eq!(cfg.output_dir, "C:\\y");
     }
 }

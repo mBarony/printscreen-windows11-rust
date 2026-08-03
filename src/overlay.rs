@@ -216,7 +216,7 @@ pub fn overlay_ui(ctx: &egui::Context, session: &mut SelectSession, idx: usize) 
             // --- Guias em cruz sob o cursor ---
             if let Some(p) = pointer_pts {
                 if session.drag.is_none() {
-                    let guide = Stroke::new(1.0, Color32::from_white_alpha(70));
+                    let guide = Stroke::new(1.0_f32, Color32::from_white_alpha(70));
                     painter.line_segment(
                         [Pos2::new(full.min.x, p.y), Pos2::new(full.max.x, p.y)],
                         guide,

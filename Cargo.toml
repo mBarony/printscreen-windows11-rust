@@ -1,6 +1,6 @@
 [package]
 name = "rustshot"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2021"
 description = "Captura de tela para Windows 11 — tela cheia, região e edição com anotações"
 license = "BSD-3-Clause"
@@ -14,20 +14,20 @@ global-hotkey = "0.7"      # atalhos globais
 tray-icon = "0.21"         # bandeja do sistema
 xcap = "0.6"               # captura de tela multi-monitor
 arboard = "3.5"            # área de transferência (imagem)
-image = "0.25"             # PNG/JPG, crop, composição
+image = "0.25"             # JPG, crop, composição
 tiny-skia = "0.11"         # rasterização vetorial na exportação
 ab_glyph = "0.2"           # rasterização de texto na exportação
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chrono = "0.4"             # data/hora no nome do arquivo
-dirs = "6"                 # %APPDATA%, pasta Imagens
+dirs = "6"                 # pasta Imagens (destino padrão)
 rfd = "0.15"               # diálogo nativo de seleção de pasta
 notify-rust = "4"          # toasts do Windows
 auto-launch = "0.5"        # iniciar com o Windows (HKCU\...\Run)
 single-instance = "0.3"    # instância única
 anyhow = "1"
 log = "0.4"
-simplelog = "0.12"         # log em %APPDATA%\RustShot\rustshot.log
+simplelog = "0.12"         # rustshot.log na pasta do executável
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [

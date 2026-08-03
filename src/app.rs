@@ -459,9 +459,12 @@ impl RustShotApp {
                     (img_h + 110.0).clamp(480.0, 860.0),
                 );
                 let builder = egui::ViewportBuilder::default()
-                    .with_title("RustShot — Editor")
+                    .with_title(editor::WINDOW_TITLE)
                     .with_inner_size(size)
                     .with_min_inner_size(egui::Vec2::new(560.0, 400.0))
+                    // Nasce ativa: o usuário deve poder usar Ctrl+C/Ctrl+S
+                    // logo após a seleção, sem clicar na janela antes.
+                    .with_active(true)
                     .with_icon(self.window_icon.clone());
                 let state = self.shared.clone();
                 ctx.show_viewport_deferred(id, builder, move |ctx, _class| {

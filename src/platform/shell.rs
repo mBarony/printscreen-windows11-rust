@@ -360,6 +360,58 @@ mod imp {
         }
     }
 
+    /// Traz para o primeiro plano a janela de titulo `title` deste processo,
+    /// **com foco de teclado**. Retorna `false` se a janela nao existe.
+    ///
+    /// Um `SetForegroundWindow` simples e' recusado pelo Windows quando o
+    /// processo nao detem o primeiro plano (foreground lock) — exatamente o
+    /// caso do editor, que nasce logo depois de o overlay fechar e devolver
+    /// o primeiro plano para o app que estava atras. A saida documentada e'
+    /// anexar a fila de entrada da thread que detem o primeiro plano, o que
+    /// faz o Windows tratar a chamada como vinda dela.
+    pub fn focus_window(title: &str) -> bool {
+        use windows_sys::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
+        use windows_sys::Win32::UI::Input::KeyboardAndMouse::SetFocus;
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            BringWindowToTop, FindWindowW, GetForegroundWindow, GetWindowThreadProcessId,
+            IsIconic, SetForegroundWindow, ShowWindow, SW_RESTORE,
+        };
+
+        let wide_title = wide(title);
+        // SAFETY: janelas do proprio processo; os handles sao verificados e o
+        // AttachThreadInput e' desfeito no mesmo escopo.
+        unsafe {
+            let hwnd = FindWindowW(std::ptr::null(), wide_title.as_ptr());
+            if hwnd.is_null() {
+                return false;
+            }
+            if IsIconic(hwnd) != 0 {
+                ShowWindow(hwnd, SW_RESTORE);
+            }
+
+            let foreground = GetForegroundWindow();
+            let fg_thread = if foreground.is_null() {
+                0
+            } else {
+                GetWindowThreadProcessId(foreground, std::ptr::null_mut())
+            };
+            let this_thread = GetCurrentThreadId();
+
+            let attached = fg_thread != 0
+                && fg_thread != this_thread
+                && AttachThreadInput(this_thread, fg_thread, 1) != 0;
+
+            SetForegroundWindow(hwnd);
+            BringWindowToTop(hwnd);
+            SetFocus(hwnd);
+
+            if attached {
+                AttachThreadInput(this_thread, fg_thread, 0);
+            }
+            true
+        }
+    }
+
     /// Remove o ícone da bandeja (saída limpa do app).
     pub fn remove_icon() {
         let hwnd = HWND_SHELL.load(Ordering::SeqCst);
@@ -379,7 +431,8 @@ mod imp {
 
 #[cfg(windows)]
 pub use imp::{
-    init, register_hotkey, remove_icon, set_menu_checked, show_balloon, unregister_hotkey,
+    focus_window, init, register_hotkey, remove_icon, set_menu_checked, show_balloon,
+    unregister_hotkey,
 };
 
 // ---------------------------------------------------------------------------
@@ -414,3 +467,8 @@ pub fn unregister_hotkey(_id: i32) {}
 
 #[cfg(not(windows))]
 pub fn remove_icon() {}
+
+#[cfg(not(windows))]
+pub fn focus_window(_title: &str) -> bool {
+    false
+}

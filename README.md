@@ -163,6 +163,9 @@ cargo check --target x86_64-pc-windows-msvc
 
 O CI (GitHub Actions) compila em `windows-latest`, roda clippy + testes e publica o `rustshot.exe` como artefato.
 
+Relatório de testes da v1.1 (método e resultados, incluindo auditoria de
+segurança): [docs/relatorio-de-testes-v1.1.md](docs/relatorio-de-testes-v1.1.md).
+
 ## Licença
 
 Código sob [BSD 3-Clause](LICENSE). A fonte embutida

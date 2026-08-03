@@ -4,6 +4,12 @@
 > v1.2 o fluxo "Capturar região" mudou: soltar o arrasto **não** salva/copia
 > mais automaticamente — a seleção fica na tela até `Ctrl+C` (copiar) ou
 > `Ctrl+S` (salvar), e no editor o `Ctrl+C` também fecha a janela.
+>
+> **Nota (v1.3):** as dependências de conveniência foram substituídas por
+> código Win32 próprio (ver README, "Dependências"). As notificações passaram
+> de toasts WinRT para balões da bandeja, e a conclusão da auditoria da seção
+> 6.1 fica ainda mais direta: além de nenhum crate de rede, o binário deixou
+> de conter as pilhas WinRT/COM de notificação e os codecs não usados.
 
 **Data:** 02–03/08/2026 · **Ambiente:** Windows 11 Pro, GPU NVIDIA, monitor 4K (3840×2160) com escala 150% · **Toolchain:** Rust 1.97 stable MSVC · **Smart App Control:** ativo (modo imposição)
 

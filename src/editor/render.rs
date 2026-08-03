@@ -5,7 +5,7 @@
 //! A fonte usada aqui é a mesma TTF embutida carregada no egui
 //! (`crate::editor::FONT_BYTES`), e o cálculo de escala/baseline espelha o do
 //! epaint (`as_scaled(px)`, baseline = topo + ascent) — garantindo WYSIWYG
-//! entre o editor e o PNG final (CA-04).
+//! entre o editor e o JPG final (CA-04).
 
 use ab_glyph::{Font as _, FontRef, ScaleFont as _};
 use anyhow::{anyhow, Context as _, Result};

@@ -9,8 +9,12 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context as _, Result};
 use image::RgbaImage;
 
-use crate::config::{Config, ImageFormat};
+use crate::config::Config;
 use crate::notify;
+
+/// Formato único de saída: JPG (sem alfa) com esta qualidade.
+const JPG_QUALITY: u8 = 90;
+const EXTENSION: &str = "jpg";
 
 /// Snapshot dos campos de configuração de que o salvamento precisa —
 /// congelado no momento da captura para não depender de mutações posteriores.
@@ -18,7 +22,6 @@ use crate::notify;
 pub struct SaveTarget {
     pub output_dir: PathBuf,
     pub filename_template: String,
-    pub format: ImageFormat,
 }
 
 impl SaveTarget {
@@ -26,7 +29,6 @@ impl SaveTarget {
         Self {
             output_dir: config.effective_output_dir(),
             filename_template: config.filename_template.clone(),
-            format: config.image_format,
         }
     }
 }
@@ -59,8 +61,10 @@ pub fn ensure_output_dir(target: &SaveTarget) -> Result<PathBuf> {
     }
 }
 
-/// Expande o template (`{date}`, `{time}`) e resolve colisões com `_1`, `_2`…
-pub fn next_free_path(dir: &Path, template: &str, extension: &str) -> PathBuf {
+/// Expande o template (`{date}`, `{time}`) em um stem saneado, sem extensão
+/// (o formato é fixo, então `shot.jpg`/`nome.png` digitados no template não
+/// devem virar `shot.jpg.jpg`).
+fn expand_stem(template: &str) -> String {
     let now = chrono::Local::now();
     let date = now.format("%Y-%m-%d").to_string();
     let time = now.format("%H-%M-%S").to_string();
@@ -69,8 +73,20 @@ pub fn next_free_path(dir: &Path, template: &str, extension: &str) -> PathBuf {
             .replace("{date}", &date)
             .replace("{time}", &time),
     );
-    let stem = if stem.is_empty() { format!("screenshot_{date}_{time}") } else { stem };
+    let mut stem = if stem.is_empty() { format!("screenshot_{date}_{time}") } else { stem };
+    let lower = stem.to_ascii_lowercase();
+    for ext in [".jpg", ".jpeg", ".png"] {
+        if lower.ends_with(ext) && stem.len() > ext.len() {
+            stem.truncate(stem.len() - ext.len());
+            break;
+        }
+    }
+    stem
+}
 
+/// Expande o template e resolve colisões com `_1`, `_2`…
+pub fn next_free_path(dir: &Path, template: &str, extension: &str) -> PathBuf {
+    let stem = expand_stem(template);
     let candidate = dir.join(format!("{stem}.{extension}"));
     if !candidate.exists() {
         return candidate;
@@ -82,6 +98,29 @@ pub fn next_free_path(dir: &Path, template: &str, extension: &str) -> PathBuf {
         }
     }
     unreachable!("sempre há um sufixo livre");
+}
+
+/// Reserva atomicamente o próximo caminho livre com `create_new`: duas
+/// capturas no mesmo segundo (saves em threads paralelas) recebem arquivos
+/// distintos em vez de a segunda truncar a primeira.
+fn claim_free_path(dir: &Path, template: &str) -> Result<(PathBuf, std::fs::File)> {
+    let stem = expand_stem(template);
+    let mut n = 0u32;
+    loop {
+        let name = if n == 0 {
+            format!("{stem}.{EXTENSION}")
+        } else {
+            format!("{stem}_{n}.{EXTENSION}")
+        };
+        let candidate = dir.join(name);
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&candidate) {
+            Ok(file) => return Ok((candidate, file)),
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => n += 1,
+            Err(err) => {
+                return Err(err).with_context(|| format!("criando {}", candidate.display()))
+            }
+        }
+    }
 }
 
 /// Remove caracteres inválidos em nomes de arquivo do Windows.
@@ -97,28 +136,18 @@ fn sanitize_filename(name: &str) -> String {
     cleaned.trim().trim_end_matches('.').to_string()
 }
 
-/// Codifica e grava a imagem; retorna o caminho final.
+/// Codifica e grava a imagem em JPG; retorna o caminho final.
 pub fn write_image(target: &SaveTarget, image: &RgbaImage) -> Result<PathBuf> {
     let dir = ensure_output_dir(target)?;
-    let path = next_free_path(&dir, &target.filename_template, target.format.extension());
 
-    match target.format {
-        ImageFormat::Png => {
-            image
-                .save_with_format(&path, image::ImageFormat::Png)
-                .with_context(|| format!("gravando {}", path.display()))?;
-        }
-        ImageFormat::Jpg => {
-            // JPG não tem alfa: converte para RGB antes de codificar.
-            let rgb = image::DynamicImage::ImageRgba8(image.clone()).to_rgb8();
-            let file = std::fs::File::create(&path)
-                .with_context(|| format!("criando {}", path.display()))?;
-            let mut writer = std::io::BufWriter::new(file);
-            let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut writer, 90);
-            rgb.write_with_encoder(encoder)
-                .with_context(|| format!("gravando {}", path.display()))?;
-        }
-    }
+    // JPG não tem alfa: converte para RGB antes de reservar o caminho, para
+    // manter mínima a janela entre reserva e escrita.
+    let rgb = image::DynamicImage::ImageRgba8(image.clone()).to_rgb8();
+    let (path, file) = claim_free_path(&dir, &target.filename_template)?;
+    let mut writer = std::io::BufWriter::new(file);
+    let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut writer, JPG_QUALITY);
+    rgb.write_with_encoder(encoder)
+        .with_context(|| format!("gravando {}", path.display()))?;
     Ok(path)
 }
 
@@ -150,13 +179,36 @@ mod tests {
     }
 
     #[test]
+    fn template_with_extension_does_not_duplicate() {
+        let dir = std::env::temp_dir().join(format!("rustshot-ext-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = next_free_path(&dir, "shot.jpg", "jpg");
+        assert_eq!(path.file_name().unwrap().to_str().unwrap(), "shot.jpg");
+        let path = next_free_path(&dir, "nome.PNG", "jpg");
+        assert_eq!(path.file_name().unwrap().to_str().unwrap(), "nome.jpg");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn claim_is_atomic_and_sequential() {
+        let dir = std::env::temp_dir().join(format!("rustshot-claim-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (first, f1) = claim_free_path(&dir, "fixed").unwrap();
+        let (second, f2) = claim_free_path(&dir, "fixed").unwrap();
+        drop((f1, f2));
+        assert_eq!(first.file_name().unwrap().to_str().unwrap(), "fixed.jpg");
+        assert_eq!(second.file_name().unwrap().to_str().unwrap(), "fixed_1.jpg");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn collision_suffixes() {
         let dir = std::env::temp_dir().join(format!("rustshot-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let first = next_free_path(&dir, "fixed", "png");
+        let first = next_free_path(&dir, "fixed", "jpg");
         std::fs::write(&first, b"x").unwrap();
-        let second = next_free_path(&dir, "fixed", "png");
-        assert_eq!(second.file_name().unwrap().to_str().unwrap(), "fixed_1.png");
+        let second = next_free_path(&dir, "fixed", "jpg");
+        assert_eq!(second.file_name().unwrap().to_str().unwrap(), "fixed_1.jpg");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

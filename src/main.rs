@@ -1,8 +1,8 @@
 //! RustShot — captura de tela para Windows 11 (bootstrap).
 //!
-//! Responsável por: instância única (RF-08), logging em
-//! `%APPDATA%\RustShot\rustshot.log`, carga do `config.json` e inicialização
-//! do event loop do eframe com o viewport principal **oculto** — a aplicação
+//! Responsável por: instância única (RF-08), logging em `rustshot.log` (na
+//! pasta do executável), carga do `config.json` e inicialização do event loop
+//! do eframe com o viewport principal fora da área visível — a aplicação
 //! vive na bandeja do sistema (RF-06).
 
 #![cfg_attr(windows, windows_subsystem = "windows")]
@@ -26,16 +26,11 @@ const SINGLE_INSTANCE_NAME: &str = "rustshot-single-instance-mutex";
 const LOG_ROTATE_BYTES: u64 = 2 * 1024 * 1024;
 
 fn main() {
-    init_logging();
-    std::panic::set_hook(Box::new(|info| {
-        log::error!("panic: {info}");
-    }));
-
-    // RF-08: apenas uma instância. A segunda notifica e encerra.
+    // RF-08 primeiro: a segunda instância não deve tocar (nem rotacionar) o
+    // log que a instância em execução mantém aberto.
     let _instance = match single_instance::SingleInstance::new(SINGLE_INSTANCE_NAME) {
         Ok(instance) => {
             if !instance.is_single() {
-                log::info!("segunda instância detectada; encerrando");
                 notify::toast_blocking(
                     "RustShot já está em execução",
                     "Use o ícone na bandeja do sistema.",
@@ -44,12 +39,22 @@ fn main() {
             }
             Some(instance)
         }
-        Err(err) => {
-            // Sem o mutex seguimos mesmo assim — pior caso, duas instâncias.
-            log::warn!("verificação de instância única falhou: {err}");
-            None
-        }
+        // Sem o mutex seguimos mesmo assim — pior caso, duas instâncias.
+        Err(_) => None,
     };
+
+    init_logging();
+    std::panic::set_hook(Box::new(|info| {
+        log::error!("panic: {info}");
+    }));
+
+    if !config::state_dir_writable() {
+        log::warn!("pasta do executável sem permissão de escrita");
+        notify::toast_error(
+            "Pasta do executável sem permissão de escrita",
+            "Configurações e log não serão gravados. Mova o RustShot para uma pasta gravável (ex.: Documentos).",
+        );
+    }
 
     let loaded = config::load();
     log::info!(
@@ -58,13 +63,25 @@ fn main() {
         config::config_path().display()
     );
 
+    // O viewport-raiz precisa ficar VISÍVEL para o SO (janela oculta não
+    // recebe WM_PAINT, o `update` nunca roda e atalhos/bandeja morrem), mas
+    // imperceptível para o usuário: 1×1 px, sem decoração, fora da área da
+    // tela, sem ativação e sem redimensionar/maximizar (Win+Seta em uma
+    // janela alcançada por engano maximizaria um retângulo vazio).
+    // `visible(false)` era a causa do retângulo preto: em máquinas onde a
+    // flag não segurava a janela, ela surgia no canto do monitor.
+    // O App ainda a remove do Alt-Tab (WS_EX_TOOLWINDOW) e ignora Alt+F4.
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title(APP_NAME)
-            .with_visible(false)
             .with_decorations(false)
             .with_taskbar(false)
-            .with_inner_size(egui::Vec2::new(320.0, 220.0))
+            .with_active(false)
+            .with_resizable(false)
+            .with_maximize_button(false)
+            .with_minimize_button(false)
+            .with_position(egui::Pos2::new(-32000.0, -32000.0))
+            .with_inner_size(egui::Vec2::new(1.0, 1.0))
             .with_icon(std::sync::Arc::new(app::app_icon_data())),
         persist_window: false,
         centered: false,
@@ -84,7 +101,7 @@ fn main() {
 
 /// Logger em arquivo com rotação simples (`.log` → `.log.old` acima de 2 MB).
 fn init_logging() {
-    let dir = config::app_data_dir();
+    let dir = config::state_dir();
     let _ = std::fs::create_dir_all(&dir);
     let path = dir.join("rustshot.log");
 

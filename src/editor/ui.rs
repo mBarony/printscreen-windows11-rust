@@ -127,14 +127,14 @@ fn toolbar(ctx: &egui::Context, session: &mut EditorSession, target: &SaveTarget
                     painter.rect_stroke(
                         rect,
                         4.0,
-                        Stroke::new(2.0, ui.visuals().strong_text_color()),
+                        Stroke::new(2.0_f32, ui.visuals().strong_text_color()),
                         StrokeKind::Inside,
                     );
                 } else {
                     painter.rect_stroke(
                         rect.shrink(2.0),
                         3.0,
-                        Stroke::new(1.0, Color32::from_gray(90)),
+                        Stroke::new(1.0_f32, Color32::from_gray(90)),
                         StrokeKind::Inside,
                     );
                 }

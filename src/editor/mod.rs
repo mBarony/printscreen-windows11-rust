@@ -15,7 +15,7 @@ use crate::config::{self, EditorConfig};
 use shapes::{Point, ShapeStack, Style, Tool};
 
 /// Fonte TTF embutida (Inter, licença SIL OFL), usada tanto no egui quanto na
-/// exportação — garantindo WYSIWYG entre editor e PNG final (§8).
+/// exportação — garantindo WYSIWYG entre editor e JPG final (§8).
 pub static FONT_BYTES: &[u8] = include_bytes!("../../assets/Inter-Regular.ttf");
 
 pub const STROKE_MIN: f32 = 1.0;

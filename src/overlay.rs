@@ -169,9 +169,15 @@ pub fn overlay_ui(ctx: &egui::Context, session: &mut SelectSession, idx: usize) 
                     })
                     .clone()
             };
+            // 1:1 exato: destino com o tamanho da imagem (independe de o rect
+            // da janela divergir por arredondamento).
+            let image_rect = Rect::from_min_size(
+                full.min,
+                Vec2::new(img_w / ppp, img_h / ppp),
+            );
             painter.image(
                 texture.id(),
-                full,
+                image_rect,
                 Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
                 Color32::WHITE,
             );

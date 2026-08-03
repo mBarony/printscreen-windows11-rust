@@ -123,6 +123,11 @@ fn init_logging() {
     if let Ok(file) = file {
         let config = simplelog::ConfigBuilder::new()
             .set_time_format_rfc3339()
+            // Módulos gráficos são ruidosos (naga chega a despejar código de
+            // shader no Info) — o log é do app, não do renderizador.
+            .add_filter_ignore_str("naga")
+            .add_filter_ignore_str("wgpu")
+            .add_filter_ignore_str("egui_wgpu")
             .build();
         // Build debug loga em nível Debug (diagnóstico de geometria/DPI).
         let level = if cfg!(debug_assertions) {

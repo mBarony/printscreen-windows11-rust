@@ -1,6 +1,11 @@
 # Relatório de Testes — RustShot v1.1
 
-**Data:** 02–03/08/2026 · **Máquina:** Windows 11 Pro (10.0.26200), GPU NVIDIA, monitor Samsung Q85A 4K (3840×2160) com escala 150% · **Toolchain:** Rust 1.97.1 stable MSVC · **Smart App Control:** ativo (modo imposição)
+> **Nota (v1.2):** este relatório é o registro histórico da v1.1. A partir da
+> v1.2 o fluxo "Capturar região" mudou: soltar o arrasto **não** salva/copia
+> mais automaticamente — a seleção fica na tela até `Ctrl+C` (copiar) ou
+> `Ctrl+S` (salvar), e no editor o `Ctrl+C` também fecha a janela.
+
+**Data:** 02–03/08/2026 · **Ambiente:** Windows 11 Pro, GPU NVIDIA, monitor 4K (3840×2160) com escala 150% · **Toolchain:** Rust 1.97 stable MSVC · **Smart App Control:** ativo (modo imposição)
 
 Método geral dos testes de interface: injeção de entrada sintética via Win32
 (`keybd_event` para atalhos globais, `SetCursorPos`+`mouse_event` para
@@ -19,7 +24,7 @@ colisão `_1`/`_2`, template com extensão digitada (sem `.jpg.jpg`), reserva
 atômica de caminho, renderização (dimensões preservadas, linha/texto tocam
 pixels, render vazio = identidade).
 
-## 2. Funcional de ponta a ponta (build release, nesta máquina)
+## 2. Funcional de ponta a ponta (build release, na máquina de testes)
 
 | Teste | Método | Resultado |
 |---|---|---|
@@ -63,9 +68,10 @@ otimizações de tela cheia não mudou (descartaram-se as causas clássicas).
 Conclusão: *unredirection* de janela **OpenGL** de tela cheia pelo driver
 NVIDIA (o backend glow do eframe). Correção: migração do renderizador para
 **wgpu/Direct3D 12** (mesmo caminho DXGI/DWM composto do Snipping Tool).
-Testes pós-migração nesta máquina: todos os fluxos funcionais re-executados
-e exatos (seções 2–3). **Confirmação visual do fim do apagão: depende do
-usuário** (impossível observar o scanout remotamente).
+Testes pós-migração na máquina de testes: todos os fluxos funcionais
+re-executados e exatos (seções 2–3). **Confirmação visual do fim do apagão:
+depende de observação presencial** (impossível observar o scanout
+remotamente).
 
 Correções complementares testadas: pré-carga das texturas do overlay antes
 da criação das janelas (elimina o 1º frame preto da própria janela) e origem

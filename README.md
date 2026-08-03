@@ -24,6 +24,22 @@ Aplicação standalone de captura de tela para **Windows 11 (x64)**, escrita em 
 
 Toolchain: `stable-x86_64-pc-windows-msvc` (Rust 1.81+).
 
+**Script de build** (recomendado) — roda as mesmas verificações do CI, compila
+e relata o artefato:
+
+```powershell
+.\build.ps1                                            # clippy + testes + release
+.\build.ps1 -SkipChecks -Run                           # iteração rápida: compila e abre
+.\build.ps1 -InstallTo "$env:LOCALAPPDATA\RustShot" -Run   # compila, instala e executa
+.\build.ps1 -NewSalt                                   # quando o Smart App Control bloquear (ver abaixo)
+```
+
+Outras opções: `-Dev` (perfil debug), `-Clean`, `-Verbose`. `Get-Help .\build.ps1 -Full`
+mostra a ajuda completa. Se o PowerShell recusar o script por política de
+execução, use `powershell -ExecutionPolicy Bypass -File .\build.ps1`.
+
+Direto pelo cargo, sem o script:
+
 ```powershell
 cargo build --release
 # artefato único:

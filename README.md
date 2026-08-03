@@ -18,7 +18,7 @@ Aplicação standalone de captura de tela para **Windows 11 (x64)**, escrita em 
 - **Configuração persistente** em `config.json` (leitura tolerante; arquivo corrompido é renomeado para `.bak` e recriado). Alterações têm efeito imediato, sem reiniciar.
 - **Instância única**: uma segunda instância notifica e encerra.
 - **Visual Windows 11 (Fluent)**: tema claro/escuro seguindo o sistema, cor de destaque do Windows, cards e cantos arredondados, fonte **Segoe UI Variable** na interface — o texto das anotações permanece na Inter embutida, garantindo que o preview do editor seja idêntico ao JPG exportado.
-- Saída sempre em JPG (qualidade 90); nomes `screenshot_2026-08-02_14-30-05.jpg` com sufixos `_1`, `_2`… em caso de colisão; toast de confirmação a cada captura salva.
+- Saída sempre em JPG (qualidade 90); nomes `screenshot_2026-08-02_14-30-05.jpg` com sufixos `_1`, `_2`… em caso de colisão; notificação de confirmação (balão da bandeja, com o nome e o ícone do RustShot) a cada captura salva.
 
 ## Build
 
@@ -166,7 +166,7 @@ plataforma compilam como stubs, só para rodar os testes de lógica.
 - Atalhos globais não disparam sobre janelas elevadas se o RustShot não estiver elevado.
 - A seleção de região fica contida no monitor onde o arrasto começou.
 - Formas não são editáveis/movíveis após criadas (undo/redo apenas).
-- Toasts aparecem com origem "Windows PowerShell" enquanto o exe não tem AUMID registrado (comportamento padrão de apps não instalados).
+- As notificações usam balões da bandeja; com "Não incomodar"/Assistente de foco ativos o Windows pode suprimi-las (as capturas continuam sendo salvas normalmente — o resultado está na pasta e no log).
 - "Iniciar com o Windows" grava o caminho absoluto do exe em `HKCU\...\Run`: mover ou renomear a pasta quebra o autostart até o app ser aberto manualmente (ele então corrige o registro); apagar a pasta com o recurso ativo deixa uma entrada órfã (inofensiva) — desative antes de "desinstalar".
 - Interface em pt-BR (multi-idioma no roadmap).
 
@@ -195,6 +195,11 @@ O `rustshot.exe` é publicado como artefato **`rustshot-windows-x64`** em cada
 execução do CI: aba **Actions** → run mais recente da `main` → seção
 *Artifacts*. Alternativa: compile localmente com `cargo build --release`
 (seção [Build](#build)).
+
+## Histórico de versões
+
+Ver [CHANGELOG.md](CHANGELOG.md) — da v1.0 (implementação da especificação) à
+v1.3 (código standalone, sem dependências além do núcleo de GUI).
 
 ## Especificação
 

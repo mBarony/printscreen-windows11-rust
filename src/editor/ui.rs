@@ -146,9 +146,9 @@ fn toolbar(ctx: &egui::Context, session: &mut EditorSession, target: &SaveTarget
             if ui.color_edit_button_srgb(&mut rgb).changed() {
                 session.color = [rgb[0], rgb[1], rgb[2], 255];
             }
-
-            ui.separator();
-
+        });
+        ui.add_space(2.0);
+        ui.horizontal_wrapped(|ui| {
             ui.label("Traço");
             let mut stroke = session.stroke_width;
             if ui
@@ -171,14 +171,14 @@ fn toolbar(ctx: &egui::Context, session: &mut EditorSession, target: &SaveTarget
             ui.separator();
 
             if ui
-                .add_enabled(session.stack.can_undo(), egui::Button::new("↶ Desfazer"))
+                .add_enabled(session.stack.can_undo(), egui::Button::new("Desfazer"))
                 .on_hover_text("Ctrl+Z")
                 .clicked()
             {
                 session.stack.undo();
             }
             if ui
-                .add_enabled(session.stack.can_redo(), egui::Button::new("↷ Refazer"))
+                .add_enabled(session.stack.can_redo(), egui::Button::new("Refazer"))
                 .on_hover_text("Ctrl+Y")
                 .clicked()
             {
@@ -423,7 +423,7 @@ fn paint_shape(painter: &egui::Painter, shape: &Shape, ts: ToScreen) {
                 ts.pos(*anchor),
                 Align2::LEFT_TOP,
                 content,
-                FontId::proportional(ts.len(style.font_size)),
+                FontId::new(ts.len(style.font_size), egui::FontFamily::Name(crate::theme::INTER.into())),
                 color32(style.color),
             );
         }
@@ -452,7 +452,7 @@ fn text_input_overlay(ctx: &egui::Context, session: &mut EditorSession, ts: ToSc
         .order(egui::Order::Foreground)
         .show(ctx, |ui| {
             let edit = egui::TextEdit::singleline(&mut input.buffer)
-                .font(FontId::proportional(font_pts))
+                .font(FontId::new(font_pts, egui::FontFamily::Name(crate::theme::INTER.into())))
                 .text_color(color)
                 .hint_text("Texto…")
                 .desired_width(280.0_f32.max(font_pts * 6.0));

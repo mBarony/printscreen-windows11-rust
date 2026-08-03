@@ -17,6 +17,7 @@ Aplicação standalone de captura de tela para **Windows 11 (x64)**, escrita em 
 - **Bandeja do sistema**: a aplicação não tem janela principal — menu com os três modos, abrir pasta de capturas, configurações, "Iniciar com o Windows" e Sair.
 - **Configuração persistente** em `config.json` (leitura tolerante; arquivo corrompido é renomeado para `.bak` e recriado). Alterações têm efeito imediato, sem reiniciar.
 - **Instância única**: uma segunda instância notifica e encerra.
+- **Visual Windows 11 (Fluent)**: tema claro/escuro seguindo o sistema, cor de destaque do Windows, cards e cantos arredondados, fonte **Segoe UI Variable** na interface — o texto das anotações permanece na Inter embutida, garantindo que o preview do editor seja idêntico ao JPG exportado.
 - Saída sempre em JPG (qualidade 90); nomes `screenshot_2026-08-02_14-30-05.jpg` com sufixos `_1`, `_2`… em caso de colisão; toast de confirmação a cada captura salva.
 
 ## Build
@@ -91,6 +92,7 @@ embutida** (Inter) do preview — o que você vê é o que sai no JPG.
 | `overlay.rs` | viewports de seleção de região |
 | `editor/` | `ui.rs` (janela), `shapes.rs` (modelo + undo), `render.rs` (exportação) |
 | `settings.rs` | janela de configurações (RF-05) |
+| `theme.rs` | tema Fluent (Win11): paleta claro/escuro, cor de destaque, fontes, widgets |
 | `clipboard.rs` / `storage.rs` / `tray.rs` / `notify.rs` | cópia, salvamento, bandeja, toasts |
 
 ## Dependências

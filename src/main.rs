@@ -17,6 +17,7 @@ mod notify;
 mod overlay;
 mod settings;
 mod storage;
+mod theme;
 mod tray;
 
 use config::APP_NAME;

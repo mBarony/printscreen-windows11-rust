@@ -67,13 +67,29 @@ pub struct SelectSession {
 }
 
 impl SelectSession {
-    pub fn new(serial: u64, shots: Vec<MonitorShot>, purpose: Purpose) -> Self {
+    /// Cria a sessão e já sobe as texturas das capturas para a GPU pelo
+    /// contexto compartilhado: o primeiro frame de cada overlay só desenha,
+    /// eliminando a janela preta entre a criação da janela e a primeira
+    /// pintura (o upload de um 4K leva dezenas de ms).
+    pub fn new(ctx: &egui::Context, serial: u64, shots: Vec<MonitorShot>, purpose: Purpose) -> Self {
         Self {
             serial,
             purpose,
             monitors: shots
                 .into_iter()
-                .map(|shot| OverlayMonitor { shot, texture: None })
+                .enumerate()
+                .map(|(idx, shot)| {
+                    let color = ColorImage::from_rgba_unmultiplied(
+                        [shot.image.width() as usize, shot.image.height() as usize],
+                        shot.image.as_raw(),
+                    );
+                    let texture = ctx.load_texture(
+                        format!("overlay_{serial}_{idx}"),
+                        color,
+                        TextureOptions::NEAREST,
+                    );
+                    OverlayMonitor { shot, texture: Some(texture) }
+                })
                 .collect(),
             drag: None,
             outcome: None,

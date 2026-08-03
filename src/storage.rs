@@ -84,7 +84,9 @@ fn expand_stem(template: &str) -> String {
     stem
 }
 
-/// Expande o template e resolve colisões com `_1`, `_2`…
+/// Expande o template e resolve colisões com `_1`, `_2`… (produção usa a
+/// variante atômica `claim_free_path`; esta permanece para os testes).
+#[cfg(test)]
 pub fn next_free_path(dir: &Path, template: &str, extension: &str) -> PathBuf {
     let stem = expand_stem(template);
     let candidate = dir.join(format!("{stem}.{extension}"));

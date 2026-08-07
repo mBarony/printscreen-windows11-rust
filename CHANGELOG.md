@@ -2,6 +2,23 @@
 
 Histórico de versões do RustShot. Datas em 2026.
 
+## v1.4.0 — 07/08
+
+- **Anotações reposicionáveis** (issue #2): nova ferramenta **Mover** na
+  toolbar — clicar numa linha, seta, retângulo, elipse ou texto seleciona a
+  anotação (moldura tracejada) e arrastar a reposiciona; a mesclagem com a
+  imagem continua acontecendo só ao salvar/copiar. O desfazer/refazer cobre
+  também os movimentos.
+- **Atalhos de ferramenta e ajuste pela roda** (issue #1): `M`/`L`/`S`/`R`/
+  `E`/`T` selecionam Mover/Linha/Seta/Retângulo/Elipse/Texto; `Ctrl+roda`
+  aumenta/diminui a espessura do traço — ou o tamanho da fonte, com a
+  ferramenta Texto ativa. O zoom, antes em `Ctrl+scroll`, passa para a roda
+  pura (o pan segue no botão do meio).
+- **Desenho começa exatamente no ponto do clique** (issue #3): o início do
+  arrasto era detectado pelo egui só após ~6 pt de movimento, atrasando o
+  preview e deslocando a forma; o rastreio agora usa a posição do press
+  desde o primeiro frame.
+
 ## v1.3.1 — 03/08
 
 - **O editor abre já com o foco do teclado**: depois de selecionar a região no

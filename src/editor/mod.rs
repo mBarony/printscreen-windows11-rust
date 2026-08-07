@@ -28,6 +28,10 @@ pub const WINDOW_TITLE: &str = "RustShot — Editor";
 /// clicar antes de `Ctrl+C`/`Ctrl+S` funcionarem.
 pub const FOCUS_CLAIM_FRAMES: u8 = 12;
 
+/// Tolerância do hit-test ao clicar numa anotação com a ferramenta Mover,
+/// em pontos do egui (convertida para px da imagem pelo zoom).
+pub const HIT_TOLERANCE_PTS: f32 = 6.0;
+
 pub const STROKE_MIN: f32 = 1.0;
 pub const STROKE_MAX: f32 = 12.0;
 pub const FONT_MIN: f32 = 12.0;
@@ -61,6 +65,18 @@ pub struct TextInput {
     pub focus_requested: bool,
 }
 
+/// Arrasto de reposicionamento de uma anotação existente (ferramenta Mover,
+/// issue #2).
+pub struct MoveDrag {
+    /// Índice da forma em `stack.shapes()`.
+    pub index: usize,
+    /// Última posição do ponteiro, em px da imagem.
+    pub last: Point,
+    /// Distância acumulada do arrasto, em px da imagem — distingue clique
+    /// parado de movimento real.
+    pub travel: f32,
+}
+
 /// Estado de uma sessão do editor (uma captura aberta para anotação).
 pub struct EditorSession {
     /// Identificador estável da sessão (diferencia viewports sucessivos).
@@ -78,6 +94,14 @@ pub struct EditorSession {
     pub pan: egui::Vec2,
     pub drag: Option<DragPreview>,
     pub text_input: Option<TextInput>,
+    /// Índice da anotação selecionada (ferramenta Mover).
+    pub selected: Option<usize>,
+    /// Arrasto de reposicionamento em andamento (ferramenta Mover).
+    pub move_drag: Option<MoveDrag>,
+    /// Acumulador do Ctrl+roda (ajuste de traço/fonte): converte tanto os
+    /// notches da roda quanto os deltas contínuos de touchpad em passos
+    /// discretos, sem varrer a faixa inteira num gesto.
+    pub wheel_accum: f32,
     /// Diálogo "descartar anotações?" visível.
     pub confirm_discard: bool,
     /// Frames restantes de tentativa de tomar o foco (zera ao conseguir).
@@ -101,6 +125,9 @@ impl EditorSession {
             pan: egui::Vec2::ZERO,
             drag: None,
             text_input: None,
+            selected: None,
+            move_drag: None,
+            wheel_accum: 0.0,
             confirm_discard: false,
             focus_frames: FOCUS_CLAIM_FRAMES,
             finished: false,

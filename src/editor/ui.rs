@@ -17,9 +17,19 @@ use crate::storage::{self, SaveTarget};
 
 use super::shapes::{arrow_geometry, shape_from_drag, Point, Shape, Tool};
 use super::{
-    DragPreview, EditorSession, TextInput, FONT_MAX, FONT_MIN, PALETTE, STROKE_MAX, STROKE_MIN,
-    ZOOM_MAX, ZOOM_MIN,
+    DragPreview, EditorSession, MoveDrag, TextInput, FONT_MAX, FONT_MIN, HIT_TOLERANCE_PTS,
+    PALETTE, STROKE_MAX, STROKE_MIN, ZOOM_MAX, ZOOM_MIN,
 };
+
+/// Ferramentas da toolbar com seus atalhos de teclado (issue #1).
+const TOOLS: [(Tool, Key, &str); 6] = [
+    (Tool::Select, Key::M, "M — arraste uma anotação para reposicioná-la"),
+    (Tool::Line, Key::L, "L"),
+    (Tool::Arrow, Key::S, "S"),
+    (Tool::Rect, Key::R, "R"),
+    (Tool::Ellipse, Key::E, "E"),
+    (Tool::Text, Key::T, "T"),
+];
 
 /// Transformação imagem → tela (pontos do egui).
 #[derive(Clone, Copy)]
@@ -51,24 +61,42 @@ pub fn show(ctx: &egui::Context, session: &mut EditorSession, target: &SaveTarge
     // Atalhos globais da janela (ficam inativos com a caixa de texto aberta,
     // para não roubar o Ctrl+C/Esc da digitação).
     if session.text_input.is_none() && !session.confirm_discard {
-        let (undo, redo, copy, save, cancel) = ctx.input_mut(|i| {
+        // Atalhos de letra pura não podem roubar a digitação de campos de
+        // texto do egui (ex.: o hex do seletor de cores, o valor dos sliders).
+        let typing = ctx.wants_keyboard_input();
+        let (undo, redo, copy, save, cancel, tool_key) = ctx.input_mut(|i| {
             // O egui-winit converte Ctrl+C em `Event::Copy` (sem emitir
             // `Event::Key`), então o Ctrl+C do editor é detectado pelo
             // evento de cópia — o `consume_key` fica como retaguarda.
             let copy_event = i.events.iter().any(|e| matches!(e, egui::Event::Copy));
+            // Letra pura de verdade: `consume_key(NONE, ..)` aceitaria
+            // Shift/Alt extras (ex.: o Shift segurado para restringir uma
+            // forma), então o gate exige nenhum modificador ativo.
+            let tool_key = (!typing && i.modifiers.is_none())
+                .then(|| {
+                    TOOLS
+                        .into_iter()
+                        .find(|(_, key, _)| i.consume_key(Modifiers::NONE, *key))
+                        .map(|(tool, ..)| tool)
+                })
+                .flatten();
             (
                 i.consume_key(Modifiers::COMMAND, Key::Z),
                 i.consume_key(Modifiers::COMMAND, Key::Y),
                 copy_event || i.consume_key(Modifiers::COMMAND, Key::C),
                 i.consume_key(Modifiers::COMMAND, Key::S),
                 i.consume_key(Modifiers::NONE, Key::Escape),
+                tool_key,
             )
         });
+        if let Some(tool) = tool_key {
+            select_tool(session, tool);
+        }
         if undo {
-            session.stack.undo();
+            perform_undo(session);
         }
         if redo {
-            session.stack.redo();
+            perform_redo(session);
         }
         if copy {
             copy_and_close(session);
@@ -120,6 +148,54 @@ fn claim_focus(ctx: &egui::Context, session: &mut EditorSession) {
 }
 
 // ---------------------------------------------------------------------------
+// Ferramenta ativa e undo/redo
+// ---------------------------------------------------------------------------
+
+/// Troca a ferramenta ativa (clique na toolbar ou atalho de teclado).
+fn select_tool(session: &mut EditorSession, tool: Tool) {
+    if session.tool == tool {
+        return;
+    }
+    // Trocar de ferramenta no meio de um arrasto (possível pelos atalhos de
+    // teclado) cancela o arrasto — um `drag` órfão viraria forma espúria.
+    session.drag = None;
+    cancel_move(session);
+    session.tool = tool;
+    session.selected = None;
+    // Trocar de ferramenta confirma o texto pendente (ou apenas fecha a
+    // caixa, se estiver vazia).
+    if tool != Tool::Text {
+        commit_text_input(session);
+    }
+}
+
+/// Aborta um arrasto de reposicionamento em andamento, restaurando a posição
+/// original da forma (o ponto de undo registrado no início sai do histórico).
+fn cancel_move(session: &mut EditorSession) {
+    if session.move_drag.take().is_some() {
+        session.stack.abort_move();
+    }
+}
+
+/// Ctrl+Z: com um arrasto de reposicionamento em andamento, desfaz só ele;
+/// caso contrário desfaz a última edição. A seleção é limpa porque os
+/// índices das formas podem mudar.
+fn perform_undo(session: &mut EditorSession) {
+    if session.move_drag.take().is_some() {
+        session.stack.abort_move();
+    } else {
+        session.stack.undo();
+    }
+    session.selected = None;
+}
+
+fn perform_redo(session: &mut EditorSession) {
+    cancel_move(session);
+    session.stack.redo();
+    session.selected = None;
+}
+
+// ---------------------------------------------------------------------------
 // Toolbar
 // ---------------------------------------------------------------------------
 
@@ -127,15 +203,14 @@ fn toolbar(ctx: &egui::Context, session: &mut EditorSession, target: &SaveTarget
     egui::TopBottomPanel::top("editor_toolbar").show(ctx, |ui| {
         ui.add_space(4.0);
         ui.horizontal_wrapped(|ui| {
-            for tool in [Tool::Line, Tool::Arrow, Tool::Rect, Tool::Ellipse, Tool::Text] {
+            for (tool, _, hint) in TOOLS {
                 let selected = session.tool == tool;
-                if ui.selectable_label(selected, tool.label()).clicked() {
-                    session.tool = tool;
-                    // Trocar de ferramenta confirma o texto pendente (ou
-                    // apenas fecha a caixa, se estiver vazia).
-                    if tool != Tool::Text {
-                        commit_text_input(session);
-                    }
+                if ui
+                    .selectable_label(selected, tool.label())
+                    .on_hover_text(hint)
+                    .clicked()
+                {
+                    select_tool(session, tool);
                 }
             }
 
@@ -201,14 +276,14 @@ fn toolbar(ctx: &egui::Context, session: &mut EditorSession, target: &SaveTarget
                 .on_hover_text("Ctrl+Z")
                 .clicked()
             {
-                session.stack.undo();
+                perform_undo(session);
             }
             if ui
                 .add_enabled(session.stack.can_redo(), egui::Button::new("Refazer"))
                 .on_hover_text("Ctrl+Y")
                 .clicked()
             {
-                session.stack.redo();
+                perform_redo(session);
             }
 
             ui.separator();
@@ -279,11 +354,36 @@ fn canvas(ctx: &egui::Context, session: &mut EditorSession) {
                 scale: zoom / ppp,
             };
 
-            // --- Zoom com Ctrl+scroll, centrado no cursor (25%–400%) ---
-            let zoom_delta = ui.input(|i| i.zoom_delta());
-            if zoom_delta != 1.0 {
-                if let Some(pointer) = response.hover_pos() {
-                    let new_zoom = (zoom * zoom_delta).clamp(ZOOM_MIN, ZOOM_MAX);
+            // --- Rolagem: a roda pura dá zoom centrado no cursor (25%–400%);
+            // Ctrl+roda ajusta a espessura do traço — ou a fonte, com a
+            // ferramenta Texto ativa (issue #1).
+            let (scroll_y, ctrl) = ui.input(|i| (i.raw_scroll_delta.y, i.modifiers.command));
+            if !ctrl {
+                session.wheel_accum = 0.0;
+            }
+            if scroll_y != 0.0 && response.hovered() {
+                if ctrl {
+                    // Um passo por "linha" de rolagem — um notch da roda vale
+                    // `line_scroll_speed` = 40 pt no egui nativo. Assim a roda
+                    // anda de 1 em 1 por notch (sem perder notches coalescidos
+                    // num frame) e os deltas contínuos de touchpad precisam
+                    // acumular a mesma distância.
+                    const WHEEL_STEP_PTS: f32 = 40.0;
+                    session.wheel_accum += scroll_y;
+                    let steps = (session.wheel_accum / WHEEL_STEP_PTS).trunc();
+                    if steps != 0.0 {
+                        session.wheel_accum -= steps * WHEEL_STEP_PTS;
+                        if session.tool == Tool::Text {
+                            session.font_size =
+                                (session.font_size + steps).round().clamp(FONT_MIN, FONT_MAX);
+                        } else {
+                            session.stroke_width = (session.stroke_width + steps)
+                                .round()
+                                .clamp(STROKE_MIN, STROKE_MAX);
+                        }
+                    }
+                } else if let Some(pointer) = response.hover_pos() {
+                    let new_zoom = (zoom * (scroll_y * 0.002).exp()).clamp(ZOOM_MIN, ZOOM_MAX);
                     if (new_zoom - zoom).abs() > f32::EPSILON {
                         // Mantém o ponto da imagem sob o cursor fixo na tela.
                         let img_pt = to_screen.inverse(pointer);
@@ -306,6 +406,153 @@ fn canvas(ctx: &egui::Context, session: &mut EditorSession) {
                 origin: canvas_rect.min + session.pan,
                 scale: zoom / ppp,
             };
+
+            // --- Interação (botão primário) ---
+            //
+            // O arrasto é rastreado manualmente pelo estado do ponteiro: o
+            // `drag_started_by` do egui só dispara após ~6 pt de movimento
+            // (desambiguação clique×arrasto do `Sense::click_and_drag`), o
+            // que atrasava o preview e fazia a forma nascer deslocada do
+            // ponto exato do press (issue #3). `press_origin` preserva esse
+            // ponto desde o primeiro frame.
+            let clamp_img = |p: Point| Point::new(p.x.clamp(0.0, img_w), p.y.clamp(0.0, img_h));
+            let (primary_down, primary_pressed, primary_released, press_origin, latest_pos) =
+                ui.input(|i| {
+                    (
+                        i.pointer.primary_down(),
+                        i.pointer.primary_pressed(),
+                        i.pointer.primary_released(),
+                        i.pointer.press_origin(),
+                        i.pointer.latest_pos(),
+                    )
+                });
+
+            // Arrasto órfão (o release foi engolido por um modal, a ferramenta
+            // trocou no meio, etc.): sem botão pressionado nem release a
+            // processar neste frame, não há arrasto legítimo — descartar
+            // evita um preview fantasma que viraria forma no próximo clique.
+            if !primary_down && !primary_released {
+                session.drag = None;
+                cancel_move(session);
+            }
+
+            if session.text_input.is_none() && !session.confirm_discard {
+                match session.tool {
+                    Tool::Text => {
+                        if response.hovered() {
+                            ctx.output_mut(|o| o.cursor_icon = CursorIcon::Text);
+                        }
+                        if response.clicked_by(PointerButton::Primary) {
+                            if let Some(p) = response
+                                .interact_pointer_pos()
+                                .or_else(|| response.hover_pos())
+                                .map(|p| to_screen.inverse(p))
+                            {
+                                session.text_input = Some(TextInput {
+                                    anchor: clamp_img(p),
+                                    buffer: String::new(),
+                                    focus_requested: false,
+                                });
+                            }
+                        }
+                    }
+                    Tool::Select => {
+                        if response.hovered() {
+                            let icon = if session.move_drag.is_some() {
+                                CursorIcon::Grabbing
+                            } else {
+                                CursorIcon::Default
+                            };
+                            ctx.output_mut(|o| o.cursor_icon = icon);
+                        }
+                        if session.move_drag.is_none() && primary_pressed && response.hovered() {
+                            // `press_origin` já foi limpo se o release chegou
+                            // no mesmo frame (clique coalescido) — o clique
+                            // ainda deve selecionar.
+                            if let Some(origin) =
+                                press_origin.or_else(|| response.interact_pointer_pos())
+                            {
+                                let p = to_screen.inverse(origin);
+                                let tol = HIT_TOLERANCE_PTS / to_screen.scale;
+                                let hit = session
+                                    .stack
+                                    .shapes()
+                                    .iter()
+                                    .enumerate()
+                                    .rev() // a mais recente (pintada por cima) vence
+                                    .find(|(_, shape)| hit_test(ctx, shape, p, tol, to_screen))
+                                    .map(|(index, _)| index);
+                                session.selected = hit;
+                                if let Some(index) = hit {
+                                    session.stack.begin_move();
+                                    session.move_drag =
+                                        Some(MoveDrag { index, last: p, travel: 0.0 });
+                                }
+                            }
+                        }
+                        if let Some(mv) = &mut session.move_drag {
+                            if let Some(pos) = latest_pos {
+                                let p = to_screen.inverse(pos);
+                                let (dx, dy) = (p.x - mv.last.x, p.y - mv.last.y);
+                                if dx != 0.0 || dy != 0.0 {
+                                    session.stack.translate(mv.index, dx, dy);
+                                    mv.travel += (dx * dx + dy * dy).sqrt();
+                                    mv.last = p;
+                                }
+                            }
+                        }
+                        if primary_released {
+                            if let Some(mv) = session.move_drag.take() {
+                                // Clique parado (sem arrasto real) só
+                                // seleciona: nem o undo nem o redo mudam.
+                                if mv.travel * to_screen.scale < 2.0 {
+                                    session.stack.abort_move();
+                                } else {
+                                    session.stack.end_move();
+                                }
+                            }
+                        }
+                    }
+                    _ => {
+                        if response.hovered() {
+                            ctx.output_mut(|o| o.cursor_icon = CursorIcon::Crosshair);
+                        }
+                        let shift = ui.input(|i| i.modifiers.shift);
+                        if session.drag.is_none() && primary_pressed && response.hovered() {
+                            if let Some(origin) =
+                                press_origin.or_else(|| response.interact_pointer_pos())
+                            {
+                                let p = clamp_img(to_screen.inverse(origin));
+                                session.drag = Some(DragPreview { start: p, current: p, shift });
+                            }
+                        }
+                        if let Some(drag) = &mut session.drag {
+                            if let Some(pos) = latest_pos {
+                                drag.current = clamp_img(to_screen.inverse(pos));
+                            }
+                            drag.shift = shift;
+                        }
+                        if primary_released {
+                            if let Some(drag) = session.drag.take() {
+                                let dx = (drag.current.x - drag.start.x).abs();
+                                let dy = (drag.current.y - drag.start.y).abs();
+                                // Ignora cliques sem arrasto real.
+                                if dx >= 2.0 || dy >= 2.0 {
+                                    if let Some(shape) = shape_from_drag(
+                                        session.tool,
+                                        drag.start,
+                                        drag.current,
+                                        drag.shift,
+                                        session.style(),
+                                    ) {
+                                        session.stack.push(shape);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 
             // --- Desenho: imagem + formas confirmadas + preview ---
             let painter = ui.painter_at(canvas_rect);
@@ -335,66 +582,13 @@ fn canvas(ctx: &egui::Context, session: &mut EditorSession) {
                 }
             }
 
-            // --- Interação de desenho (botão primário) ---
-            let pointer_img = response
-                .hover_pos()
-                .or_else(|| response.interact_pointer_pos())
-                .map(|p| to_screen.inverse(p));
-            let clamp_img = |p: Point| Point::new(p.x.clamp(0.0, img_w), p.y.clamp(0.0, img_h));
-
-            if session.text_input.is_none() && !session.confirm_discard {
-                match session.tool {
-                    Tool::Text => {
-                        if response.hovered() {
-                            ctx.output_mut(|o| o.cursor_icon = CursorIcon::Text);
-                        }
-                        if response.clicked_by(PointerButton::Primary) {
-                            if let Some(p) = pointer_img {
-                                session.text_input = Some(TextInput {
-                                    anchor: clamp_img(p),
-                                    buffer: String::new(),
-                                    focus_requested: false,
-                                });
-                            }
-                        }
-                    }
-                    _ => {
-                        if response.hovered() {
-                            ctx.output_mut(|o| o.cursor_icon = CursorIcon::Crosshair);
-                        }
-                        let shift = ui.input(|i| i.modifiers.shift);
-                        if response.drag_started_by(PointerButton::Primary) {
-                            if let Some(p) = pointer_img {
-                                let p = clamp_img(p);
-                                session.drag =
-                                    Some(DragPreview { start: p, current: p, shift });
-                            }
-                        }
-                        if response.dragged_by(PointerButton::Primary) {
-                            if let (Some(drag), Some(p)) = (&mut session.drag, pointer_img) {
-                                drag.current = clamp_img(p);
-                                drag.shift = shift;
-                            }
-                        }
-                        if response.drag_stopped_by(PointerButton::Primary) {
-                            if let Some(drag) = session.drag.take() {
-                                let dx = (drag.current.x - drag.start.x).abs();
-                                let dy = (drag.current.y - drag.start.y).abs();
-                                // Ignora cliques sem arrasto real.
-                                if dx >= 2.0 || dy >= 2.0 {
-                                    if let Some(shape) = shape_from_drag(
-                                        session.tool,
-                                        drag.start,
-                                        drag.current,
-                                        drag.shift,
-                                        session.style(),
-                                    ) {
-                                        session.stack.push(shape);
-                                    }
-                                }
-                            }
-                        }
-                    }
+            // Contorno tracejado da anotação selecionada (ferramenta Mover).
+            if session.tool == Tool::Select {
+                if let Some(shape) =
+                    session.selected.and_then(|i| session.stack.shapes().get(i))
+                {
+                    let color = ui.visuals().selection.stroke.color;
+                    draw_selection_outline(ctx, &painter, shape, to_screen, color);
                 }
             }
 
@@ -466,6 +660,85 @@ fn paint_shape(painter: &egui::Painter, shape: &Shape, ts: ToScreen) {
 
 fn color32(c: [u8; 4]) -> Color32 {
     Color32::from_rgba_unmultiplied(c[0], c[1], c[2], c[3])
+}
+
+// ---------------------------------------------------------------------------
+// Seleção (ferramenta Mover)
+// ---------------------------------------------------------------------------
+
+/// Layout do texto exatamente como `paint_shape` o pinta (fonte, tamanho em
+/// pontos de tela) — usado para hit-test e caixa de seleção da variante Text.
+fn text_galley(
+    ctx: &egui::Context,
+    content: &str,
+    font_size: f32,
+    ts: ToScreen,
+) -> std::sync::Arc<egui::Galley> {
+    ctx.fonts(|f| {
+        f.layout_no_wrap(
+            content.to_owned(),
+            FontId::new(ts.len(font_size), egui::FontFamily::Name(crate::theme::INTER.into())),
+            Color32::WHITE,
+        )
+    })
+}
+
+/// Hit-test de uma forma no espaço da imagem; a variante Text é medida com a
+/// fonte real para a caixa coincidir com o que está na tela.
+fn hit_test(ctx: &egui::Context, shape: &Shape, p: Point, tol: f32, ts: ToScreen) -> bool {
+    let text_size = match shape {
+        Shape::Text { content, style, .. } => {
+            let size = text_galley(ctx, content, style.font_size, ts).size();
+            (size.x / ts.scale, size.y / ts.scale)
+        }
+        _ => (0.0, 0.0),
+    };
+    shape.hit_test(p, tol, text_size)
+}
+
+/// Retângulo (em pontos de tela) que envolve a forma, traço incluído.
+fn shape_screen_bbox(ctx: &egui::Context, shape: &Shape, ts: ToScreen) -> Rect {
+    match shape {
+        Shape::Line { a, b, style } | Shape::Arrow { a, b, style } => {
+            Rect::from_two_pos(ts.pos(*a), ts.pos(*b)).expand(ts.len(style.stroke_width) / 2.0)
+        }
+        Shape::Rect { min, max, style } => Rect::from_min_max(ts.pos(*min), ts.pos(*max))
+            .expand(ts.len(style.stroke_width) / 2.0),
+        Shape::Ellipse { center, rx, ry, style } => {
+            Rect::from_center_size(ts.pos(*center), Vec2::new(ts.len(*rx), ts.len(*ry)) * 2.0)
+                .expand(ts.len(style.stroke_width) / 2.0)
+        }
+        Shape::Text { anchor, content, style } => {
+            let size = text_galley(ctx, content, style.font_size, ts).size();
+            Rect::from_min_size(ts.pos(*anchor), size)
+        }
+    }
+}
+
+/// Moldura tracejada ao redor da anotação selecionada.
+fn draw_selection_outline(
+    ctx: &egui::Context,
+    painter: &egui::Painter,
+    shape: &Shape,
+    ts: ToScreen,
+    color: Color32,
+) {
+    let rect = shape_screen_bbox(ctx, shape, ts).expand(5.0);
+    let stroke = Stroke::new(1.5_f32, color);
+    let corners = [
+        rect.left_top(),
+        rect.right_top(),
+        rect.right_bottom(),
+        rect.left_bottom(),
+    ];
+    for i in 0..4 {
+        painter.extend(egui::Shape::dashed_line(
+            &[corners[i], corners[(i + 1) % 4]],
+            stroke,
+            4.0,
+            3.0,
+        ));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -580,6 +853,15 @@ fn request_close(session: &mut EditorSession) {
     if session.text_input.is_some() {
         // Primeiro Esc fecha apenas a caixa de texto.
         session.text_input = None;
+        return;
+    }
+    if session.drag.take().is_some() {
+        // Primeiro Esc apenas cancela o arrasto de desenho em andamento.
+        return;
+    }
+    cancel_move(session);
+    if session.selected.take().is_some() {
+        // Primeiro Esc apenas desfaz a seleção.
         return;
     }
     if session.dirty() {

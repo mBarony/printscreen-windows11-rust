@@ -158,6 +158,10 @@ pub struct EditorConfig {
     pub default_color: String,
     pub default_stroke_width: f32,
     pub default_font_size: f32,
+    /// Teclas das ferramentas do editor (issue #4).
+    pub tool_keys: ToolKeysConfig,
+    /// O que o Ctrl+roda ajusta no canvas (issue #4).
+    pub ctrl_wheel: CtrlWheel,
 }
 
 impl Default for EditorConfig {
@@ -166,6 +170,68 @@ impl Default for EditorConfig {
             default_color: "#FF3B30".into(),
             default_stroke_width: 3.0,
             default_font_size: 24.0,
+            tool_keys: ToolKeysConfig::default(),
+            ctrl_wheel: CtrlWheel::default(),
+        }
+    }
+}
+
+/// Uma letra (A–Z) por ferramenta do editor; inválida cai no padrão da
+/// ferramenta ao abrir o editor.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolKeysConfig {
+    pub select: String,
+    pub line: String,
+    pub arrow: String,
+    pub rect: String,
+    pub ellipse: String,
+    pub text: String,
+}
+
+impl Default for ToolKeysConfig {
+    fn default() -> Self {
+        Self {
+            select: "M".into(),
+            line: "L".into(),
+            arrow: "S".into(),
+            rect: "R".into(),
+            ellipse: "E".into(),
+            text: "T".into(),
+        }
+    }
+}
+
+/// Papel da roda do mouse no canvas do editor: o Ctrl+roda ajusta uma das
+/// funções e a roda pura fica com a outra.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CtrlWheel {
+    /// Ctrl+roda ajusta o traço/fonte; a roda pura dá zoom.
+    #[default]
+    StrokeFont,
+    /// Ctrl+roda dá zoom; a roda pura ajusta o traço/fonte.
+    Zoom,
+}
+
+impl CtrlWheel {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::StrokeFont => "Traço/fonte (roda pura dá zoom)",
+            Self::Zoom => "Zoom (roda pura ajusta o traço/fonte)",
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::StrokeFont => "stroke_font",
+            Self::Zoom => "zoom",
+        }
+    }
+
+    fn from_str(text: &str) -> Option<Self> {
+        match text {
+            "stroke_font" => Some(Self::StrokeFont),
+            "zoom" => Some(Self::Zoom),
+            _ => None,
         }
     }
 }
@@ -212,6 +278,14 @@ impl Config {
         };
 
         let editor_value = root.get("editor");
+        let tool_keys_value = editor_value.and_then(|e| e.get("tool_keys"));
+        let tool_key = |key: &str, fallback: &str| -> String {
+            tool_keys_value
+                .and_then(|t| t.get(key))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .unwrap_or_else(|| fallback.to_string())
+        };
         let editor = EditorConfig {
             default_color: editor_value
                 .and_then(|e| e.get("default_color"))
@@ -226,6 +300,19 @@ impl Config {
                 editor_value.and_then(|e| e.get("default_font_size")),
                 defaults.editor.default_font_size,
             ),
+            tool_keys: ToolKeysConfig {
+                select: tool_key("select", &defaults.editor.tool_keys.select),
+                line: tool_key("line", &defaults.editor.tool_keys.line),
+                arrow: tool_key("arrow", &defaults.editor.tool_keys.arrow),
+                rect: tool_key("rect", &defaults.editor.tool_keys.rect),
+                ellipse: tool_key("ellipse", &defaults.editor.tool_keys.ellipse),
+                text: tool_key("text", &defaults.editor.tool_keys.text),
+            },
+            ctrl_wheel: editor_value
+                .and_then(|e| e.get("ctrl_wheel"))
+                .and_then(Value::as_str)
+                .and_then(CtrlWheel::from_str)
+                .unwrap_or(defaults.editor.ctrl_wheel),
         };
 
         Ok(Config {
@@ -273,6 +360,18 @@ impl Config {
                         json::n(self.editor.default_stroke_width as f64),
                     ),
                     ("default_font_size", json::n(self.editor.default_font_size as f64)),
+                    (
+                        "tool_keys",
+                        json::obj(vec![
+                            ("select", json::s(&self.editor.tool_keys.select)),
+                            ("line", json::s(&self.editor.tool_keys.line)),
+                            ("arrow", json::s(&self.editor.tool_keys.arrow)),
+                            ("rect", json::s(&self.editor.tool_keys.rect)),
+                            ("ellipse", json::s(&self.editor.tool_keys.ellipse)),
+                            ("text", json::s(&self.editor.tool_keys.text)),
+                        ]),
+                    ),
+                    ("ctrl_wheel", json::s(self.editor.ctrl_wheel.as_str())),
                 ]),
             ),
             ("start_with_windows", json::b(self.start_with_windows)),
@@ -472,6 +571,8 @@ mod tests {
             editor: EditorConfig {
                 default_color: "#00FF00".into(),
                 default_stroke_width: 5.0,
+                tool_keys: ToolKeysConfig { line: "Q".into(), ..ToolKeysConfig::default() },
+                ctrl_wheel: CtrlWheel::Zoom,
                 ..EditorConfig::default()
             },
             start_with_windows: true,
@@ -481,6 +582,23 @@ mod tests {
         let text = cfg.to_json_text();
         let reparsed = Config::from_json_text(&text).unwrap();
         assert_eq!(reparsed, cfg);
+    }
+
+    #[test]
+    fn tool_keys_absent_or_partial_fall_back_to_defaults() {
+        // Config anterior à issue #4: sem "tool_keys" nem "ctrl_wheel".
+        let cfg = Config::from_json_text(r#"{ "editor": { "default_font_size": 30 } }"#).unwrap();
+        assert_eq!(cfg.editor.tool_keys, ToolKeysConfig::default());
+        assert_eq!(cfg.editor.ctrl_wheel, CtrlWheel::StrokeFont);
+
+        // Parcial: só uma tecla trocada; "ctrl_wheel" com valor desconhecido.
+        let cfg = Config::from_json_text(
+            r#"{ "editor": { "tool_keys": { "rect": "B" }, "ctrl_wheel": "banana" } }"#,
+        )
+        .unwrap();
+        assert_eq!(cfg.editor.tool_keys.rect, "B");
+        assert_eq!(cfg.editor.tool_keys.line, "L");
+        assert_eq!(cfg.editor.ctrl_wheel, CtrlWheel::StrokeFont);
     }
 
     #[test]

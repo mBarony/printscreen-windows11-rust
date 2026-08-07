@@ -14,6 +14,10 @@ Histórico de versões do RustShot. Datas em 2026.
   aumenta/diminui a espessura do traço — ou o tamanho da fonte, com a
   ferramenta Texto ativa. O zoom, antes em `Ctrl+scroll`, passa para a roda
   pura (o pan segue no botão do meio).
+- **Atalhos do editor configuráveis** (issue #4): a janela de Configurações
+  permite trocar a letra de cada ferramenta (com aviso de conflito) e
+  escolher o que o `Ctrl+roda` ajusta — traço/fonte (padrão, zoom na roda
+  pura) ou zoom (ajuste de traço/fonte na roda pura).
 - **Desenho começa exatamente no ponto do clique** (issue #3): o início do
   arrasto era detectado pelo egui só após ~6 pt de movimento, atrasando o
   preview e deslocando a forma; o rastreio agora usa a posição do press

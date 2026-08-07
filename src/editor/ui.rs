@@ -21,15 +21,18 @@ use super::{
     PALETTE, STROKE_MAX, STROKE_MIN, ZOOM_MAX, ZOOM_MIN,
 };
 
-/// Ferramentas da toolbar com seus atalhos de teclado (issue #1).
-const TOOLS: [(Tool, Key, &str); 6] = [
-    (Tool::Select, Key::M, "M — arraste uma anotação para reposicioná-la"),
-    (Tool::Line, Key::L, "L"),
-    (Tool::Arrow, Key::S, "S"),
-    (Tool::Rect, Key::R, "R"),
-    (Tool::Ellipse, Key::E, "E"),
-    (Tool::Text, Key::T, "T"),
-];
+/// Dica de hover de uma ferramenta da toolbar: a tecla configurada (issue
+/// #1/#4) e, para Mover, o que a ferramenta faz.
+fn tool_hint(tool: Tool, key: Option<Key>) -> String {
+    let key_name = match key {
+        Some(key) => key.name().to_string(),
+        None => "sem atalho".to_string(),
+    };
+    match tool {
+        Tool::Select => format!("{key_name} — arraste uma anotação para reposicioná-la"),
+        _ => key_name,
+    }
+}
 
 /// Transformação imagem → tela (pontos do egui).
 #[derive(Clone, Copy)]
@@ -64,6 +67,7 @@ pub fn show(ctx: &egui::Context, session: &mut EditorSession, target: &SaveTarge
         // Atalhos de letra pura não podem roubar a digitação de campos de
         // texto do egui (ex.: o hex do seletor de cores, o valor dos sliders).
         let typing = ctx.wants_keyboard_input();
+        let tool_keys = session.tool_keys;
         let (undo, redo, copy, save, cancel, tool_key) = ctx.input_mut(|i| {
             // O egui-winit converte Ctrl+C em `Event::Copy` (sem emitir
             // `Event::Key`), então o Ctrl+C do editor é detectado pelo
@@ -74,10 +78,12 @@ pub fn show(ctx: &egui::Context, session: &mut EditorSession, target: &SaveTarge
             // forma), então o gate exige nenhum modificador ativo.
             let tool_key = (!typing && i.modifiers.is_none())
                 .then(|| {
-                    TOOLS
+                    tool_keys
                         .into_iter()
-                        .find(|(_, key, _)| i.consume_key(Modifiers::NONE, *key))
-                        .map(|(tool, ..)| tool)
+                        .find(|&(_, key)| {
+                            key.is_some_and(|key| i.consume_key(Modifiers::NONE, key))
+                        })
+                        .map(|(tool, _)| tool)
                 })
                 .flatten();
             (
@@ -203,11 +209,11 @@ fn toolbar(ctx: &egui::Context, session: &mut EditorSession, target: &SaveTarget
     egui::TopBottomPanel::top("editor_toolbar").show(ctx, |ui| {
         ui.add_space(4.0);
         ui.horizontal_wrapped(|ui| {
-            for (tool, _, hint) in TOOLS {
+            for (tool, key) in session.tool_keys {
                 let selected = session.tool == tool;
                 if ui
                     .selectable_label(selected, tool.label())
-                    .on_hover_text(hint)
+                    .on_hover_text(tool_hint(tool, key))
                     .clicked()
                 {
                     select_tool(session, tool);
@@ -354,15 +360,17 @@ fn canvas(ctx: &egui::Context, session: &mut EditorSession) {
                 scale: zoom / ppp,
             };
 
-            // --- Rolagem: a roda pura dá zoom centrado no cursor (25%–400%);
-            // Ctrl+roda ajusta a espessura do traço — ou a fonte, com a
-            // ferramenta Texto ativa (issue #1).
+            // --- Rolagem: uma das funções é o zoom centrado no cursor
+            // (25%–400%) e a outra o ajuste da espessura do traço — ou da
+            // fonte, com a ferramenta Texto ativa (issue #1). Qual delas fica
+            // no Ctrl+roda e qual na roda pura é configurável (issue #4).
             let (scroll_y, ctrl) = ui.input(|i| (i.raw_scroll_delta.y, i.modifiers.command));
-            if !ctrl {
+            let wheel_adjusts_size = ctrl != session.ctrl_wheel_zoom;
+            if !wheel_adjusts_size {
                 session.wheel_accum = 0.0;
             }
             if scroll_y != 0.0 && response.hovered() {
-                if ctrl {
+                if wheel_adjusts_size {
                     // Um passo por "linha" de rolagem — um notch da roda vale
                     // `line_scroll_speed` = 40 pt no egui nativo. Assim a roda
                     // anda de 1 em 1 por notch (sem perder notches coalescidos

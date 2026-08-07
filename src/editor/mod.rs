@@ -92,6 +92,12 @@ pub struct EditorSession {
     pub zoom: Option<f32>,
     /// Deslocamento da origem da imagem dentro do canvas, em pontos do egui.
     pub pan: egui::Vec2,
+    /// Teclas das ferramentas, já resolvidas do config (issue #4); `None` =
+    /// ferramenta sem atalho (a tecla estava tomada por outra).
+    pub tool_keys: [(Tool, Option<egui::Key>); 6],
+    /// `true` = Ctrl+roda dá zoom e a roda pura ajusta o traço/fonte
+    /// (papéis trocados em relação ao padrão, issue #4).
+    pub ctrl_wheel_zoom: bool,
     pub drag: Option<DragPreview>,
     pub text_input: Option<TextInput>,
     /// Índice da anotação selecionada (ferramenta Mover).
@@ -123,6 +129,8 @@ impl EditorSession {
             font_size: defaults.default_font_size.clamp(FONT_MIN, FONT_MAX),
             zoom: None,
             pan: egui::Vec2::ZERO,
+            tool_keys: resolve_tool_keys(&defaults.tool_keys),
+            ctrl_wheel_zoom: defaults.ctrl_wheel == config::CtrlWheel::Zoom,
             drag: None,
             text_input: None,
             selected: None,
@@ -145,5 +153,93 @@ impl EditorSession {
     /// Há anotações que seriam perdidas ao fechar sem salvar?
     pub fn dirty(&self) -> bool {
         !self.stack.is_empty() || self.text_input.is_some()
+    }
+}
+
+/// Resolve as teclas configuradas das ferramentas (issue #4): uma letra A–Z
+/// em qualquer caixa; valor inválido cai no padrão da ferramenta. Teclas já
+/// tomadas por uma ferramenta anterior não são reatribuídas — a ferramenta
+/// fica sem atalho (`None`) em vez de disputar a tecla (config editado à
+/// mão pode criar duplicatas que a UI de Configurações não deixa salvar).
+pub fn resolve_tool_keys(config: &config::ToolKeysConfig) -> [(Tool, Option<egui::Key>); 6] {
+    let defaults = config::ToolKeysConfig::default();
+    let entries = [
+        (Tool::Select, &config.select, &defaults.select),
+        (Tool::Line, &config.line, &defaults.line),
+        (Tool::Arrow, &config.arrow, &defaults.arrow),
+        (Tool::Rect, &config.rect, &defaults.rect),
+        (Tool::Ellipse, &config.ellipse, &defaults.ellipse),
+        (Tool::Text, &config.text, &defaults.text),
+    ];
+    let mut used: Vec<egui::Key> = Vec::new();
+    entries.map(|(tool, configured, fallback)| {
+        let key = parse_tool_key(configured)
+            .filter(|k| !used.contains(k))
+            .or_else(|| parse_tool_key(fallback).filter(|k| !used.contains(k)));
+        if let Some(k) = key {
+            used.push(k);
+        }
+        (tool, key)
+    })
+}
+
+/// Uma letra A–Z (qualquer caixa) → tecla do egui.
+pub fn parse_tool_key(text: &str) -> Option<egui::Key> {
+    let mut chars = text.trim().chars();
+    let c = chars.next()?;
+    if chars.next().is_some() || !c.is_ascii_alphabetic() {
+        return None;
+    }
+    egui::Key::from_name(&c.to_ascii_uppercase().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::ToolKeysConfig;
+
+    #[test]
+    fn resolve_tool_keys_defaults() {
+        let keys = resolve_tool_keys(&ToolKeysConfig::default());
+        assert_eq!(keys[0], (Tool::Select, Some(egui::Key::M)));
+        assert_eq!(keys[5], (Tool::Text, Some(egui::Key::T)));
+    }
+
+    #[test]
+    fn resolve_tool_keys_accepts_lowercase_and_rejects_garbage() {
+        let config = ToolKeysConfig {
+            line: "q".into(),      // caixa baixa vale
+            arrow: "F5".into(),    // mais de um caractere → padrão (S)
+            rect: String::new(),   // vazio → padrão (R)
+            ..ToolKeysConfig::default()
+        };
+        let keys = resolve_tool_keys(&config);
+        assert_eq!(keys[1], (Tool::Line, Some(egui::Key::Q)));
+        assert_eq!(keys[2], (Tool::Arrow, Some(egui::Key::S)));
+        assert_eq!(keys[3], (Tool::Rect, Some(egui::Key::R)));
+    }
+
+    #[test]
+    fn resolve_tool_keys_never_duplicates() {
+        // Config manual: Mover toma "S"; a Seta ("F5" inválida) cairia no
+        // padrão "S", já ocupado → fica sem atalho, sem disputar a tecla.
+        let config = ToolKeysConfig {
+            select: "S".into(),
+            arrow: "F5".into(),
+            ..ToolKeysConfig::default()
+        };
+        let keys = resolve_tool_keys(&config);
+        assert_eq!(keys[0], (Tool::Select, Some(egui::Key::S)));
+        assert_eq!(keys[2], (Tool::Arrow, None));
+
+        // Tecla configurada tomada, mas o padrão da ferramenta está livre:
+        // cai no padrão em vez de ficar sem atalho.
+        let config = ToolKeysConfig {
+            line: "M".into(), // "M" já é do Mover; o padrão da Linha ("L") está livre
+            ..ToolKeysConfig::default()
+        };
+        let keys = resolve_tool_keys(&config);
+        assert_eq!(keys[0], (Tool::Select, Some(egui::Key::M)));
+        assert_eq!(keys[1], (Tool::Line, Some(egui::Key::L)));
     }
 }

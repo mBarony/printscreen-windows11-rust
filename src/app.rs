@@ -414,6 +414,13 @@ impl RustShotApp {
         {
             let mut shared = self.shared.lock().unwrap();
             shared.config = new_config.clone();
+            // O config novo vale também para a sessão de edição já aberta
+            // (issue #4) — teclas e papel da roda são snapshots simples.
+            if let Flow::Editing(session) = &mut shared.flow {
+                session.tool_keys = editor::resolve_tool_keys(&new_config.editor.tool_keys);
+                session.ctrl_wheel_zoom =
+                    new_config.editor.ctrl_wheel == config::CtrlWheel::Zoom;
+            }
             if let Some(settings) = &mut shared.settings {
                 settings.last_failures = failure_lines.clone();
                 settings.draft = new_config;

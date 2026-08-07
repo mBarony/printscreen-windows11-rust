@@ -11,7 +11,8 @@
 
 use egui::{Color32, Key, RichText};
 
-use crate::config::{Config, HotkeyDef};
+use crate::config::{Config, CtrlWheel, HotkeyDef, ToolKeysConfig};
+use crate::editor::shapes::Tool;
 use crate::hotkeys::HotkeyAction;
 
 /// Estado da janela de configurações.
@@ -70,6 +71,7 @@ pub fn show(ctx: &egui::Context, state: &mut SettingsState) {
     }
 
     let conflicts = conflict_pairs(&state.draft);
+    let tool_conflicts = tool_key_conflicts(&state.draft.editor.tool_keys);
 
     egui::CentralPanel::default().show(ctx, |ui| {
         egui::ScrollArea::vertical().show(ui, |ui| {
@@ -183,6 +185,58 @@ pub fn show(ctx: &egui::Context, state: &mut SettingsState) {
                             .speed(0.5),
                     );
                 });
+
+                ui.add_space(10.0);
+                ui.label("Atalhos das ferramentas (uma letra, sem modificador):");
+                ui.add_space(2.0);
+                ui.horizontal_wrapped(|ui| {
+                    let tk = &mut state.draft.editor.tool_keys;
+                    for (tool, key) in [
+                        (Tool::Select, &mut tk.select),
+                        (Tool::Line, &mut tk.line),
+                        (Tool::Arrow, &mut tk.arrow),
+                        (Tool::Rect, &mut tk.rect),
+                        (Tool::Ellipse, &mut tk.ellipse),
+                        (Tool::Text, &mut tk.text),
+                    ] {
+                        ui.label(tool.label());
+                        egui::ComboBox::from_id_salt(("tool_key", tool.label()))
+                            .selected_text(key.clone())
+                            .width(48.0)
+                            .show_ui(ui, |ui| {
+                                for c in 'A'..='Z' {
+                                    ui.selectable_value(key, c.to_string(), c.to_string());
+                                }
+                            });
+                        ui.add_space(8.0);
+                    }
+                });
+                for (a, b) in &tool_conflicts {
+                    ui.label(
+                        RichText::new(format!(
+                            "⚠ Conflito: \"{}\" e \"{}\" usam a mesma tecla.",
+                            a.label(),
+                            b.label()
+                        ))
+                        .color(Color32::from_rgb(230, 80, 70)),
+                    );
+                }
+
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    ui.label("Ctrl+roda ajusta:");
+                    egui::ComboBox::from_id_salt("ctrl_wheel")
+                        .selected_text(state.draft.editor.ctrl_wheel.label())
+                        .show_ui(ui, |ui| {
+                            for mode in [CtrlWheel::StrokeFont, CtrlWheel::Zoom] {
+                                ui.selectable_value(
+                                    &mut state.draft.editor.ctrl_wheel,
+                                    mode,
+                                    mode.label(),
+                                );
+                            }
+                        });
+                });
             });
 
             ui.add_space(10.0);
@@ -197,7 +251,7 @@ pub fn show(ctx: &egui::Context, state: &mut SettingsState) {
 
             ui.add_space(14.0);
             ui.horizontal(|ui| {
-                let can_save = conflicts.is_empty();
+                let can_save = conflicts.is_empty() && tool_conflicts.is_empty();
                 let accent = ui.visuals().selection.bg_fill;
                 let save = egui::Button::new(
                     RichText::new("Salvar").color(ui.visuals().selection.stroke.color),
@@ -333,6 +387,37 @@ fn conflict_pairs(config: &Config) -> Vec<(HotkeyAction, HotkeyAction)> {
     out
 }
 
+/// Pares de ferramentas do editor com a mesma tecla **efetiva** (issue #4):
+/// compara o que o editor realmente usará — valor inválido cai no padrão da
+/// ferramenta (`editor::parse_tool_key`), então um config editado à mão pode
+/// colidir via fallback mesmo com strings diferentes.
+fn tool_key_conflicts(keys: &ToolKeysConfig) -> Vec<(Tool, Tool)> {
+    let defaults = ToolKeysConfig::default();
+    let entries = [
+        (Tool::Select, &keys.select, &defaults.select),
+        (Tool::Line, &keys.line, &defaults.line),
+        (Tool::Arrow, &keys.arrow, &defaults.arrow),
+        (Tool::Rect, &keys.rect, &defaults.rect),
+        (Tool::Ellipse, &keys.ellipse, &defaults.ellipse),
+        (Tool::Text, &keys.text, &defaults.text),
+    ];
+    let effective = |configured: &str, fallback: &str| {
+        crate::editor::parse_tool_key(configured)
+            .or_else(|| crate::editor::parse_tool_key(fallback))
+    };
+    let mut out = Vec::new();
+    for i in 0..entries.len() {
+        for j in (i + 1)..entries.len() {
+            let a = effective(entries[i].1, entries[i].2);
+            let b = effective(entries[j].1, entries[j].2);
+            if a.is_some() && a == b {
+                out.push((entries[i].0, entries[j].0));
+            }
+        }
+    }
+    out
+}
+
 enum CaptureResult {
     Cancel,
     Combo(HotkeyDef),
@@ -421,5 +506,26 @@ mod tests {
     #[test]
     fn defaults_have_no_conflicts() {
         assert!(conflict_pairs(&Config::default()).is_empty());
+    }
+
+    #[test]
+    fn tool_key_conflicts_ignore_case() {
+        let mut keys = ToolKeysConfig::default();
+        assert!(tool_key_conflicts(&keys).is_empty());
+        keys.rect = "t".into(); // colide com Texto ("T")
+        let pairs = tool_key_conflicts(&keys);
+        assert_eq!(pairs, vec![(Tool::Rect, Tool::Text)]);
+    }
+
+    #[test]
+    fn tool_key_conflicts_detect_fallback_collision() {
+        // "XY" é inválida → o editor usa o padrão do Mover ("M"), que colide
+        // com a Linha configurada em "m" — mesmo com strings diferentes.
+        let keys = ToolKeysConfig {
+            select: "XY".into(),
+            line: "m".into(),
+            ..ToolKeysConfig::default()
+        };
+        assert_eq!(tool_key_conflicts(&keys), vec![(Tool::Select, Tool::Line)]);
     }
 }

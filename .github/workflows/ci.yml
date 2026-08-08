@@ -8,9 +8,6 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
-permissions:
-  contents: write # o passo "Publicar bin/" commita o exe no branch de teste
-
 jobs:
   windows:
     name: Build & test (Windows)
@@ -45,18 +42,3 @@ jobs:
         with:
           name: rustshot-windows-x64
           path: target/release/rustshot.exe
-
-      # Publica o exe em bin/ no próprio branch, para baixar e testar sem
-      # release. Restrito ao branch de trabalho; o "[skip ci]" impede que o
-      # commit do bot dispare este workflow de novo.
-      - name: Publicar bin/ no branch (teste manual)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/worktree-issues-1-2-3'
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Path bin -Force | Out-Null
-          Copy-Item target/release/rustshot.exe bin/rustshot.exe -Force
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add bin/rustshot.exe
-          git commit -m "build: publica bin/rustshot.exe para teste no Windows [skip ci]"
-          git push

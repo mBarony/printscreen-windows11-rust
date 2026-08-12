@@ -12,17 +12,24 @@ use egui::{
 };
 
 use crate::clipboard;
+use crate::imgbuf::RgbaImage;
 use crate::notify;
 use crate::storage::{self, SaveTarget};
 
-use super::shapes::{arrow_geometry, shape_from_drag, Point, Shape, Tool};
+use super::icons::{self, Icon};
+use super::shapes::{arrow_geometry, normalize, shape_from_drag, Point, Shape, Tool};
 use super::{
-    DragPreview, EditorSession, MoveDrag, TextInput, FONT_MAX, FONT_MIN, HIT_TOLERANCE_PTS,
-    PALETTE, STROKE_MAX, STROKE_MIN, ZOOM_MAX, ZOOM_MIN,
+    DragPreview, EditorSession, MoveDrag, TextInput, CROP_MIN_SIDE, FONT_MAX, FONT_MIN,
+    HIT_TOLERANCE_PTS, PALETTE, STROKE_MAX, STROKE_MIN, ZOOM_MAX, ZOOM_MIN,
 };
 
+/// Lado do botão de ícone da toolbar, em pontos.
+const ICON_BUTTON: f32 = 26.0;
+/// Lado da amostra de cor da paleta, em pontos.
+const SWATCH: f32 = 20.0;
+
 /// Dica de hover de uma ferramenta da toolbar: a tecla configurada (issue
-/// #1/#4) e, para Mover, o que a ferramenta faz.
+/// #1/#4) e, para Mover/Recortar, o que a ferramenta faz.
 fn tool_hint(tool: Tool, key: Option<Key>) -> String {
     let key_name = match key {
         Some(key) => key.name().to_string(),
@@ -30,6 +37,7 @@ fn tool_hint(tool: Tool, key: Option<Key>) -> String {
     };
     match tool {
         Tool::Select => format!("{key_name} — arraste uma anotação para reposicioná-la"),
+        Tool::Crop => format!("{key_name} — arraste a área a manter e confirme com Enter"),
         _ => key_name,
     }
 }
@@ -68,7 +76,7 @@ pub fn show(ctx: &egui::Context, session: &mut EditorSession, target: &SaveTarge
         // texto do egui (ex.: o hex do seletor de cores, o valor dos sliders).
         let typing = ctx.wants_keyboard_input();
         let tool_keys = session.tool_keys;
-        let (undo, redo, copy, save, cancel, tool_key) = ctx.input_mut(|i| {
+        let (undo, redo, copy, save, cancel, tool_key, confirm) = ctx.input_mut(|i| {
             // O egui-winit converte Ctrl+C em `Event::Copy` (sem emitir
             // `Event::Key`), então o Ctrl+C do editor é detectado pelo
             // evento de cópia — o `consume_key` fica como retaguarda.
@@ -93,8 +101,14 @@ pub fn show(ctx: &egui::Context, session: &mut EditorSession, target: &SaveTarge
                 i.consume_key(Modifiers::COMMAND, Key::S),
                 i.consume_key(Modifiers::NONE, Key::Escape),
                 tool_key,
+                // Enter confirma o recorte, mas não pode roubar o Enter que
+                // fecha a edição de um campo numérico da toolbar.
+                !typing && i.consume_key(Modifiers::NONE, Key::Enter),
             )
         });
+        if confirm {
+            apply_crop(session);
+        }
         if let Some(tool) = tool_key {
             select_tool(session, tool);
         }
@@ -168,6 +182,8 @@ fn select_tool(session: &mut EditorSession, tool: Tool) {
     cancel_move(session);
     session.tool = tool;
     session.selected = None;
+    // Sair da ferramenta Recortar descarta a região ainda não confirmada.
+    session.crop_pending = None;
     // Trocar de ferramenta confirma o texto pendente (ou apenas fecha a
     // caixa, se estiver vazia).
     if tool != Tool::Text {
@@ -179,7 +195,7 @@ fn select_tool(session: &mut EditorSession, tool: Tool) {
 /// original da forma (o ponto de undo registrado no início sai do histórico).
 fn cancel_move(session: &mut EditorSession) {
     if session.move_drag.take().is_some() {
-        session.stack.abort_move();
+        session.doc.abort_move();
     }
 }
 
@@ -188,132 +204,262 @@ fn cancel_move(session: &mut EditorSession) {
 /// índices das formas podem mudar.
 fn perform_undo(session: &mut EditorSession) {
     if session.move_drag.take().is_some() {
-        session.stack.abort_move();
+        session.doc.abort_move();
     } else {
-        session.stack.undo();
+        let before = session.doc.image().clone();
+        session.doc.undo();
+        refit_if_image_changed(session, &before);
     }
     session.selected = None;
 }
 
 fn perform_redo(session: &mut EditorSession) {
     cancel_move(session);
-    session.stack.redo();
+    let before = session.doc.image().clone();
+    session.doc.redo();
+    refit_if_image_changed(session, &before);
     session.selected = None;
+}
+
+// ---------------------------------------------------------------------------
+// Recorte (issue #5)
+// ---------------------------------------------------------------------------
+
+/// Aplica a região pendente: a imagem passa a ser só ela e as anotações
+/// acompanham o conteúdo. Sem região pendente, é um no-op (o Enter é inócuo
+/// nas demais ferramentas).
+fn apply_crop(session: &mut EditorSession) {
+    let Some((min, max)) = session.crop_pending.take() else { return };
+    let (img_w, img_h) = (session.doc.image().width(), session.doc.image().height());
+
+    // A região já vem clampeada à imagem; floor/ceil preferem incluir o
+    // pixel de borda a perdê-lo. `x`/`y` param um pixel antes do fim para
+    // que a imagem resultante nunca tenha lado zero.
+    let x = (min.x.floor().max(0.0) as u32).min(img_w.saturating_sub(1));
+    let y = (min.y.floor().max(0.0) as u32).min(img_h.saturating_sub(1));
+    let w = ((max.x.ceil().max(0.0) as u32).saturating_sub(x)).clamp(1, img_w - x);
+    let h = ((max.y.ceil().max(0.0) as u32).saturating_sub(y)).clamp(1, img_h - y);
+
+    session.doc.crop(x, y, w, h);
+    reset_view(session);
+    session.selected = None;
+}
+
+/// A imagem mudou de conteúdo/tamanho: recria a textura e reajusta a vista.
+fn refit_if_image_changed(session: &mut EditorSession, before: &std::sync::Arc<RgbaImage>) {
+    if !std::sync::Arc::ptr_eq(before, session.doc.image()) {
+        reset_view(session);
+    }
+}
+
+/// Textura recriada no próximo frame; zoom volta a "ajustar à janela" e o
+/// pan recentraliza a imagem nova.
+fn reset_view(session: &mut EditorSession) {
+    session.texture = None;
+    session.zoom = None;
+    session.pan = Vec2::ZERO;
 }
 
 // ---------------------------------------------------------------------------
 // Toolbar
 // ---------------------------------------------------------------------------
 
+/// Botão quadrado de ícone: fundo só quando ativo ou sob o cursor, para a
+/// faixa ficar leve — a identificação vem do ícone e do tooltip.
+fn icon_button(ui: &mut egui::Ui, icon: Icon, selected: bool, enabled: bool) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(
+        Vec2::splat(ICON_BUTTON),
+        if enabled { Sense::click() } else { Sense::hover() },
+    );
+    let hovered = enabled && response.hovered();
+    let visuals = ui.visuals();
+    let background = if selected {
+        visuals.selection.bg_fill
+    } else if hovered {
+        visuals.widgets.hovered.bg_fill
+    } else {
+        Color32::TRANSPARENT
+    };
+    let color = if !enabled {
+        visuals.weak_text_color()
+    } else if selected {
+        visuals.selection.stroke.color
+    } else if hovered {
+        visuals.strong_text_color()
+    } else {
+        visuals.text_color()
+    };
+    if background != Color32::TRANSPARENT {
+        ui.painter()
+            .rect_filled(rect, CornerRadius::same(6), background);
+    }
+    icons::paint(ui.painter(), rect.shrink(ICON_BUTTON * 0.26), icon, color);
+    response
+}
+
+/// Amostra de cor clicável da paleta.
+fn color_swatch(ui: &mut egui::Ui, rgba: [u8; 4], selected: bool) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(Vec2::splat(SWATCH), Sense::click());
+    let painter = ui.painter();
+    let fill = Color32::from_rgba_unmultiplied(rgba[0], rgba[1], rgba[2], rgba[3]);
+    painter.rect_filled(rect.shrink(2.0), CornerRadius::same(4), fill);
+    let outline = if selected {
+        Stroke::new(2.0_f32, ui.visuals().strong_text_color())
+    } else {
+        Stroke::new(1.0_f32, ui.visuals().widgets.inactive.bg_stroke.color)
+    };
+    let target = if selected { rect } else { rect.shrink(2.0) };
+    painter.rect_stroke(target, CornerRadius::same(4), outline, StrokeKind::Inside);
+    response
+}
+
 fn toolbar(ctx: &egui::Context, session: &mut EditorSession, target: &SaveTarget) {
-    egui::TopBottomPanel::top("editor_toolbar").show(ctx, |ui| {
-        ui.add_space(4.0);
-        ui.horizontal_wrapped(|ui| {
-            for (tool, key) in session.tool_keys {
-                let selected = session.tool == tool;
+    egui::TopBottomPanel::top("editor_toolbar")
+        .frame(egui::Frame::default().inner_margin(egui::Margin::symmetric(8, 5)))
+        .show(ctx, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = Vec2::new(3.0, 3.0);
+
+                // --- Ferramentas ---
+                for (tool, key) in session.tool_keys {
+                    let selected = session.tool == tool;
+                    if icon_button(ui, Icon::of(tool), selected, true)
+                        .on_hover_text(format!("{} — {}", tool.label(), tool_hint(tool, key)))
+                        .clicked()
+                    {
+                        select_tool(session, tool);
+                    }
+                }
+
+                // Confirmação do recorte, junto das ferramentas.
+                if session.tool == Tool::Crop {
+                    let ready = session.crop_pending.is_some();
+                    if icon_button(ui, Icon::Check, false, ready)
+                        .on_hover_text("Aplicar recorte (Enter)")
+                        .clicked()
+                    {
+                        apply_crop(session);
+                    }
+                }
+
+                separator(ui);
+
+                // --- Cor ---
+                for color in PALETTE {
+                    if color_swatch(ui, color, session.color == color).clicked() {
+                        session.color = color;
+                    }
+                }
+                let mut rgb = [session.color[0], session.color[1], session.color[2]];
                 if ui
-                    .selectable_label(selected, tool.label())
-                    .on_hover_text(tool_hint(tool, key))
+                    .color_edit_button_srgb(&mut rgb)
+                    .on_hover_text("Cor personalizada")
+                    .changed()
+                {
+                    session.color = [rgb[0], rgb[1], rgb[2], 255];
+                }
+
+                separator(ui);
+
+                // --- Espessura do traço: amostra + valor arrastável ---
+                stroke_preview(ui, session.stroke_width);
+                let mut stroke = session.stroke_width;
+                if ui
+                    .add(
+                        egui::DragValue::new(&mut stroke)
+                            .range(STROKE_MIN..=STROKE_MAX)
+                            .speed(0.1)
+                            .fixed_decimals(0),
+                    )
+                    .on_hover_text("Espessura do traço (Ctrl+roda no canvas)")
+                    .changed()
+                {
+                    session.stroke_width = stroke.round().clamp(STROKE_MIN, STROKE_MAX);
+                }
+
+                // --- Tamanho da fonte (só com a ferramenta Texto) ---
+                let text_tool = session.tool == Tool::Text;
+                ui.add_enabled_ui(text_tool, |ui| {
+                    ui.label(egui::RichText::new("A").size(15.0).strong());
+                    let mut font = session.font_size;
+                    if ui
+                        .add(
+                            egui::DragValue::new(&mut font)
+                                .range(FONT_MIN..=FONT_MAX)
+                                .speed(0.3)
+                                .fixed_decimals(0),
+                        )
+                        .on_hover_text("Tamanho da fonte (Ctrl+roda no canvas)")
+                        .changed()
+                    {
+                        session.font_size = font.round().clamp(FONT_MIN, FONT_MAX);
+                    }
+                });
+
+                separator(ui);
+
+                // --- Histórico ---
+                if icon_button(ui, Icon::Undo, false, session.doc.can_undo())
+                    .on_hover_text("Desfazer (Ctrl+Z)")
                     .clicked()
                 {
-                    select_tool(session, tool);
+                    perform_undo(session);
                 }
-            }
+                if icon_button(ui, Icon::Redo, false, session.doc.can_redo())
+                    .on_hover_text("Refazer (Ctrl+Y)")
+                    .clicked()
+                {
+                    perform_redo(session);
+                }
 
-            ui.separator();
+                separator(ui);
 
-            // Paleta de 8 cores + seletor livre.
-            for color in PALETTE {
-                let c32 = Color32::from_rgba_unmultiplied(color[0], color[1], color[2], color[3]);
-                let selected = session.color == color;
-                let size = Vec2::splat(18.0);
-                let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
-                let painter = ui.painter();
-                painter.rect_filled(rect.shrink(2.0), 3.0, c32);
-                if selected {
-                    painter.rect_stroke(
-                        rect,
-                        4.0,
-                        Stroke::new(2.0_f32, ui.visuals().strong_text_color()),
-                        StrokeKind::Inside,
-                    );
-                } else {
-                    painter.rect_stroke(
-                        rect.shrink(2.0),
-                        3.0,
-                        Stroke::new(1.0_f32, Color32::from_gray(90)),
-                        StrokeKind::Inside,
-                    );
+                // --- Saída ---
+                if icon_button(ui, Icon::Copy, false, true)
+                    .on_hover_text("Copiar e fechar (Ctrl+C)")
+                    .clicked()
+                {
+                    copy_and_close(session);
                 }
-                if resp.clicked() {
-                    session.color = color;
+                if icon_button(ui, Icon::Save, false, true)
+                    .on_hover_text("Salvar e fechar (Ctrl+S)")
+                    .clicked()
+                {
+                    save_and_close(session, target);
                 }
-            }
-            let mut rgb = [session.color[0], session.color[1], session.color[2]];
-            if ui.color_edit_button_srgb(&mut rgb).changed() {
-                session.color = [rgb[0], rgb[1], rgb[2], 255];
-            }
+                if icon_button(ui, Icon::Close, false, true)
+                    .on_hover_text("Cancelar (Esc)")
+                    .clicked()
+                {
+                    request_close(session);
+                }
+            });
         });
-        ui.add_space(2.0);
-        ui.horizontal_wrapped(|ui| {
-            ui.label("Traço");
-            let mut stroke = session.stroke_width;
-            if ui
-                .add(egui::Slider::new(&mut stroke, STROKE_MIN..=STROKE_MAX).step_by(1.0))
-                .changed()
-            {
-                session.stroke_width = stroke.round().clamp(STROKE_MIN, STROKE_MAX);
-            }
+}
 
-            ui.label("Fonte");
-            let mut font = session.font_size;
-            let font_slider = egui::Slider::new(&mut font, FONT_MIN..=FONT_MAX).step_by(1.0);
-            if ui
-                .add_enabled(session.tool == Tool::Text, font_slider)
-                .changed()
-            {
-                session.font_size = font.round().clamp(FONT_MIN, FONT_MAX);
-            }
+/// Separador vertical discreto entre grupos da toolbar.
+fn separator(ui: &mut egui::Ui) {
+    ui.add_space(4.0);
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(1.0, ICON_BUTTON * 0.6), Sense::hover());
+    ui.painter().rect_filled(
+        rect,
+        CornerRadius::ZERO,
+        ui.visuals().widgets.noninteractive.bg_stroke.color,
+    );
+    ui.add_space(4.0);
+}
 
-            ui.separator();
-
-            if ui
-                .add_enabled(session.stack.can_undo(), egui::Button::new("Desfazer"))
-                .on_hover_text("Ctrl+Z")
-                .clicked()
-            {
-                perform_undo(session);
-            }
-            if ui
-                .add_enabled(session.stack.can_redo(), egui::Button::new("Refazer"))
-                .on_hover_text("Ctrl+Y")
-                .clicked()
-            {
-                perform_redo(session);
-            }
-
-            ui.separator();
-
-            if ui
-                .button("Copiar")
-                .on_hover_text("Ctrl+C — copia e fecha")
-                .clicked()
-            {
-                copy_and_close(session);
-            }
-            if ui
-                .button("Salvar")
-                .on_hover_text("Ctrl+S — salva e fecha")
-                .clicked()
-            {
-                save_and_close(session, target);
-            }
-            if ui.button("Cancelar").on_hover_text("Esc").clicked() {
-                request_close(session);
-            }
-        });
-        ui.add_space(4.0);
-    });
+/// Amostra da espessura atual — o valor numérico ao lado dá a precisão.
+fn stroke_preview(ui: &mut egui::Ui, width: f32) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(20.0, ICON_BUTTON), Sense::hover());
+    let thickness = (width * 0.7).clamp(1.0, 7.0);
+    ui.painter().line_segment(
+        [
+            Pos2::new(rect.left() + 1.0, rect.center().y),
+            Pos2::new(rect.right() - 1.0, rect.center().y),
+        ],
+        Stroke::new(thickness, ui.visuals().text_color()),
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -328,19 +474,22 @@ fn canvas(ctx: &egui::Context, session: &mut EditorSession) {
             let canvas_rect = ui.available_rect_before_wrap();
             let response = ui.allocate_rect(canvas_rect, Sense::click_and_drag());
 
-            let texture = session.texture.get_or_insert_with(|| {
-                let img = &session.image;
-                let color = ColorImage::from_rgba_unmultiplied(
-                    [img.width() as usize, img.height() as usize],
-                    img.as_raw(),
-                );
-                ui.ctx()
-                    .load_texture("editor_capture", color, TextureOptions::LINEAR)
-            });
+            let texture = {
+                let doc = &session.doc;
+                session.texture.get_or_insert_with(|| {
+                    let img = doc.image();
+                    let color = ColorImage::from_rgba_unmultiplied(
+                        [img.width() as usize, img.height() as usize],
+                        img.as_raw(),
+                    );
+                    ui.ctx()
+                        .load_texture("editor_capture", color, TextureOptions::LINEAR)
+                })
+            };
             let tex_id = texture.id();
 
-            let img_w = session.image.width() as f32;
-            let img_h = session.image.height() as f32;
+            let img_w = session.doc.image().width() as f32;
+            let img_h = session.doc.image().height() as f32;
 
             // Primeiro frame: "ajustar à janela" (nunca acima de 100%).
             let zoom = *session.zoom.get_or_insert_with(|| {
@@ -483,7 +632,7 @@ fn canvas(ctx: &egui::Context, session: &mut EditorSession) {
                                 let p = to_screen.inverse(origin);
                                 let tol = HIT_TOLERANCE_PTS / to_screen.scale;
                                 let hit = session
-                                    .stack
+                                    .doc
                                     .shapes()
                                     .iter()
                                     .enumerate()
@@ -492,7 +641,7 @@ fn canvas(ctx: &egui::Context, session: &mut EditorSession) {
                                     .map(|(index, _)| index);
                                 session.selected = hit;
                                 if let Some(index) = hit {
-                                    session.stack.begin_move();
+                                    session.doc.begin_move();
                                     session.move_drag =
                                         Some(MoveDrag { index, last: p, travel: 0.0 });
                                 }
@@ -503,7 +652,7 @@ fn canvas(ctx: &egui::Context, session: &mut EditorSession) {
                                 let p = to_screen.inverse(pos);
                                 let (dx, dy) = (p.x - mv.last.x, p.y - mv.last.y);
                                 if dx != 0.0 || dy != 0.0 {
-                                    session.stack.translate(mv.index, dx, dy);
+                                    session.doc.translate(mv.index, dx, dy);
                                     mv.travel += (dx * dx + dy * dy).sqrt();
                                     mv.last = p;
                                 }
@@ -514,13 +663,15 @@ fn canvas(ctx: &egui::Context, session: &mut EditorSession) {
                                 // Clique parado (sem arrasto real) só
                                 // seleciona: nem o undo nem o redo mudam.
                                 if mv.travel * to_screen.scale < 2.0 {
-                                    session.stack.abort_move();
+                                    session.doc.abort_move();
                                 } else {
-                                    session.stack.end_move();
+                                    session.doc.end_move();
                                 }
                             }
                         }
                     }
+                    // Desenho de formas e marcação da área de recorte: mesma
+                    // mecânica de arrasto, destinos diferentes no release.
                     _ => {
                         if response.hovered() {
                             ctx.output_mut(|o| o.cursor_icon = CursorIcon::Crosshair);
@@ -532,6 +683,8 @@ fn canvas(ctx: &egui::Context, session: &mut EditorSession) {
                             {
                                 let p = clamp_img(to_screen.inverse(origin));
                                 session.drag = Some(DragPreview { start: p, current: p, shift });
+                                // Começar uma área nova descarta a anterior.
+                                session.crop_pending = None;
                             }
                         }
                         if let Some(drag) = &mut session.drag {
@@ -544,8 +697,15 @@ fn canvas(ctx: &egui::Context, session: &mut EditorSession) {
                             if let Some(drag) = session.drag.take() {
                                 let dx = (drag.current.x - drag.start.x).abs();
                                 let dy = (drag.current.y - drag.start.y).abs();
-                                // Ignora cliques sem arrasto real.
-                                if dx >= 2.0 || dy >= 2.0 {
+                                if session.tool == Tool::Crop {
+                                    // Área pequena demais foi engano: nada a
+                                    // confirmar (o recorte só sai no Enter).
+                                    if dx >= CROP_MIN_SIDE && dy >= CROP_MIN_SIDE {
+                                        session.crop_pending =
+                                            Some(normalize(drag.start, drag.current));
+                                    }
+                                } else if dx >= 2.0 || dy >= 2.0 {
+                                    // Ignora cliques sem arrasto real.
                                     if let Some(shape) = shape_from_drag(
                                         session.tool,
                                         drag.start,
@@ -553,7 +713,7 @@ fn canvas(ctx: &egui::Context, session: &mut EditorSession) {
                                         drag.shift,
                                         session.style(),
                                     ) {
-                                        session.stack.push(shape);
+                                        session.doc.push(shape);
                                     }
                                 }
                             }
@@ -575,8 +735,13 @@ fn canvas(ctx: &egui::Context, session: &mut EditorSession) {
                 Color32::WHITE,
             );
 
-            for shape in session.stack.shapes() {
-                paint_shape(&painter, shape, to_screen);
+            // As anotações são clipadas à imagem: o que vaza para fora não
+            // entra no arquivo salvo (o rasterizador clipa), então também
+            // não pode aparecer no editor — WYSIWYG inclusive depois de um
+            // recorte ou de arrastar uma anotação para fora.
+            let shape_painter = ui.painter_at(image_rect.intersect(canvas_rect));
+            for shape in session.doc.shapes() {
+                paint_shape(&shape_painter, shape, to_screen);
             }
             if let Some(drag) = &session.drag {
                 if let Some(preview) = shape_from_drag(
@@ -586,17 +751,37 @@ fn canvas(ctx: &egui::Context, session: &mut EditorSession) {
                     drag.shift,
                     session.style(),
                 ) {
-                    paint_shape(&painter, &preview, to_screen);
+                    paint_shape(&shape_painter, &preview, to_screen);
                 }
             }
 
-            // Contorno tracejado da anotação selecionada (ferramenta Mover).
+            // Contorno tracejado da anotação selecionada (ferramenta Mover) —
+            // no painter sem clip, para continuar visível se a anotação foi
+            // arrastada para fora da imagem.
             if session.tool == Tool::Select {
-                if let Some(shape) =
-                    session.selected.and_then(|i| session.stack.shapes().get(i))
-                {
+                if let Some(shape) = session.selected.and_then(|i| session.doc.shapes().get(i)) {
                     let color = ui.visuals().selection.stroke.color;
                     draw_selection_outline(ctx, &painter, shape, to_screen, color);
+                }
+            }
+
+            // Área do recorte: véu sobre o que será descartado (issue #5).
+            if session.tool == Tool::Crop {
+                let region = session
+                    .drag
+                    .as_ref()
+                    .map(|d| normalize(d.start, d.current))
+                    .or(session.crop_pending);
+                if let Some((min, max)) = region {
+                    let selection =
+                        Rect::from_min_max(to_screen.pos(min), to_screen.pos(max));
+                    draw_crop_overlay(
+                        &painter,
+                        image_rect,
+                        selection,
+                        (max.x - min.x, max.y - min.y),
+                        session.crop_pending.is_some(),
+                    );
                 }
             }
 
@@ -750,6 +935,76 @@ fn draw_selection_outline(
 }
 
 // ---------------------------------------------------------------------------
+// Recorte: véu e moldura
+// ---------------------------------------------------------------------------
+
+/// Escurece o que ficará de fora, contorna a área mantida e anota as suas
+/// dimensões. `confirmed` distingue a região já solta (aguardando Enter) do
+/// arrasto ainda em curso.
+fn draw_crop_overlay(
+    painter: &egui::Painter,
+    image_rect: Rect,
+    selection: Rect,
+    size_px: (f32, f32),
+    confirmed: bool,
+) {
+    let selection = selection.intersect(image_rect);
+    let veil = Color32::from_black_alpha(150);
+    // Faixas acima, abaixo, à esquerda e à direita da área mantida.
+    let bands = [
+        Rect::from_min_max(
+            image_rect.min,
+            Pos2::new(image_rect.max.x, selection.min.y),
+        ),
+        Rect::from_min_max(
+            Pos2::new(image_rect.min.x, selection.max.y),
+            image_rect.max,
+        ),
+        Rect::from_min_max(
+            Pos2::new(image_rect.min.x, selection.min.y),
+            Pos2::new(selection.min.x, selection.max.y),
+        ),
+        Rect::from_min_max(
+            Pos2::new(selection.max.x, selection.min.y),
+            Pos2::new(image_rect.max.x, selection.max.y),
+        ),
+    ];
+    for band in bands {
+        if band.is_positive() {
+            painter.rect_filled(band, CornerRadius::ZERO, veil);
+        }
+    }
+
+    painter.rect_stroke(
+        selection,
+        CornerRadius::ZERO,
+        Stroke::new(1.5_f32, Color32::WHITE),
+        StrokeKind::Middle,
+    );
+
+    let (w, h) = size_px;
+    let label = if confirmed {
+        format!("{} × {} — Enter aplica · Esc cancela", w.round(), h.round())
+    } else {
+        format!("{} × {}", w.round(), h.round())
+    };
+    // Acima da área quando há espaço; dentro dela quando o recorte encosta
+    // no topo da imagem.
+    let (anchor, pos) = if selection.min.y - image_rect.min.y > 22.0 {
+        (Align2::LEFT_BOTTOM, selection.left_top() + Vec2::new(0.0, -4.0))
+    } else {
+        (Align2::LEFT_TOP, selection.left_top() + Vec2::new(4.0, 4.0))
+    };
+    painter.text(
+        pos,
+        anchor,
+        label,
+        FontId::proportional(12.0),
+        Color32::WHITE,
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Texto inline
 // ---------------------------------------------------------------------------
 
@@ -804,7 +1059,7 @@ fn commit_text_input(session: &mut EditorSession) {
         content: input.buffer.clone(),
         style: session.style(),
     };
-    session.stack.push(shape);
+    session.doc.push(shape);
     session.text_input = None;
 }
 
@@ -818,8 +1073,8 @@ fn commit_text_input(session: &mut EditorSession) {
 /// confirma (ou reporta a falha) na sequência.
 fn copy_and_close(session: &mut EditorSession) {
     commit_text_input(session);
-    let base = session.image.clone();
-    let shapes = session.stack.shapes().to_vec();
+    let base = session.doc.image().clone();
+    let shapes = session.doc.shapes().to_vec();
     std::thread::spawn(move || match super::render::render(&base, &shapes) {
         Ok(final_image) => match clipboard::copy_image(&final_image) {
             Ok(()) => notify::toast(
@@ -836,8 +1091,8 @@ fn copy_and_close(session: &mut EditorSession) {
 /// Ctrl+S: renderiza, salva na pasta configurada e fecha o editor (RF-04).
 fn save_and_close(session: &mut EditorSession, target: &SaveTarget) {
     commit_text_input(session);
-    let base = session.image.clone();
-    let shapes = session.stack.shapes().to_vec();
+    let base = session.doc.image().clone();
+    let shapes = session.doc.shapes().to_vec();
     let target = target.clone();
     std::thread::spawn(move || match super::render::render(&base, &shapes) {
         Ok(final_image) => match storage::write_image(&target, &final_image) {
@@ -865,6 +1120,10 @@ fn request_close(session: &mut EditorSession) {
     }
     if session.drag.take().is_some() {
         // Primeiro Esc apenas cancela o arrasto de desenho em andamento.
+        return;
+    }
+    if session.crop_pending.take().is_some() {
+        // Primeiro Esc apenas descarta a área de recorte marcada.
         return;
     }
     cancel_move(session);

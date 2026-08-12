@@ -1,10 +1,11 @@
-//! Modelo de dados das formas do editor e pilha de undo (§8).
+//! Modelo de dados das formas do editor e sua geometria (§8).
 //!
 //! As formas são armazenadas **em coordenadas do espaço da imagem** (pixels
 //! físicos da captura) e convertidas para o espaço de tela apenas na
 //! exibição — assim zoom e exportação nunca divergem. A geometria derivada
 //! (ponta de seta, restrições com Shift) vive aqui e é compartilhada entre a
-//! pré-visualização (egui) e a rasterização final (tiny-skia).
+//! pré-visualização (egui) e a rasterização final (`raster`). O conjunto de
+//! formas e seu histórico ficam em [`super::document`].
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Point {
@@ -27,6 +28,8 @@ pub enum Tool {
     Rect,
     Ellipse,
     Text,
+    /// Recorta a imagem para a região arrastada (issue #5).
+    Crop,
 }
 
 impl Tool {
@@ -38,6 +41,7 @@ impl Tool {
             Self::Rect => "Retângulo",
             Self::Ellipse => "Elipse",
             Self::Text => "Texto",
+            Self::Crop => "Recortar",
         }
     }
 }
@@ -162,8 +166,8 @@ fn point_in_triangle(p: Point, t: [Point; 3]) -> bool {
 
 /// Constrói a forma resultante de um arrasto `a → b` com a ferramenta dada.
 /// `shift` restringe: linha/seta em ângulos de 45°, retângulo em quadrado,
-/// elipse em círculo. Retorna `None` para as ferramentas Texto e Mover
-/// (fluxos próprios).
+/// elipse em círculo. Retorna `None` para as ferramentas Texto, Mover e
+/// Recortar (fluxos próprios).
 pub fn shape_from_drag(tool: Tool, a: Point, mut b: Point, shift: bool, style: Style) -> Option<Shape> {
     match tool {
         Tool::Line | Tool::Arrow => {
@@ -197,7 +201,7 @@ pub fn shape_from_drag(tool: Tool, a: Point, mut b: Point, shift: bool, style: S
                 style,
             })
         }
-        Tool::Text | Tool::Select => None,
+        Tool::Text | Tool::Select | Tool::Crop => None,
     }
 }
 
@@ -223,7 +227,8 @@ fn snap_square(a: Point, b: Point) -> Point {
     Point::new(a.x + side * dx.signum(), a.y + side * dy.signum())
 }
 
-fn normalize(a: Point, b: Point) -> (Point, Point) {
+/// Canto superior-esquerdo e inferior-direito do retângulo `a`–`b`.
+pub fn normalize(a: Point, b: Point) -> (Point, Point) {
     (
         Point::new(a.x.min(b.x), a.y.min(b.y)),
         Point::new(a.x.max(b.x), a.y.max(b.y)),
@@ -268,98 +273,6 @@ pub fn arrow_geometry(a: Point, b: Point, stroke_width: f32) -> ArrowGeometry {
             Point::new(base.x + px * half_width, base.y + py * half_width),
             Point::new(base.x - px * half_width, base.y - py * half_width),
         ],
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Undo / redo — snapshots do conjunto de formas
-// ---------------------------------------------------------------------------
-
-/// Pilha de undo/redo por snapshots: cada edição (criar uma forma ou
-/// reposicioná-la com a ferramenta Mover, issue #2) registra o estado
-/// anterior inteiro. Snapshots são baratos — uma sessão tem no máximo
-/// dezenas de anotações — e cobrem qualquer tipo de edição uniformemente.
-#[derive(Default)]
-pub struct ShapeStack {
-    shapes: Vec<Shape>,
-    undo: Vec<Vec<Shape>>,
-    redo: Vec<Vec<Shape>>,
-    /// Snapshot do movimento em andamento — só entra no histórico quando o
-    /// arrasto se confirma (`end_move`); um clique parado (`abort_move`)
-    /// não toca nem no undo nem no redo.
-    moving: Option<Vec<Shape>>,
-}
-
-impl ShapeStack {
-    pub fn shapes(&self) -> &[Shape] {
-        &self.shapes
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.shapes.is_empty()
-    }
-
-    /// Registra o estado atual como ponto de desfazer (e, como toda edição
-    /// nova, limpa a pilha de refazer, §8).
-    fn checkpoint(&mut self) {
-        self.undo.push(self.shapes.clone());
-        self.redo.clear();
-    }
-
-    pub fn push(&mut self, shape: Shape) {
-        self.checkpoint();
-        self.shapes.push(shape);
-    }
-
-    /// Início de um arrasto de reposicionamento: guarda o estado atual fora
-    /// do histórico — ele só vira ponto de desfazer se o movimento se
-    /// confirmar (`end_move`).
-    pub fn begin_move(&mut self) {
-        self.moving = Some(self.shapes.clone());
-    }
-
-    /// Deslocamento incremental da forma `index` durante o arrasto.
-    pub fn translate(&mut self, index: usize, dx: f32, dy: f32) {
-        if let Some(shape) = self.shapes.get_mut(index) {
-            shape.translate(dx, dy);
-        }
-    }
-
-    /// Confirma o movimento: o estado pré-arrasto entra no undo e, como toda
-    /// edição nova, a pilha de refazer é limpa (§8).
-    pub fn end_move(&mut self) {
-        if let Some(prev) = self.moving.take() {
-            self.undo.push(prev);
-            self.redo.clear();
-        }
-    }
-
-    /// Descarta o movimento em andamento (clique parado, troca de ferramenta,
-    /// Esc): restaura o estado pré-arrasto sem tocar no undo nem no redo.
-    pub fn abort_move(&mut self) {
-        if let Some(prev) = self.moving.take() {
-            self.shapes = prev;
-        }
-    }
-
-    pub fn can_undo(&self) -> bool {
-        !self.undo.is_empty()
-    }
-
-    pub fn can_redo(&self) -> bool {
-        !self.redo.is_empty()
-    }
-
-    pub fn undo(&mut self) {
-        if let Some(prev) = self.undo.pop() {
-            self.redo.push(std::mem::replace(&mut self.shapes, prev));
-        }
-    }
-
-    pub fn redo(&mut self) {
-        if let Some(next) = self.redo.pop() {
-            self.undo.push(std::mem::replace(&mut self.shapes, next));
-        }
     }
 }
 
@@ -513,89 +426,27 @@ mod tests {
     }
 
     #[test]
-    fn move_undo_redo_and_abort() {
-        let mut stack = ShapeStack::default();
-        stack.push(Shape::Rect {
-            min: Point::new(0.0, 0.0),
-            max: Point::new(10.0, 10.0),
-            style: style(),
-        });
-
-        // Movimento real: um único ponto de undo para o arrasto inteiro.
-        stack.begin_move();
-        stack.translate(0, 3.0, 0.0);
-        stack.translate(0, 2.0, 4.0);
-        stack.end_move();
-        let moved = stack.shapes()[0].clone();
-        match &moved {
-            Shape::Rect { min, .. } => assert_eq!((min.x, min.y), (5.0, 4.0)),
-            _ => unreachable!(),
+    fn crop_and_select_have_no_drag_shape() {
+        for tool in [Tool::Crop, Tool::Select, Tool::Text] {
+            assert!(
+                shape_from_drag(
+                    tool,
+                    Point::new(0.0, 0.0),
+                    Point::new(10.0, 10.0),
+                    false,
+                    style()
+                )
+                .is_none(),
+                "{} tem fluxo próprio",
+                tool.label()
+            );
         }
-
-        stack.undo();
-        match &stack.shapes()[0] {
-            Shape::Rect { min, .. } => assert_eq!((min.x, min.y), (0.0, 0.0)),
-            _ => unreachable!(),
-        }
-        stack.redo();
-        assert_eq!(stack.shapes()[0], moved);
-
-        // Movimento abortado no meio: posição restaurada, histórico intacto.
-        stack.begin_move();
-        stack.translate(0, 100.0, 100.0);
-        stack.abort_move();
-        assert_eq!(stack.shapes()[0], moved);
-
-        stack.undo(); // desfaz o movimento
-        stack.undo(); // desfaz a criação
-        assert!(stack.is_empty() && !stack.can_undo());
     }
 
     #[test]
-    fn select_click_preserves_redo() {
-        let mut stack = ShapeStack::default();
-        let line = shape_from_drag(
-            Tool::Line,
-            Point::new(0.0, 0.0),
-            Point::new(10.0, 10.0),
-            false,
-            style(),
-        )
-        .unwrap();
-        stack.push(line.clone());
-        stack.push(line);
-        stack.undo(); // segunda forma vai para o redo
-        assert!(stack.can_redo());
-
-        // Clique parado com a ferramenta Mover (selecionar sem arrastar):
-        // não é edição — o refazer precisa sobreviver.
-        stack.begin_move();
-        stack.abort_move();
-        assert!(stack.can_redo(), "clique de seleção não pode destruir o redo");
-        stack.redo();
-        assert_eq!(stack.shapes().len(), 2);
-    }
-
-    #[test]
-    fn undo_redo_cycle() {
-        let mut stack = ShapeStack::default();
-        let line = shape_from_drag(
-            Tool::Line,
-            Point::new(0.0, 0.0),
-            Point::new(1.0, 1.0),
-            false,
-            style(),
-        )
-        .unwrap();
-        stack.push(line.clone());
-        assert!(stack.can_undo());
-        stack.undo();
-        assert!(stack.is_empty() && stack.can_redo());
-        stack.redo();
-        assert_eq!(stack.shapes(), std::slice::from_ref(&line));
-        // Nova forma limpa o redo.
-        stack.undo();
-        stack.push(line);
-        assert!(!stack.can_redo());
+    fn normalize_orders_corners() {
+        let (min, max) = normalize(Point::new(50.0, 8.0), Point::new(10.0, 30.0));
+        assert_eq!((min.x, min.y), (10.0, 8.0));
+        assert_eq!((max.x, max.y), (50.0, 30.0));
     }
 }

@@ -2,6 +2,22 @@
 
 Histórico de versões do RustShot. Datas em 2026.
 
+## v1.5.0 — 12/08
+
+- **Recorte no editor** (issue #5): nova ferramenta **Recortar** (`C`) —
+  arraste a área a manter (o resto escurece, com as dimensões em px) e
+  confirme com `Enter` ou com o botão ✓; `Esc` descarta a marcação. As
+  anotações acompanham o conteúdo recortado, recortes sucessivos se
+  compõem e `Ctrl+Z` devolve a imagem anterior: o histórico passou a
+  versionar imagem e anotações juntas.
+- **Toolbar redesenhada**: uma única faixa compacta, só com ícones
+  vetoriais (nítidos em qualquer DPI, desenhados pelo próprio app — sem
+  depender de fontes de emoji) e dicas no hover; a espessura ganhou uma
+  amostra visual e os controles viraram campos arrastáveis, no lugar dos
+  dois blocos de sliders e botões de texto.
+- As anotações agora são recortadas pela borda da imagem também no editor,
+  como já aconteciam no arquivo salvo.
+
 ## v1.4.0 — 07/08
 
 - **Anotações reposicionáveis** (issue #2): nova ferramenta **Mover** na

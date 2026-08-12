@@ -186,6 +186,7 @@ pub struct ToolKeysConfig {
     pub rect: String,
     pub ellipse: String,
     pub text: String,
+    pub crop: String,
 }
 
 impl Default for ToolKeysConfig {
@@ -197,6 +198,7 @@ impl Default for ToolKeysConfig {
             rect: "R".into(),
             ellipse: "E".into(),
             text: "T".into(),
+            crop: "C".into(),
         }
     }
 }
@@ -307,6 +309,7 @@ impl Config {
                 rect: tool_key("rect", &defaults.editor.tool_keys.rect),
                 ellipse: tool_key("ellipse", &defaults.editor.tool_keys.ellipse),
                 text: tool_key("text", &defaults.editor.tool_keys.text),
+                crop: tool_key("crop", &defaults.editor.tool_keys.crop),
             },
             ctrl_wheel: editor_value
                 .and_then(|e| e.get("ctrl_wheel"))
@@ -369,6 +372,7 @@ impl Config {
                             ("rect", json::s(&self.editor.tool_keys.rect)),
                             ("ellipse", json::s(&self.editor.tool_keys.ellipse)),
                             ("text", json::s(&self.editor.tool_keys.text)),
+                            ("crop", json::s(&self.editor.tool_keys.crop)),
                         ]),
                     ),
                     ("ctrl_wheel", json::s(self.editor.ctrl_wheel.as_str())),

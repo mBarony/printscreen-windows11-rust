@@ -1,18 +1,20 @@
 //! Editor de anotações (RF-03/RF-04, §8).
 //!
-//! Submódulos: `shapes` (modelo de dados + undo), `ui` (janela/canvas/
-//! toolbar) e `render` (rasterização final para exportação).
+//! Submódulos: `shapes` (modelo de dados das formas), `document` (imagem +
+//! anotações + histórico), `ui` (janela/canvas/toolbar) e `render`
+//! (rasterização final para exportação).
 
+pub mod document;
+pub mod icons;
 pub mod raster;
 pub mod render;
 pub mod shapes;
 pub mod ui;
 
-use std::sync::Arc;
-
 use crate::config::{self, EditorConfig};
 use crate::imgbuf::RgbaImage;
-use shapes::{Point, ShapeStack, Style, Tool};
+use document::Document;
+use shapes::{Point, Style, Tool};
 
 /// Fonte TTF embutida (Inter, licença SIL OFL), usada tanto no egui quanto na
 /// exportação — garantindo WYSIWYG entre editor e JPG final (§8).
@@ -31,6 +33,10 @@ pub const FOCUS_CLAIM_FRAMES: u8 = 12;
 /// Tolerância do hit-test ao clicar numa anotação com a ferramenta Mover,
 /// em pontos do egui (convertida para px da imagem pelo zoom).
 pub const HIT_TOLERANCE_PTS: f32 = 6.0;
+
+/// Lado mínimo (px da imagem) de um recorte: abaixo disso o arrasto foi
+/// engano, não intenção de recortar.
+pub const CROP_MIN_SIDE: f32 = 4.0;
 
 pub const STROKE_MIN: f32 = 1.0;
 pub const STROKE_MAX: f32 = 12.0;
@@ -81,9 +87,9 @@ pub struct MoveDrag {
 pub struct EditorSession {
     /// Identificador estável da sessão (diferencia viewports sucessivos).
     pub serial: u64,
-    pub image: Arc<RgbaImage>,
+    /// Imagem base + anotações + histórico (o recorte muda a imagem).
+    pub doc: Document,
     pub texture: Option<egui::TextureHandle>,
-    pub stack: ShapeStack,
     pub tool: Tool,
     pub color: [u8; 4],
     pub stroke_width: f32,
@@ -94,7 +100,7 @@ pub struct EditorSession {
     pub pan: egui::Vec2,
     /// Teclas das ferramentas, já resolvidas do config (issue #4); `None` =
     /// ferramenta sem atalho (a tecla estava tomada por outra).
-    pub tool_keys: [(Tool, Option<egui::Key>); 6],
+    pub tool_keys: [(Tool, Option<egui::Key>); 7],
     /// `true` = Ctrl+roda dá zoom e a roda pura ajusta o traço/fonte
     /// (papéis trocados em relação ao padrão, issue #4).
     pub ctrl_wheel_zoom: bool,
@@ -104,6 +110,9 @@ pub struct EditorSession {
     pub selected: Option<usize>,
     /// Arrasto de reposicionamento em andamento (ferramenta Mover).
     pub move_drag: Option<MoveDrag>,
+    /// Região de recorte já desenhada, aguardando confirmação (issue #5),
+    /// em px da imagem — `(canto superior-esquerdo, inferior-direito)`.
+    pub crop_pending: Option<(Point, Point)>,
     /// Acumulador do Ctrl+roda (ajuste de traço/fonte): converte tanto os
     /// notches da roda quanto os deltas contínuos de touchpad em passos
     /// discretos, sem varrer a faixa inteira num gesto.
@@ -120,9 +129,8 @@ impl EditorSession {
     pub fn new(serial: u64, image: RgbaImage, defaults: &EditorConfig) -> Self {
         Self {
             serial,
-            image: Arc::new(image),
+            doc: Document::new(image),
             texture: None,
-            stack: ShapeStack::default(),
             tool: Tool::Arrow,
             color: config::parse_color(&defaults.default_color),
             stroke_width: defaults.default_stroke_width.clamp(STROKE_MIN, STROKE_MAX),
@@ -135,6 +143,7 @@ impl EditorSession {
             text_input: None,
             selected: None,
             move_drag: None,
+            crop_pending: None,
             wheel_accum: 0.0,
             confirm_discard: false,
             focus_frames: FOCUS_CLAIM_FRAMES,
@@ -150,9 +159,11 @@ impl EditorSession {
         }
     }
 
-    /// Há anotações que seriam perdidas ao fechar sem salvar?
+    /// Há edições que seriam perdidas ao fechar sem salvar? Qualquer ponto
+    /// no histórico conta — anotações e também recortes (issue #5); desfazer
+    /// tudo devolve a sessão ao estado original e limpa a pendência.
     pub fn dirty(&self) -> bool {
-        !self.stack.is_empty() || self.text_input.is_some()
+        self.doc.can_undo() || self.text_input.is_some()
     }
 }
 
@@ -161,7 +172,7 @@ impl EditorSession {
 /// tomadas por uma ferramenta anterior não são reatribuídas — a ferramenta
 /// fica sem atalho (`None`) em vez de disputar a tecla (config editado à
 /// mão pode criar duplicatas que a UI de Configurações não deixa salvar).
-pub fn resolve_tool_keys(config: &config::ToolKeysConfig) -> [(Tool, Option<egui::Key>); 6] {
+pub fn resolve_tool_keys(config: &config::ToolKeysConfig) -> [(Tool, Option<egui::Key>); 7] {
     let defaults = config::ToolKeysConfig::default();
     let entries = [
         (Tool::Select, &config.select, &defaults.select),
@@ -170,6 +181,7 @@ pub fn resolve_tool_keys(config: &config::ToolKeysConfig) -> [(Tool, Option<egui
         (Tool::Rect, &config.rect, &defaults.rect),
         (Tool::Ellipse, &config.ellipse, &defaults.ellipse),
         (Tool::Text, &config.text, &defaults.text),
+        (Tool::Crop, &config.crop, &defaults.crop),
     ];
     let mut used: Vec<egui::Key> = Vec::new();
     entries.map(|(tool, configured, fallback)| {
@@ -203,6 +215,7 @@ mod tests {
         let keys = resolve_tool_keys(&ToolKeysConfig::default());
         assert_eq!(keys[0], (Tool::Select, Some(egui::Key::M)));
         assert_eq!(keys[5], (Tool::Text, Some(egui::Key::T)));
+        assert_eq!(keys[6], (Tool::Crop, Some(egui::Key::C)));
     }
 
     #[test]

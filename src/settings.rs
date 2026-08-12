@@ -198,6 +198,7 @@ pub fn show(ctx: &egui::Context, state: &mut SettingsState) {
                         (Tool::Rect, &mut tk.rect),
                         (Tool::Ellipse, &mut tk.ellipse),
                         (Tool::Text, &mut tk.text),
+                        (Tool::Crop, &mut tk.crop),
                     ] {
                         ui.label(tool.label());
                         egui::ComboBox::from_id_salt(("tool_key", tool.label()))
@@ -400,6 +401,7 @@ fn tool_key_conflicts(keys: &ToolKeysConfig) -> Vec<(Tool, Tool)> {
         (Tool::Rect, &keys.rect, &defaults.rect),
         (Tool::Ellipse, &keys.ellipse, &defaults.ellipse),
         (Tool::Text, &keys.text, &defaults.text),
+        (Tool::Crop, &keys.crop, &defaults.crop),
     ];
     let effective = |configured: &str, fallback: &str| {
         crate::editor::parse_tool_key(configured)

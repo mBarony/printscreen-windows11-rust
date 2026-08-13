@@ -37,8 +37,25 @@ jobs:
           Write-Host "rustshot.exe: $mb MB"
           if ($exe.Length -gt 15MB) { Write-Warning "Acima do alvo de 15 MB (RNF-01)" }
 
+      # Assina uma cópia, nunca o exe em target/: o rust-cache guarda essa
+      # pasta, e um binário assinado no cache confundiria builds seguintes.
+      - name: Separar o artefato para assinatura
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path artifact -Force | Out-Null
+          Copy-Item target/release/rustshot.exe artifact/rustshot.exe -Force
+
+      # Pushes de fork não recebem segredos: aqui a assinatura é opcional.
+      - name: Assinar o executável
+        uses: ./.github/actions/sign-windows
+        with:
+          path: artifact/rustshot.exe
+          pfx-base64: ${{ secrets.CODE_SIGN_PFX_BASE64 }}
+          password: ${{ secrets.CODE_SIGN_PASSWORD }}
+          required: "false"
+
       - name: Publicar artefato
         uses: actions/upload-artifact@v5
         with:
           name: rustshot-windows-x64
-          path: target/release/rustshot.exe
+          path: artifact/rustshot.exe

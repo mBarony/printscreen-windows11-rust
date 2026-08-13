@@ -57,8 +57,8 @@ extraídas do CHANGELOG. Também dá para disparar pela aba *Actions* →
 *Release* → *Run workflow*, informando a tag (útil quando não se quer criar
 a tag localmente).
 
-> Um exe não assinado pode disparar o SmartScreen na primeira execução em outras
-> máquinas; assinatura de código (OV/EV) é opcional e recomendada para distribuição ampla.
+O executável publicado é assinado pelo workflow (ver [Assinatura digital](#assinatura-digital));
+a chave privada vive apenas como segredo do repositório, nunca no código.
 
 Em hosts não-Windows é possível validar tipos e lints sem linkar:
 `cargo check --target x86_64-pc-windows-msvc` (o script de build só embute os
@@ -228,8 +228,56 @@ O binário é compilado pelo CI no `windows-latest` com o toolchain **MSVC**
 conferência — veja [todas as releases](https://github.com/mBarony/printscreen-windows11-rust/releases).
 Também dá para compilar você mesmo com `.\build.ps1` (seção [Build](#build)).
 
-> Um exe não assinado pode disparar o SmartScreen na primeira execução:
-> "Mais informações" → "Executar assim mesmo".
+## Assinatura digital
+
+O `rustshot.exe` das releases é assinado no CI com **Authenticode** (SHA-256 e carimbo
+de tempo RFC 3161). Para ver quem assinou:
+
+```powershell
+Get-AuthenticodeSignature .\rustshot.exe | Format-List Status, SignerCertificate, TimeStamperCertificate
+```
+
+O certificado é **autoassinado**, e isso tem uma consequência que vale dizer sem
+rodeios: **o SmartScreen continua aparecendo** na primeira execução ("Mais informações"
+→ "Executar assim mesmo"), e o `Status` do comando acima vem como `UnknownError`,
+porque a cadeia não termina numa autoridade certificadora reconhecida pelo Windows.
+Só um certificado OV/EV de uma CA (ou o Azure Trusted Signing) elimina esse aviso.
+
+O que a assinatura entrega, mesmo assim: **autoria** — o binário comprovadamente saiu
+deste projeto — e **detecção de adulteração**, já que qualquer byte alterado invalida
+a assinatura. É uma garantia mais forte que o `SHA256SUMS.txt` sozinho, que um
+adversário poderia recalcular junto com o arquivo trocado.
+
+Certificado usado (parte pública em [`assets/rustshot-codesign.cer`](assets/rustshot-codesign.cer),
+também anexado a cada release):
+
+| | |
+|---|---|
+| Titular | `CN=Marcio Baroni, O=RustShot, C=BR` |
+| Validade | 13/08/2026 – 13/08/2031 |
+| SHA-256 | `9019C1A627A5F5B0F10C454A86C0A1800FB4C2C81CFC586E72C382A7AF5F8E82` |
+
+Confira que o arquivo baixado corresponde a esse certificado:
+
+```powershell
+(Get-FileHash .\rustshot-codesign.cer -Algorithm SHA256).Hash
+Get-PfxCertificate .\rustshot-codesign.cer | Format-List Subject, Thumbprint, NotAfter
+```
+
+### Confiar no certificado (opcional)
+
+Instalar o certificado faz o Windows reconhecer o app como assinado e o `Status` virar
+`Valid`. **Pense antes de fazer isso:** ao colocar um certificado autoassinado em
+*Trusted Root*, você passa a confiar em **tudo** que for assinado com aquela chave —
+não é um passo de instalação de rotina, e só faz sentido em máquinas suas, depois de
+conferir o SHA-256 acima. Em PowerShell **como administrador**:
+
+```powershell
+Import-Certificate -FilePath .\rustshot-codesign.cer -CertStoreLocation Cert:\LocalMachine\Root
+Import-Certificate -FilePath .\rustshot-codesign.cer -CertStoreLocation Cert:\LocalMachine\TrustedPublisher
+```
+
+Para desfazer, remova o certificado desses dois repositórios pelo `certlm.msc`.
 
 ## Histórico de versões
 

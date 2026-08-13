@@ -95,10 +95,11 @@ runs:
           Write-Host "::error::Assinatura sem carimbo de tempo — expiraria junto com o certificado."
           exit 1
         }
-        Write-Host "Assinado por: $subject"
-        Write-Host "Impressão digital: $($signature.SignerCertificate.Thumbprint)"
+        $thumbprint = $signature.SignerCertificate.Thumbprint
         Write-Host "Carimbo de tempo: $($signature.TimeStamperCertificate.Subject)"
         Write-Host "Status (UnknownError é o esperado: cadeia autoassinada): $($signature.Status)"
+        # Anotação (e não só log) para o resultado ficar auditável de fora do runner.
+        Write-Host "::notice::Executável assinado por $subject (impressão digital $thumbprint), com carimbo de tempo."
 
     - name: Remover o certificado do runner
       if: always()

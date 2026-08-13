@@ -92,10 +92,25 @@ jobs:
 
           New-Item -ItemType Directory -Path release-assets -Force | Out-Null
           Copy-Item $exe.FullName release-assets/rustshot.exe
+          Copy-Item assets/rustshot-codesign.cer release-assets/rustshot-codesign.cer
 
+      # Obrigatória aqui: uma release não pode sair sem assinatura.
+      - name: Assinar o executável
+        uses: ./.github/actions/sign-windows
+        with:
+          path: release-assets/rustshot.exe
+          pfx-base64: ${{ secrets.CODE_SIGN_PFX_BASE64 }}
+          password: ${{ secrets.CODE_SIGN_PASSWORD }}
+          required: "true"
+
+      # Depois de assinar, sempre: a assinatura altera o binário, e o hash
+      # publicado precisa ser o do arquivo que o usuário baixa.
+      - name: Gerar o SHA256SUMS
+        shell: pwsh
+        run: |
           $hash = (Get-FileHash release-assets/rustshot.exe -Algorithm SHA256).Hash.ToLower()
           "$hash  rustshot.exe" | Out-File -FilePath release-assets/SHA256SUMS.txt -Encoding ascii
-          Write-Host "SHA-256: $hash"
+          Write-Host "SHA-256 (executável assinado): $hash"
 
       - name: Montar as notas da release
         shell: pwsh
@@ -133,7 +148,16 @@ jobs:
           $notes += 'Get-FileHash .\rustshot.exe -Algorithm SHA256'
           $notes += '```'
           $notes += ''
-          $notes += 'Um exe não assinado pode disparar o SmartScreen na primeira execução ("Mais informações" → "Executar assim mesmo").'
+          $notes += ''
+          $notes += '## Assinatura digital'
+          $notes += ''
+          $notes += 'O executável é assinado (Authenticode, SHA-256 com carimbo de tempo). Para ver quem assinou:'
+          $notes += ''
+          $notes += '```powershell'
+          $notes += 'Get-AuthenticodeSignature .\rustshot.exe | Format-List Status, SignerCertificate, TimeStamperCertificate'
+          $notes += '```'
+          $notes += ''
+          $notes += 'O certificado é **autoassinado**, então o Windows ainda mostra o SmartScreen na primeira execução ("Mais informações" → "Executar assim mesmo") e o `Status` aparece como `UnknownError` — a assinatura prova a origem do arquivo, não substitui um certificado de CA. O `rustshot-codesign.cer` anexado é a parte pública; instalá-lo é opcional e explicado no README.'
 
           $notes -join "`n" | Out-File -FilePath release-notes.md -Encoding utf8
           Get-Content release-notes.md
@@ -148,11 +172,12 @@ jobs:
           gh release view $tag 2>$null | Out-Null
           if ($LASTEXITCODE -eq 0) {
             Write-Host "Release $tag ja existe; substituindo os assets."
-            gh release upload $tag release-assets/rustshot.exe release-assets/SHA256SUMS.txt --clobber
+            gh release upload $tag release-assets/rustshot.exe release-assets/SHA256SUMS.txt release-assets/rustshot-codesign.cer --clobber
           } else {
             gh release create $tag `
               release-assets/rustshot.exe `
               release-assets/SHA256SUMS.txt `
+              release-assets/rustshot-codesign.cer `
               --title "RustShot $tag" `
               --notes-file release-notes.md
           }

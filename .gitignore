@@ -27,3 +27,14 @@ rustshot.log.old
 config.json.bak
 config.json.tmp
 dist/
+
+# Material de assinatura de código — a chave privada vive fora do repositório
+# (só como segredo do GitHub). Rede de segurança contra commit acidental.
+# `*.cer` NÃO entra aqui: a parte pública é publicada de propósito.
+*.pfx
+*.p12
+*.pem
+*.key
+*.crt
+*.b64
+pfx-password.txt

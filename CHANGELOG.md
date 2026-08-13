@@ -2,6 +2,18 @@
 
 Histórico de versões do RustShot. Datas em 2026.
 
+## v1.5.1 — 13/08
+
+- **Executável assinado** (Authenticode, SHA-256 com carimbo de tempo): a
+  assinatura acontece no CI, com a chave privada guardada apenas como segredo
+  do repositório. O `SHA256SUMS.txt` passa a ser calculado depois da
+  assinatura, e cada release leva junto a parte pública do certificado
+  (`rustshot-codesign.cer`).
+- O certificado é autoassinado: ele comprova a autoria e denuncia adulteração,
+  mas **não** remove o aviso do SmartScreen — para isso seria preciso um
+  certificado de uma autoridade certificadora. Detalhes na seção "Assinatura
+  digital" do README.
+
 ## v1.5.0 — 12/08
 
 - **Recorte no editor** (issue #5): nova ferramenta **Recortar** (`C`) —

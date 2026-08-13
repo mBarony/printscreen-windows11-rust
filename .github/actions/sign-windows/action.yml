@@ -1,0 +1,111 @@
+name: Assinar executável (Authenticode)
+description: >
+  Assina um executável do Windows com o certificado de código do projeto.
+  A chave privada vem dos segredos do repositório e nunca toca o workspace.
+
+inputs:
+  path:
+    description: Caminho do .exe a assinar.
+    required: true
+  pfx-base64:
+    description: PKCS#12 (chave + certificado) em base64 — segredo do repositório.
+    required: true
+  password:
+    description: Senha do PKCS#12 — segredo do repositório.
+    required: true
+  required:
+    description: >
+      "true" falha quando não há certificado (releases); "false" apenas avisa e
+      segue sem assinar (pushes de fork, que não recebem segredos).
+    required: false
+    default: "false"
+  expected-subject:
+    description: Trecho que o Subject do certificado precisa conter, conferido após assinar.
+    required: false
+    default: "CN=Marcio Baroni"
+
+runs:
+  using: composite
+  steps:
+    - name: Assinar
+      shell: pwsh
+      env:
+        # Os segredos entram por env: interpolá-los dentro do script permitiria
+        # injeção e poderia imprimi-los no log.
+        PFX_BASE64: ${{ inputs.pfx-base64 }}
+        PFX_PASSWORD: ${{ inputs.password }}
+        TARGET_PATH: ${{ inputs.path }}
+        SIGN_REQUIRED: ${{ inputs.required }}
+        EXPECTED_SUBJECT: ${{ inputs.expected-subject }}
+      run: |
+        $ErrorActionPreference = 'Stop'
+
+        if ([string]::IsNullOrWhiteSpace($env:PFX_BASE64)) {
+          if ($env:SIGN_REQUIRED -eq 'true') {
+            Write-Host "::error::Certificado de assinatura ausente (segredo CODE_SIGN_PFX_BASE64). Uma release não pode sair sem assinatura."
+            exit 1
+          }
+          Write-Host "::notice::Sem certificado disponível (fork ou segredo ausente) — executável não assinado."
+          exit 0
+        }
+
+        $exe = (Resolve-Path $env:TARGET_PATH).Path
+
+        # O PFX é gravado fora do workspace: assim não há como ser commitado
+        # nem recolhido por upload-artifact.
+        $pfx = Join-Path $env:RUNNER_TEMP 'codesign.pfx'
+        [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:PFX_BASE64.Trim()))
+
+        $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" -ErrorAction SilentlyContinue |
+                    Sort-Object { [version]($_.Directory.Parent.Name -replace '[^\d\.]', '') } |
+                    Select-Object -Last 1
+        if (-not $signtool) {
+          Write-Host "::error::signtool.exe não encontrado no Windows SDK do runner."
+          exit 1
+        }
+        Write-Host "signtool: $($signtool.FullName)"
+
+        # O carimbo de tempo (RFC 3161) é obrigatório: sem ele a assinatura
+        # deixaria de valer quando o certificado expirar.
+        & $signtool.FullName sign `
+          /f $pfx /p $env:PFX_PASSWORD `
+          /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
+          /d "RustShot" /du "https://github.com/mBarony/printscreen-windows11-rust" `
+          $exe
+        if ($LASTEXITCODE -ne 0) {
+          Write-Host "::error::signtool falhou (código $LASTEXITCODE)."
+          exit 1
+        }
+
+        # Verificação: `signtool verify /pa` falharia sempre, porque o
+        # certificado é autoassinado e a cadeia não é confiável por padrão —
+        # o que se confere aqui é que a assinatura existe, é nossa e tem
+        # carimbo de tempo.
+        $signature = Get-AuthenticodeSignature -FilePath $exe
+        if (-not $signature.SignerCertificate) {
+          Write-Host "::error::Nenhuma assinatura encontrada em $exe após assinar."
+          exit 1
+        }
+        $subject = $signature.SignerCertificate.Subject
+        if ($subject -notlike "*$($env:EXPECTED_SUBJECT)*") {
+          Write-Host "::error::Assinado por '$subject', esperado conter '$($env:EXPECTED_SUBJECT)'."
+          exit 1
+        }
+        if (-not $signature.TimeStamperCertificate) {
+          Write-Host "::error::Assinatura sem carimbo de tempo — expiraria junto com o certificado."
+          exit 1
+        }
+        Write-Host "Assinado por: $subject"
+        Write-Host "Impressão digital: $($signature.SignerCertificate.Thumbprint)"
+        Write-Host "Carimbo de tempo: $($signature.TimeStamperCertificate.Subject)"
+        Write-Host "Status (UnknownError é o esperado: cadeia autoassinada): $($signature.Status)"
+
+    - name: Remover o certificado do runner
+      if: always()
+      shell: pwsh
+      run: |
+        $pfx = Join-Path $env:RUNNER_TEMP 'codesign.pfx'
+        if (Test-Path $pfx) {
+          Remove-Item $pfx -Force
+          Write-Host "PFX temporário removido."
+        }

@@ -299,6 +299,8 @@ impl RustShotApp {
     // -----------------------------------------------------------------------
 
     fn process_shared(&mut self) {
+        let was_busy = !matches!(self.shared.lock().unwrap().flow, Flow::Idle);
+
         // Resultado do overlay de seleção.
         let outcome_step = {
             let mut shared = self.shared.lock().unwrap();
@@ -378,6 +380,13 @@ impl RustShotApp {
         };
         if let Some(new_config) = pending {
             self.apply_config(new_config);
+        }
+
+        // Fluxo encerrado: as capturas já foram liberadas, mas as páginas que
+        // elas tocaram continuariam no working set — o app volta para a bandeja
+        // com o tamanho de quando estava editando um 4K.
+        if was_busy && matches!(self.shared.lock().unwrap().flow, Flow::Idle) {
+            platform::memory::trim_working_set();
         }
     }
 

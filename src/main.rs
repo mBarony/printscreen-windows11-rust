@@ -130,6 +130,12 @@ fn wgpu_options() -> eframe::egui_wgpu::WgpuConfiguration {
         ..Default::default()
     };
     if let WgpuSetup::CreateNew(setup) = &mut options.wgpu_setup {
+        // Só D3D12: é o único backend compilado (feature "dx12" do wgpu) e o
+        // único que faz sentido no alvo. O padrão do eframe pede PRIMARY | GL,
+        // o que ainda faz o wgpu enumerar e sondar backends inexistentes no
+        // boot — e deixa `WGPU_BACKEND` capaz de pedir um caminho que não
+        // existe no binário.
+        setup.instance_descriptor.backends = wgpu::Backends::DX12;
         setup.power_preference =
             wgpu::PowerPreference::from_env().unwrap_or(wgpu::PowerPreference::LowPower);
         setup.device_descriptor = std::sync::Arc::new(|_adapter| wgpu::DeviceDescriptor {

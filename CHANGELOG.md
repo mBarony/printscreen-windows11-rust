@@ -2,6 +2,58 @@
 
 Histórico de versões do RustShot. Datas em 2026.
 
+## v1.6.0 — 17/08
+
+Versão dedicada a consumo de memória. O app ocupava ~90 MB parado na bandeja, e
+praticamente nada disso eram dados do RustShot: era o device D3D12 que o
+viewport-raiz de 1×1 px mantinha de pé a sessão inteira — driver da GPU mapeado,
+blocos do alocador do wgpu e swapchain, 24 horas por dia, para uma janela
+invisível de um pixel.
+
+- **O processo residente não carrega mais GUI.** O executável passou a ter dois
+  modos: o *residente* (sem argumentos) cuida de bandeja, atalhos globais e
+  captura de tela cheia em Win32 puro, num loop de mensagens próprio, sem
+  eframe/wgpu; e o de *GUI* (`--gui select|settings`), que sobe o eframe apenas
+  para o overlay de seleção, o editor ou as configurações, e encerra ao terminar
+  — devolvendo ao sistema tudo que a GPU custava. A captura continua acontecendo
+  no residente, antes de qualquer janela existir, então a tela permanece
+  congelada no instante do atalho; os pixels chegam ao processo de GUI por
+  memória compartilhada. Balões de notificação e o aviso de "config.json
+  regravado" voltam por `WM_COPYDATA`, porque atalhos e registro do Windows
+  continuam sendo do residente (RF-05 segue valendo: alteração de atalho tem
+  efeito imediato, sem reiniciar).
+- **Ajustes de memória do backend gráfico** no processo de GUI: só
+  `Backends::DX12` (o padrão do eframe fazia o wgpu sondar backends que nem
+  estão compilados), `MemoryHints::MemoryUsage` — que troca os blocos de 256 MiB
+  (device) e 64 MiB (host, RAM do sistema) do padrão por 8 MiB e 4 MiB —,
+  `PowerPreference::LowPower`, que em máquina de GPU híbrida escolhe a integrada
+  e evita carregar o driver da dedicada (`WGPU_POWER_PREF=high` reverte sem
+  recompilar), e uma única frame em voo. Somou-se a isso o
+  `trim_working_set()`, que devolve ao SO as páginas tocadas pela captura assim
+  que o fluxo termina.
+- **Executável 24% menor** (7,38 MB → 5,59 MB): saíram as quatro fontes
+  embutidas do egui (Ubuntu-Light, Hack, NotoEmoji, emoji-icon-font), que o app
+  não usava — a interface roda na Segoe UI Variable do sistema com a Inter
+  embutida como reserva, e os ícones são vetoriais próprios —, saiu o
+  `accesskit` e o release passou a usar `lto = "fat"`.
+- **Alvo restrito a Windows 11 x64.** Build para outra arquitetura falha na
+  compilação com mensagem explícita, e em sistema anterior à build 22000 o app
+  mostra uma caixa de mensagem e encerra.
+
+Mudanças de comportamento a conhecer:
+
+- O overlay de seleção agora aparece algumas centenas de milissegundos depois do
+  atalho — é o tempo de subir o processo de GUI e criar o device. A imagem
+  exibida é a do instante do atalho, não a do momento em que a janela surge.
+- **Leitores de tela não enxergam mais a interface**: o provedor de UI Automation
+  (`accesskit`) foi removido em troca de memória.
+- Emoji digitado no editor não renderiza (sem a NotoEmoji). Ele já não sobrevivia
+  à exportação, que rasteriza com a Inter — o preview passou a ser fiel ao JPG.
+- "Sair" com o editor aberto encerra apenas o residente: a janela do editor
+  continua viva de propósito, para não descartar anotações não salvas.
+- Falhas de registro de atalho aparecem como balão da bandeja, não mais na lista
+  dentro da janela de configurações.
+
 ## v1.5.1 — 13/08
 
 - **Executável assinado** (Authenticode, SHA-256 com carimbo de tempo): a

@@ -1,6 +1,6 @@
 [package]
 name = "rustshot"
-version = "1.5.1"
+version = "1.6.0"
 edition = "2021"
 description = "Captura de tela para Windows 11 — tela cheia, região e edição com anotações"
 license = "BSD-3-Clause"

@@ -23,6 +23,9 @@ const SEGOE: &str = "Segoe UI Variable";
 /// sistema como fonte primária da UI. Inter fica também como família nomeada
 /// para o canvas do editor.
 pub fn install_fonts(ctx: &egui::Context) {
+    // Sem a feature "default_fonts" do egui, o `default()` vem vazio: toda
+    // família precisa ser preenchida aqui — o epaint entra em pânico ao
+    // formatar texto com uma família sem fonte alguma.
     let mut fonts = egui::FontDefinitions::default();
 
     fonts.font_data.insert(
@@ -35,6 +38,10 @@ pub fn install_fonts(ctx: &egui::Context) {
 
     let proportional = fonts.families.entry(FontFamily::Proportional).or_default();
     proportional.insert(0, INTER.into());
+    // A UI não usa monoespaçada, mas o `TextStyle::Monospace` do egui existe e
+    // qualquer widget pode alcançá-lo: fica na Inter em vez de vazio.
+    let monospace = fonts.families.entry(FontFamily::Monospace).or_default();
+    monospace.insert(0, INTER.into());
 
     if let Some(bytes) = system_ui_font() {
         fonts
@@ -281,4 +288,38 @@ pub fn toggle_switch(ui: &mut egui::Ui, on: &mut bool) -> egui::Response {
     painter.circle_filled(egui::Pos2::new(knob_x, rect.center().y), radius - 4.0, knob_fill);
 
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Sem a feature `default_fonts` do egui nada vem preenchido de graça, e uma
+    /// família sem fonte só se manifesta em runtime: o epaint entra em pânico ao
+    /// formatar o primeiro texto. O teste percorre as três famílias que a UI e o
+    /// editor alcançam.
+    #[test]
+    fn every_family_has_a_font() {
+        let ctx = egui::Context::default();
+        install_fonts(&ctx);
+        let _ = ctx.run(Default::default(), |ctx| {
+            for family in [
+                FontFamily::Proportional,
+                FontFamily::Monospace,
+                FontFamily::Name(INTER.into()),
+            ] {
+                ctx.fonts(|fonts| {
+                    let galley = fonts.layout_no_wrap(
+                        "RustShot".to_owned(),
+                        FontId::new(14.0, family.clone()),
+                        Color32::WHITE,
+                    );
+                    assert!(
+                        galley.rect.width() > 0.0,
+                        "família {family:?} não rasterizou glifo algum"
+                    );
+                });
+            }
+        });
+    }
 }

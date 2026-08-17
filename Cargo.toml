@@ -20,15 +20,22 @@ build = "build.rs"
 # GUI (egui) com renderizador wgpu (D3D12/DXGI no Windows): o backend
 # glow (OpenGL) fazia o driver NVIDIA tirar o overlay de tela cheia da
 # composição do DWM (unredirection), apagando o monitor por ~1 s.
+# Sem "default_fonts": as quatro fontes embutidas do egui (Ubuntu-Light, Hack,
+# NotoEmoji, emoji-icon-font) não são usadas — a UI roda na Segoe UI Variable do
+# sistema com a Inter embutida como reserva, e os ícones são vetoriais próprios
+# (editor::icons). Emoji já não sobrevivia à exportação, que rasteriza com a
+# Inter; sem a NotoEmoji no preview, o editor passa a ser WYSIWYG de verdade.
 eframe = { version = "0.32", default-features = false, features = [
     "accesskit",       # acessibilidade (leitores de tela)
-    "default_fonts",
     "wgpu",
 ] }
 # Backend de plataforma do wgpu (o feature "wgpu" do eframe não habilita
 # nenhum): D3D12, o mesmo caminho DXGI/DWM dos apps nativos do Windows.
 wgpu = { version = "25", default-features = false, features = ["dx12"] }
-egui = "0.32"
+# default-features = false pelo mesmo motivo: o default do egui é justamente
+# "default_fonts", e a unificação de features do cargo o reativaria para o
+# eframe.
+egui = { version = "0.32", default-features = false }
 ab_glyph = "0.2"           # rasterização de texto na exportação (já é dep. do epaint)
 log = "0.4"                # fachada usada também por eframe/wgpu
 
@@ -56,7 +63,9 @@ embed-resource = "3"       # (build) embute ícone + manifesto Per-Monitor V2
 
 [profile.release]
 opt-level = 3
-lto = "thin"
+# "fat": o binário é pequeno e o build já é curto — vale o inline entre crates
+# (menos código morto no exe, menos páginas mapeadas em execução).
+lto = "fat"
 codegen-units = 1
 strip = "symbols"
 panic = "abort"

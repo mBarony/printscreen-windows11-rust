@@ -24,6 +24,7 @@ pub mod dialog;
 pub mod folders;
 pub mod instance;
 pub mod logger;
+pub mod memory;
 pub mod msgbox;
 pub mod shell;
 pub mod time;

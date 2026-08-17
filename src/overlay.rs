@@ -32,7 +32,7 @@ const VEIL_ALPHA: u8 = 153;
 const MIN_SELECTION_PX: f32 = 3.0;
 
 /// O que fazer com a região confirmada.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Purpose {
     /// RF-02: a seleção fica pendente até Ctrl+C (copiar) ou Ctrl+S (salvar).
     SaveDirect,

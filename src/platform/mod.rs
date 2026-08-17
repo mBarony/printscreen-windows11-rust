@@ -23,6 +23,10 @@ pub mod clipboard;
 pub mod dialog;
 pub mod folders;
 pub mod instance;
+// Transporte entre processos: só existe no Windows (e sob teste, que exercita a
+// serialização pura em qualquer host).
+#[cfg(any(windows, test))]
+pub mod ipc;
 pub mod logger;
 pub mod memory;
 pub mod msgbox;

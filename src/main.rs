@@ -1,9 +1,15 @@
 //! RustShot — captura de tela para Windows 11 (bootstrap).
 //!
-//! Responsável por: instância única (RF-08), logging em `rustshot.log` (na
-//! pasta do executável), carga do `config.json` e inicialização do event loop
-//! do eframe com o viewport principal fora da área visível — a aplicação
-//! vive na bandeja do sistema (RF-06).
+//! Um executável, dois modos:
+//!
+//! * **residente** (sem argumentos) — bandeja, atalhos globais e captura de tela
+//!   cheia em Win32 puro. É o que fica de pé a sessão inteira, e por isso não
+//!   carrega eframe/wgpu: um device D3D12 aberto 24/7 custava ~90 MB.
+//! * **GUI** (`--gui …`) — overlay de seleção, editor ou configurações. Sobe o
+//!   eframe, cumpre a tarefa recebida na linha de comando e encerra.
+//!
+//! Ambos passam por aqui para instância única (RF-08, só o residente), logging
+//! em `rustshot.log` (na pasta do executável) e carga do `config.json`.
 
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
@@ -21,11 +27,14 @@ mod editor;
 mod error;
 mod hotkeys;
 mod imgbuf;
+mod jobs;
 mod jpeg;
 mod json;
 mod notify;
 mod overlay;
 mod platform;
+mod resident;
+mod resident_link;
 mod settings;
 mod storage;
 mod theme;
@@ -53,7 +62,21 @@ fn main() {
         return;
     }
 
-    // RF-08 em seguida: a segunda instância não deve tocar (nem rotacionar) o
+    match cli::parse(std::env::args().skip(1)) {
+        Ok(cli::Mode::Resident) => run_resident(),
+        Ok(cli::Mode::Gui(request)) => run_gui(request),
+        Err(err) => {
+            // Linha de comando malformada só acontece por engano de quem chamou
+            // o exe à mão: reportar e sair, sem tocar em bandeja nem em log.
+            platform::msgbox::info("RustShot — argumentos inválidos", &err);
+        }
+    }
+    jobs::join_all();
+}
+
+/// Modo residente: instância única, bandeja e loop de mensagens (RF-06/RF-08).
+fn run_resident() {
+    // RF-08 primeiro: a segunda instância não deve tocar (nem rotacionar) o
     // log que a instância em execução mantém aberto.
     let Some(_instance) = platform::instance::acquire(SINGLE_INSTANCE_NAME) else {
         notify::toast_blocking(
@@ -63,10 +86,8 @@ fn main() {
         return;
     };
 
-    init_logging();
-    std::panic::set_hook(Box::new(|info| {
-        log::error!("panic: {info}");
-    }));
+    init_logging(true);
+    install_panic_hook();
 
     if !config::state_dir_writable() {
         log::warn!("pasta do executável sem permissão de escrita");
@@ -78,25 +99,51 @@ fn main() {
 
     let loaded = config::load();
     log::info!(
-        "RustShot {} iniciando; config em {}",
+        "RustShot {} iniciando (residente); config em {}",
         env!("CARGO_PKG_VERSION"),
         config::config_path().display()
     );
 
-    // O viewport-raiz precisa ficar VISÍVEL para o SO (janela oculta não
-    // recebe WM_PAINT, o `update` nunca roda e atalhos/bandeja morrem), mas
-    // imperceptível para o usuário: 1×1 px, sem decoração, fora da área da
-    // tela, sem ativação e sem redimensionar/maximizar (Win+Seta em uma
-    // janela alcançada por engano maximizaria um retângulo vazio).
-    // `visible(false)` era a causa do retângulo preto: em máquinas onde a
-    // flag não segurava a janela, ela surgia no canto do monitor.
-    // O App ainda a remove do Alt-Tab (WS_EX_TOOLWINDOW) e ignora Alt+F4.
+    resident::run(loaded);
+    log::info!("RustShot encerrado");
+}
+
+/// Modo GUI: uma tarefa, uma janela, e o processo morre em seguida.
+fn run_gui(request: cli::GuiRequest) {
+    // Sem instância única: o residente é que é singleton, e ele pode ter mais de
+    // um filho vivo (uma captura e as configurações). Sem rotação de log
+    // também — o arquivo é do residente, que o mantém aberto.
+    init_logging(false);
+    install_panic_hook();
+    resident_link::set_resident(request.parent);
+
+    let config = config::load().config;
+    let task = match request.task {
+        cli::GuiTask::Select { shots, len, purpose } => match load_shots(&shots, len) {
+            Ok(shots) => app::Task::Select { shots, purpose },
+            Err(err) => {
+                log::error!("capturas não recebidas do residente: {err:#}");
+                notify::toast_error("Falha na captura", &format!("{err:#}"));
+                return;
+            }
+        },
+        cli::GuiTask::Settings => app::Task::Settings,
+    };
+
+    log::info!("RustShot {} iniciando (GUI)", env!("CARGO_PKG_VERSION"));
+
+    // O viewport-raiz precisa ficar VISÍVEL para o SO (janela oculta não recebe
+    // WM_PAINT e o `update` nunca roda), mas imperceptível para o usuário: 1×1
+    // px, sem decoração, fora da área da tela, sem ativação e sem
+    // redimensionar/maximizar. `visible(false)` era a causa do retângulo preto:
+    // em máquinas onde a flag não segurava a janela, ela surgia no canto do
+    // monitor. O App ainda a remove do Alt-Tab (WS_EX_TOOLWINDOW).
     let options = eframe::NativeOptions {
         // wgpu (D3D12/DXGI): apresentação composta pelo DWM como qualquer
         // app moderno — o glow/OpenGL sofria unredirection em tela cheia.
         renderer: eframe::Renderer::Wgpu,
         viewport: egui::ViewportBuilder::default()
-            .with_title(APP_NAME)
+            .with_title(app::ROOT_TITLE)
             .with_decorations(false)
             .with_taskbar(false)
             .with_active(false)
@@ -115,23 +162,31 @@ fn main() {
     let result = eframe::run_native(
         APP_NAME,
         options,
-        Box::new(move |cc| Ok(Box::new(app::RustShotApp::new(cc, loaded)))),
+        Box::new(move |cc| Ok(Box::new(app::GuiApp::new(cc, config, task)))),
     );
     if let Err(err) = result {
         log::error!("falha fatal no event loop: {err}");
     }
-    log::info!("RustShot encerrado");
+    log::info!("processo de GUI encerrado");
+}
+
+#[cfg(windows)]
+fn load_shots(name: &str, len: usize) -> error::Result<Vec<capture::MonitorShot>> {
+    platform::ipc::consume(name, len)
+}
+
+#[cfg(not(windows))]
+fn load_shots(_name: &str, _len: usize) -> error::Result<Vec<capture::MonitorShot>> {
+    Err(error::err!("memória compartilhada disponível apenas no Windows"))
 }
 
 /// Ajustes de memória do backend wgpu: os padrões do eframe são de aplicativo
-/// de tela cheia, e este vive na bandeja com um viewport-raiz de 1×1 px — o
-/// device D3D12 fica de pé a sessão inteira, então o que ele reserva no boot é
-/// consumo permanente.
+/// de tela cheia, e este processo é efêmero.
 ///
 /// * `MemoryUsage`: o alocador do dx12 passa de blocos de 256 MiB (device) e
 ///   64 MiB (host-visível, que é RAM do sistema) para 8 MiB e 4 MiB. Sem isso o
 ///   primeiro upload — o atlas de fontes, já no boot — reserva um heap UPLOAD
-///   de 64 MiB que fica preso até o app encerrar.
+///   de 64 MiB.
 /// * `LowPower`: em máquina de GPU híbrida escolhe a integrada. Uma ferramenta
 ///   de captura não ganha nada da dedicada, e o driver de usuário dela (dezenas
 ///   de MB mapeados) é a maior fatia isolada do consumo — além de manter a
@@ -171,15 +226,25 @@ fn wgpu_options() -> eframe::egui_wgpu::WgpuConfiguration {
     options
 }
 
+fn install_panic_hook() {
+    std::panic::set_hook(Box::new(|info| {
+        log::error!("panic: {info}");
+    }));
+}
+
 /// Logger em arquivo com rotação simples (`.log` → `.log.old` acima de 2 MB).
-fn init_logging() {
+/// Só o residente rotaciona: o arquivo fica aberto por ele, e um filho
+/// renomeando-o levaria o log da sessão embora.
+fn init_logging(rotate: bool) {
     let dir = config::state_dir();
     let _ = std::fs::create_dir_all(&dir);
     let path = dir.join("rustshot.log");
 
-    if let Ok(meta) = std::fs::metadata(&path) {
-        if meta.len() > LOG_ROTATE_BYTES {
-            let _ = std::fs::rename(&path, dir.join("rustshot.log.old"));
+    if rotate {
+        if let Ok(meta) = std::fs::metadata(&path) {
+            if meta.len() > LOG_ROTATE_BYTES {
+                let _ = std::fs::rename(&path, dir.join("rustshot.log.old"));
+            }
         }
     }
 
@@ -194,5 +259,130 @@ fn init_logging() {
             log::LevelFilter::Info
         };
         platform::logger::init(file, level);
+    }
+}
+
+/// Linha de comando do modo GUI. Não é interface pública: quem monta esses
+/// argumentos é o próprio residente (`resident::spawn_gui`).
+mod cli {
+    use crate::overlay::Purpose;
+
+    pub enum Mode {
+        Resident,
+        Gui(GuiRequest),
+    }
+
+    pub struct GuiRequest {
+        /// `HWND` da janela de shell do residente, para o caminho de volta.
+        pub parent: isize,
+        pub task: GuiTask,
+    }
+
+    pub enum GuiTask {
+        Select { shots: String, len: usize, purpose: Purpose },
+        Settings,
+    }
+
+    /// `--gui select --shots <nome> --len <bytes> --purpose region|edit
+    /// --parent <hwnd>` ou `--gui settings --parent <hwnd>`.
+    pub fn parse(args: impl Iterator<Item = String>) -> Result<Mode, String> {
+        let mut kind: Option<String> = None;
+        let mut shots: Option<String> = None;
+        let mut len: Option<usize> = None;
+        let mut purpose: Option<Purpose> = None;
+        let mut parent: isize = 0;
+
+        let mut args = args.peekable();
+        if args.peek().is_none() {
+            return Ok(Mode::Resident);
+        }
+
+        while let Some(arg) = args.next() {
+            let mut value = || args.next().ok_or_else(|| format!("{arg} exige um valor"));
+            match arg.as_str() {
+                "--gui" => kind = Some(value()?),
+                "--shots" => shots = Some(value()?),
+                "--len" => {
+                    let raw = value()?;
+                    len = Some(raw.parse().map_err(|_| format!("--len inválido: {raw}"))?);
+                }
+                "--purpose" => {
+                    purpose = Some(match value()?.as_str() {
+                        "region" => Purpose::SaveDirect,
+                        "edit" => Purpose::Edit,
+                        other => return Err(format!("--purpose desconhecido: {other}")),
+                    });
+                }
+                "--parent" => {
+                    let raw = value()?;
+                    parent = raw.parse().map_err(|_| format!("--parent inválido: {raw}"))?;
+                }
+                other => return Err(format!("argumento desconhecido: {other}")),
+            }
+        }
+
+        let task = match kind.as_deref() {
+            Some("select") => GuiTask::Select {
+                shots: shots.ok_or("--gui select exige --shots")?,
+                len: len.ok_or("--gui select exige --len")?,
+                purpose: purpose.ok_or("--gui select exige --purpose")?,
+            },
+            Some("settings") => GuiTask::Settings,
+            Some(other) => return Err(format!("--gui desconhecido: {other}")),
+            None => return Err("use --gui select|settings".to_owned()),
+        };
+        Ok(Mode::Gui(GuiRequest { parent, task }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cli::{parse, GuiTask, Mode};
+    use crate::overlay::Purpose;
+
+    fn args(line: &str) -> impl Iterator<Item = String> + '_ {
+        line.split_whitespace().map(str::to_owned)
+    }
+
+    #[test]
+    fn no_arguments_is_the_resident() {
+        assert!(matches!(parse(args("")).unwrap(), Mode::Resident));
+    }
+
+    #[test]
+    fn parses_the_select_request() {
+        let mode = parse(args(
+            "--gui select --shots Local\\rustshot-shots-7-1 --len 128 --purpose edit --parent 4242",
+        ))
+        .unwrap();
+        let Mode::Gui(request) = mode else { panic!("esperado modo GUI") };
+        assert_eq!(request.parent, 4242);
+        match request.task {
+            GuiTask::Select { shots, len, purpose } => {
+                assert_eq!(shots, "Local\\rustshot-shots-7-1");
+                assert_eq!(len, 128);
+                assert_eq!(purpose, Purpose::Edit);
+            }
+            GuiTask::Settings => panic!("esperado select"),
+        }
+    }
+
+    #[test]
+    fn parses_the_settings_request() {
+        let mode = parse(args("--gui settings --parent 9")).unwrap();
+        let Mode::Gui(request) = mode else { panic!("esperado modo GUI") };
+        assert!(matches!(request.task, GuiTask::Settings));
+        assert_eq!(request.parent, 9);
+    }
+
+    #[test]
+    fn rejects_incomplete_or_unknown_lines() {
+        // Sem os dados da captura o filho não teria o que exibir.
+        assert!(parse(args("--gui select --parent 1")).is_err());
+        assert!(parse(args("--gui select --shots x --len 1 --parent 1")).is_err());
+        assert!(parse(args("--gui bananas")).is_err());
+        assert!(parse(args("--parent")).is_err(), "valor faltando");
+        assert!(parse(args("--parent abc")).is_err(), "hwnd não numérico");
+        assert!(parse(args("--purpose region")).is_err(), "sem --gui");
     }
 }

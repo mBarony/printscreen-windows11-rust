@@ -25,10 +25,11 @@ build = "build.rs"
 # sistema com a Inter embutida como reserva, e os ícones são vetoriais próprios
 # (editor::icons). Emoji já não sobrevivia à exportação, que rasteriza com a
 # Inter; sem a NotoEmoji no preview, o editor passa a ser WYSIWYG de verdade.
-eframe = { version = "0.32", default-features = false, features = [
-    "accesskit",       # acessibilidade (leitores de tela)
-    "wgpu",
-] }
+# Sem "accesskit": o adapter carregava o uiautomationcore.dll no boot de toda
+# sessão (a árvore de acessibilidade em si só é construída quando um leitor de
+# tela se conecta). Decisão consciente de trocar o suporte a NVDA/Narrator pelos
+# MB do provedor de UI Automation.
+eframe = { version = "0.32", default-features = false, features = ["wgpu"] }
 # Backend de plataforma do wgpu (o feature "wgpu" do eframe não habilita
 # nenhum): D3D12, o mesmo caminho DXGI/DWM dos apps nativos do Windows.
 wgpu = { version = "25", default-features = false, features = ["dx12"] }

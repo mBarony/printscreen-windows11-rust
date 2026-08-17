@@ -7,6 +7,12 @@
 
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+// O alvo é um só: Windows 11 x64. O manifesto embutido declara
+// `processorArchitecture="amd64"`, então um build para ARM64 ou 32 bits sairia
+// descrito errado — falha aqui, com mensagem, em vez de gerar esse exe.
+#[cfg(all(windows, not(target_arch = "x86_64")))]
+compile_error!("RustShot só suporta Windows x86_64 (o manifesto declara amd64)");
+
 mod app;
 mod capture;
 mod clipboard;
@@ -36,7 +42,18 @@ const SAC_EXE_SALT: u32 = 1;
 const LOG_ROTATE_BYTES: u64 = 2 * 1024 * 1024;
 
 fn main() {
-    // RF-08 primeiro: a segunda instância não deve tocar (nem rotacionar) o
+    // Antes de qualquer coisa: sistema anterior ao Windows 11 não é alvo
+    // suportado. Caixa de mensagem (e não toast) porque não há bandeja ainda e
+    // o processo encerra em seguida.
+    if !platform::version::is_supported() {
+        platform::msgbox::info(
+            "RustShot requer Windows 11",
+            "Este aplicativo tem como alvo o Windows 11 (build 22000) ou superior.",
+        );
+        return;
+    }
+
+    // RF-08 em seguida: a segunda instância não deve tocar (nem rotacionar) o
     // log que a instância em execução mantém aberto.
     let Some(_instance) = platform::instance::acquire(SINGLE_INSTANCE_NAME) else {
         notify::toast_blocking(

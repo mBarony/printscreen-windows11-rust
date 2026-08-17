@@ -107,19 +107,34 @@ abre a Ferramenta de Captura nativa, e `Win+Shift+S` é reservado pelo sistema.
 
 ## Arquitetura (resumo)
 
-Processo único, event loop único (`eframe`/`egui` com o viewport principal de 1×1 px fora da área visível — visível para o SO, imperceptível para o usuário);
-overlay de seleção (uma janela por monitor, sempre no topo, com a captura congelada e
-véu escuro) e editor abrem como viewports adicionais sob demanda. Atalhos globais
-(`WM_HOTKEY`) e menu da bandeja chegam pela janela de shell própria
-(`platform/shell.rs`) e acordam a UI via fila de eventos + `request_repaint`.
-Codificação e escrita de JPG rodam em threads de trabalho. Exportação do editor
-rasteriza com o rasterizador próprio (`editor/raster.rs`) + `ab_glyph` usando a
-**mesma fonte embutida** (Inter) do preview — o que você vê é o que sai no JPG.
+**Um executável, dois modos.** O que fica de pé a sessão inteira é o *residente*
+(`resident.rs`): bandeja, atalhos globais (`WM_HOTKEY`) e captura de tela cheia, tudo em
+Win32 puro — sem `eframe`, sem `wgpu`, sem device D3D12. Ele é um loop de mensagens
+`GetMessage`/`DispatchMessage` sobre a janela de shell própria (`platform/shell.rs`), e
+processa os eventos **fora** do `WndProc`, por fila.
+
+Quando um fluxo precisa de janela, o residente lança `rustshot.exe --gui …`, que sobe o
+eframe, cumpre a tarefa e encerra — devolvendo ao SO tudo que a GPU e o driver custavam.
+A captura acontece no **residente**, antes de qualquer janela existir, para a tela ficar
+congelada no instante do atalho; os pixels chegam ao filho por memória compartilhada
+(`platform/ipc.rs`). No sentido inverso, o filho pede balões e avisa que regravou o
+`config.json` por `WM_COPYDATA` (`resident_link.rs`) — quem é dono dos atalhos e do
+registro do Windows é sempre o residente.
+
+Dentro do processo de GUI, o desenho antigo continua: viewport-raiz de 1×1 px fora da área
+visível, overlay de seleção como uma janela por monitor (sempre no topo, captura congelada
+e véu escuro) e o editor como viewport adicional. Codificação e escrita de JPG rodam em
+threads de trabalho registradas em `jobs.rs`, que o `main` espera antes de deixar o
+processo morrer. Exportação do editor rasteriza com o rasterizador próprio
+(`editor/raster.rs`) + `ab_glyph` usando a **mesma fonte embutida** (Inter) do preview — o
+que você vê é o que sai no JPG.
 
 | Módulo | Responsabilidade |
 |---|---|
-| `main.rs` | bootstrap, instância única, logging, eframe |
-| `app.rs` | estado global, máquina de estados `Idle → Selecting → Editing` |
+| `main.rs` | bootstrap, escolha do modo (`--gui`), instância única, logging |
+| `resident.rs` | processo residente: bandeja, atalhos, tela cheia, lançamento dos filhos |
+| `app.rs` | processo de GUI: máquina de estados `Selecting → Editing → fim` |
+| `resident_link.rs` / `jobs.rs` | canal do filho para o residente; trabalhos que não podem morrer com o processo |
 | `config.rs` | load/save/validação do `config.json` |
 | `hotkeys.rs` | registro/re-registro dos atalhos globais |
 | `capture.rs` | enumeração de monitores e captura (GDI), composição, crop |
@@ -180,7 +195,8 @@ plataforma compilam como stubs, só para rodar os testes de lógica.
 
 - **Widget de atalho**: a tecla `PrtScr` não chega como evento de teclado do egui, então o "clique e pressione a combinação" é complementado por seletores explícitos de modificadores + tecla (único caminho para `PrintScreen`, que já vem nos padrões).
 - **Módulo extra** `settings.rs` para a janela de configurações.
-- **Consumo de memória e alvo único**: o viewport-raiz de 1×1 px mantém um device D3D12 de pé a sessão inteira, então tudo que o wgpu reserva no boot é consumo permanente. Daí os ajustes em `main.rs::wgpu_options` (só `Backends::DX12`, `MemoryHints::MemoryUsage` no lugar dos blocos de 256/64 MiB do padrão, `PowerPreference::LowPower` — reversível por `WGPU_POWER_PREF=high` —, uma frame em voo) e o `platform::memory::trim_working_set()` ao voltar para a bandeja, que devolve ao SO as páginas que a captura tocou. Na mesma direção saíram as fontes embutidas do egui (a UI usa Segoe UI Variable com a Inter como reserva; emoji digitado no editor vira tofu, mas ele já não sobrevivia à exportação) e o `accesskit` — sem provedor de UI Automation, **leitores de tela não enxergam a UI**. O alvo é só Windows 11 x64: build para outra arquitetura falha em `compile_error!`, e em sistema anterior à build 22000 o app mostra uma caixa de mensagem e encerra.
+- **Residente sem GUI**: o consumo de ~90 MB em repouso era o device D3D12 que o viewport-raiz de 1×1 px mantinha de pé a sessão inteira (driver da GPU mapeado, blocos do alocador do wgpu, swapchain). A saída foi tirar o eframe do processo residente: quem espera na bandeja é Win32 puro, e a GUI virou um processo efêmero. Preço a pagar: o overlay de seleção agora aparece com o atraso de subir um processo e criar o device (algo entre 200 e 400 ms) — a **imagem** continua congelada no instante do atalho, porque a captura acontece no residente, mas o retângulo de seleção demora a surgir. A tela cheia não paga nada: nunca abre janela. Encerrar pelo "Sair" com um editor aberto deixa a janela viva de propósito, para não descartar anotações não salvas.
+- **Consumo de memória e alvo único**: no processo de GUI valem os ajustes em `main.rs::wgpu_options` (só `Backends::DX12`, `MemoryHints::MemoryUsage` no lugar dos blocos de 256/64 MiB do padrão, `PowerPreference::LowPower` — reversível por `WGPU_POWER_PREF=high` —, uma frame em voo) e o `platform::memory::trim_working_set()` ao voltar para a bandeja, que devolve ao SO as páginas que a captura tocou. Na mesma direção saíram as fontes embutidas do egui (a UI usa Segoe UI Variable com a Inter como reserva; emoji digitado no editor vira tofu, mas ele já não sobrevivia à exportação) e o `accesskit` — sem provedor de UI Automation, **leitores de tela não enxergam a UI**. O alvo é só Windows 11 x64: build para outra arquitetura falha em `compile_error!`, e em sistema anterior à build 22000 o app mostra uma caixa de mensagem e encerra.
 - **v1.1**: saída fixa em JPG (qualidade 90) e todo o estado ao lado do exe — a v1.0 usava PNG por padrão e `%APPDATA%\RustShot`. O retângulo preto que aparecia no canto do monitor era o viewport-raiz "oculto" do eframe: uma janela realmente invisível não recebe `WM_PAINT` e mataria os atalhos, então a solução é o oposto — a janela fica **visível para o SO**, mas com 1×1 px, fora da área da tela (-32000,-32000), sem ativação, sem redimensionar/maximizar, fora do Alt-Tab (`WS_EX_TOOLWINDOW`) e imune a Alt+F4.
 - **v1.3 (standalone)**: dependências de conveniência substituídas por código próprio chamando Win32 (tabela acima). Efeitos visíveis: as notificações passam de toasts WinRT (que apareciam como "Windows PowerShell") para **balões da bandeja com o nome e o ícone do RustShot**, e o seletor de pasta usa o diálogo clássico do shell. Formatos e comportamento do `config.json` permanecem idênticos.
 - **v1.2**: a captura de região deixou de concluir ao soltar o mouse — a seleção fica **pendente na tela** e o destino é escolhido pelo teclado (`Ctrl+C` copia, `Ctrl+S` salva, novo arrasto refaz, `Esc` cancela); no editor, `Ctrl+C` passou a **fechar a janela** depois de copiar, espelhando o `Ctrl+S`. Detalhe de plataforma: `Ctrl+C` chega ao egui como `Event::Copy` (não como tecla), e é assim que overlay e editor o detectam.
@@ -197,6 +213,8 @@ plataforma compilam como stubs, só para rodar os testes de lógica.
 - Interface em pt-BR (multi-idioma no roadmap).
 - Sem suporte a leitores de tela: o provedor de UI Automation (`accesskit`) foi removido em troca de memória.
 - Windows 10 não é suportado: o app se recusa a iniciar em builds anteriores à 22000.
+- O overlay de seleção leva algumas centenas de ms para aparecer (o tempo de subir o processo de GUI); a imagem exibida é a do instante do atalho, não a do momento em que a janela surge.
+- "Sair" com o editor aberto encerra apenas o residente (bandeja e atalhos): a janela do editor continua até você fechá-la, e as notificações dela passam a ir só para o log.
 
 ## Desenvolvimento
 

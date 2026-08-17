@@ -9,8 +9,13 @@
 use crate::platform;
 
 /// Exibe uma notificação "summary / body" sem bloquear o chamador.
+///
+/// No processo de GUI a bandeja pertence ao residente, então o balão é pedido a
+/// ele por `WM_COPYDATA`; no residente, sai direto pelo ícone da bandeja.
 pub fn toast(summary: &str, body: &str) {
-    if platform::shell::show_balloon(summary, body) {
+    if crate::resident_link::balloon(summary, body)
+        || platform::shell::show_balloon(summary, body)
+    {
         log::debug!("toast: {summary} — {body}");
     } else {
         log::warn!("toast indisponível (sem bandeja): {summary} — {body}");

@@ -1075,7 +1075,7 @@ fn copy_and_close(session: &mut EditorSession) {
     commit_text_input(session);
     let base = session.doc.image().clone();
     let shapes = session.doc.shapes().to_vec();
-    std::thread::spawn(move || match super::render::render(&base, &shapes) {
+    crate::jobs::spawn(move || match super::render::render(&base, &shapes) {
         Ok(final_image) => match clipboard::copy_image(&final_image) {
             Ok(()) => notify::toast(
                 "Copiado para a área de transferência",
@@ -1094,7 +1094,7 @@ fn save_and_close(session: &mut EditorSession, target: &SaveTarget) {
     let base = session.doc.image().clone();
     let shapes = session.doc.shapes().to_vec();
     let target = target.clone();
-    std::thread::spawn(move || match super::render::render(&base, &shapes) {
+    crate::jobs::spawn(move || match super::render::render(&base, &shapes) {
         Ok(final_image) => match storage::write_image(&target, &final_image) {
             Ok(path) => {
                 let name = path

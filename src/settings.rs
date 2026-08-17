@@ -1,8 +1,9 @@
 //! Janela de configurações (RF-05), acessível pelo menu da bandeja.
 //!
 //! Edita um rascunho (`draft`) de `Config`; "Salvar" publica o rascunho em
-//! `pending_apply`, e o `App` aplica com efeito imediato (re-registro de
-//! atalhos, autostart, persistência em `config.json`).
+//! `pending_apply`, que o processo de GUI grava em `config.json` antes de avisar
+//! o residente — é ele que re-registra os atalhos e mexe no autostart, e é dele
+//! que vêm os balões quando alguma combinação é recusada pelo sistema.
 //!
 //! O widget de atalho combina "clique e pressione a combinação" (para teclas
 //! que o egui enxerga) com seletor explícito de tecla + modificadores — a
@@ -15,13 +16,15 @@ use crate::config::{Config, CtrlWheel, HotkeyDef, ToolKeysConfig};
 use crate::editor::shapes::Tool;
 use crate::hotkeys::HotkeyAction;
 
+/// Título da janela — o residente o usa para trazer ao primeiro plano a janela
+/// já aberta em vez de lançar uma segunda.
+pub const WINDOW_TITLE: &str = "RustShot — Configurações";
+
 /// Estado da janela de configurações.
 pub struct SettingsState {
     pub draft: Config,
     /// Ação cujo atalho está em modo "pressione a combinação".
     capturing: Option<HotkeyAction>,
-    /// Falhas do último apply (ex.: atalho tomado por outro app).
-    pub last_failures: Vec<String>,
     /// Pedido de fechamento da janela.
     pub close_requested: bool,
     /// Rascunho pronto para o App aplicar.
@@ -33,7 +36,6 @@ impl SettingsState {
         Self {
             draft: config,
             capturing: None,
-            last_failures: Vec::new(),
             close_requested: false,
             pending_apply: None,
         }
@@ -105,9 +107,6 @@ pub fn show(ctx: &egui::Context, state: &mut SettingsState) {
                             .color(Color32::from_rgb(230, 80, 70)),
                         );
                     }
-                }
-                for failure in &state.last_failures {
-                    ui.label(RichText::new(failure).color(Color32::from_rgb(235, 150, 60)));
                 }
             });
 
@@ -263,7 +262,6 @@ pub fn show(ctx: &egui::Context, state: &mut SettingsState) {
                     .on_hover_text("Aplica imediatamente e grava no config.json")
                     .clicked()
                 {
-                    state.last_failures.clear();
                     state.pending_apply = Some(state.draft.clone());
                 }
                 if ui.button("Fechar").clicked() {

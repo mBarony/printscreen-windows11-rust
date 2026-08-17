@@ -14,13 +14,22 @@
 
 use crate::error::Result;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum ShellEvent {
     /// Item de menu clicado (id definido em `MenuEntry`).
     Menu(u16),
     /// Atalho global disparado (id passado em `register_hotkey`).
     Hotkey(i32),
+    /// Mensagem de um processo de GUI (`WM_COPYDATA`): `kind` é um dos
+    /// `IPC_*` e `payload` o texto UTF-8 que o acompanha.
+    Ipc { kind: u32, payload: String },
 }
+
+/// Pedido de balão de notificação: `payload` é `título\ntexto`.
+pub const IPC_BALLOON: u32 = 1;
+/// O `config.json` foi regravado pela janela de configurações; o residente
+/// precisa recarregá-lo e re-registrar os atalhos.
+pub const IPC_CONFIG_CHANGED: u32 = 2;
 
 pub enum MenuEntry {
     Item { id: u16, label: &'static str },
@@ -52,9 +61,12 @@ mod imp {
         DefWindowProcW, GetCursorPos, PostMessageW, RegisterClassW, RegisterWindowMessageW,
         SetForegroundWindow, TrackPopupMenuEx, HICON, ICONINFO, MF_BYCOMMAND, MF_CHECKED,
         MF_SEPARATOR, MF_STRING, MF_UNCHECKED, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_NONOTIFY,
-        TPM_RETURNCMD, TPM_RIGHTBUTTON, WM_APP, WM_DESTROY, WM_HOTKEY, WM_LBUTTONUP,
+        TPM_RETURNCMD, TPM_RIGHTBUTTON, WM_APP, WM_COPYDATA, WM_DESTROY, WM_HOTKEY, WM_LBUTTONUP,
         WM_RBUTTONUP, WNDCLASSW,
     };
+    // COPYDATASTRUCT vive em DataExchange (a feature já estava habilitada para
+    // a área de transferência), não em WindowsAndMessaging.
+    use windows_sys::Win32::System::DataExchange::COPYDATASTRUCT;
 
     const TRAY_ICON_ID: u32 = 1;
     const WM_APP_TRAY: u32 = WM_APP + 1;
@@ -245,6 +257,24 @@ mod imp {
             }
             return 0;
         }
+        if msg == WM_COPYDATA {
+            // O ponteiro só é válido durante esta chamada (o Windows faz o
+            // marshalling entre processos), então a cópia é obrigatória.
+            let data = lparam as *const COPYDATASTRUCT;
+            if !data.is_null() {
+                let cds = &*data;
+                let bytes = if cds.cbData == 0 || cds.lpData.is_null() {
+                    &[][..]
+                } else {
+                    std::slice::from_raw_parts(cds.lpData.cast::<u8>(), cds.cbData as usize)
+                };
+                let payload = String::from_utf8_lossy(bytes).into_owned();
+                if let Some(handler) = HANDLER.get() {
+                    handler(ShellEvent::Ipc { kind: cds.dwData as u32, payload });
+                }
+            }
+            return 1;
+        }
         if msg == WM_DESTROY {
             remove_icon();
             return 0;
@@ -360,8 +390,11 @@ mod imp {
         }
     }
 
-    /// Traz para o primeiro plano a janela de titulo `title` deste processo,
-    /// **com foco de teclado**. Retorna `false` se a janela nao existe.
+    /// Traz para o primeiro plano a janela de titulo `title`, **com foco de
+    /// teclado**. Retorna `false` se a janela nao existe. A busca e' por titulo
+    /// no desktop, entao serve tanto para uma janela do proprio processo (o
+    /// editor) quanto para a de um processo de GUI filho (as configuracoes, que
+    /// o residente traz de volta em vez de abrir uma segunda).
     ///
     /// Um `SetForegroundWindow` simples e' recusado pelo Windows quando o
     /// processo nao detem o primeiro plano (foreground lock) — exatamente o
@@ -412,6 +445,99 @@ mod imp {
         }
     }
 
+    /// `HWND` da janela de shell como inteiro, para passar ao processo de GUI
+    /// na linha de comando. `0` antes do `init`.
+    pub fn hwnd_value() -> isize {
+        HWND_SHELL.load(Ordering::SeqCst)
+    }
+
+    /// Bombeia mensagens até `PostQuitMessage` (o "Sair" do menu). É o corpo do
+    /// processo residente — sem event loop de GUI, ele é quem mantém a bandeja
+    /// e os atalhos vivos.
+    ///
+    /// `after_dispatch` roda depois de cada mensagem, **fora** do `WndProc`: é
+    /// onde o residente trata os eventos que o handler enfileirou, sem risco de
+    /// reentrar em um menu modal.
+    pub fn run_message_loop(mut after_dispatch: impl FnMut()) {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            DispatchMessageW, GetMessageW, TranslateMessage, MSG,
+        };
+
+        // SAFETY: laço clássico de mensagens da própria thread; `msg` é
+        // preenchido pelo GetMessageW antes de qualquer leitura.
+        unsafe {
+            let mut msg: MSG = std::mem::zeroed();
+            while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
+                TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+                after_dispatch();
+            }
+        }
+    }
+
+    /// Liga/desliga o despertador de 1 s que permite ao residente notar que um
+    /// processo de GUI encerrou (e então liberar o bloco compartilhado). Fica
+    /// desligado enquanto não há filho: idle continua sendo event-driven.
+    pub fn set_poll_timer(on: bool) {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{KillTimer, SetTimer};
+
+        const POLL_TIMER_ID: usize = 1;
+        let hwnd = HWND_SHELL.load(Ordering::SeqCst);
+        if hwnd == 0 {
+            return;
+        }
+        // SAFETY: hwnd da própria janela; Set/KillTimer com o mesmo id.
+        unsafe {
+            if on {
+                SetTimer(hwnd as HWND, POLL_TIMER_ID, 1000, None);
+            } else {
+                KillTimer(hwnd as HWND, POLL_TIMER_ID);
+            }
+        }
+    }
+
+    /// Encerra o `run_message_loop` (menu "Sair").
+    pub fn post_quit() {
+        use windows_sys::Win32::UI::WindowsAndMessaging::PostQuitMessage;
+
+        // SAFETY: só marca WM_QUIT na fila da thread chamadora.
+        unsafe { PostQuitMessage(0) }
+    }
+
+    /// Envia `payload` ao residente (chamado pelo processo de GUI). O timeout
+    /// evita que um residente ocupado — ou já encerrado — trave o filho.
+    pub fn send_to_resident(hwnd_value: isize, kind: u32, payload: &str) -> bool {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{SendMessageTimeoutW, SMTO_ABORTIFHUNG};
+
+        if hwnd_value == 0 {
+            return false;
+        }
+        let bytes = payload.as_bytes();
+        let cds = COPYDATASTRUCT {
+            dwData: kind as usize,
+            cbData: bytes.len() as u32,
+            lpData: bytes.as_ptr() as *mut core::ffi::c_void,
+        };
+        // SAFETY: `bytes` e `cds` vivem por toda a chamada síncrona; o Windows
+        // copia o buffer para o processo destino. Um HWND inválido apenas faz a
+        // chamada falhar.
+        let sent = unsafe {
+            SendMessageTimeoutW(
+                hwnd_value as HWND,
+                WM_COPYDATA,
+                0,
+                &cds as *const COPYDATASTRUCT as LPARAM,
+                SMTO_ABORTIFHUNG,
+                // O residente só enfileira a mensagem e retorna; meio segundo é
+                // folga suficiente. Um valor alto congelaria a UI do filho
+                // quando o residente já tivesse encerrado.
+                500,
+                std::ptr::null_mut(),
+            )
+        };
+        sent != 0
+    }
+
     /// Remove o ícone da bandeja (saída limpa do app).
     pub fn remove_icon() {
         let hwnd = HWND_SHELL.load(Ordering::SeqCst);
@@ -431,8 +557,8 @@ mod imp {
 
 #[cfg(windows)]
 pub use imp::{
-    focus_window, init, register_hotkey, remove_icon, set_menu_checked, show_balloon,
-    unregister_hotkey,
+    focus_window, hwnd_value, init, post_quit, register_hotkey, remove_icon, run_message_loop,
+    send_to_resident, set_menu_checked, set_poll_timer, show_balloon, unregister_hotkey,
 };
 
 // ---------------------------------------------------------------------------
@@ -467,6 +593,25 @@ pub fn unregister_hotkey(_id: i32) {}
 
 #[cfg(not(windows))]
 pub fn remove_icon() {}
+
+#[cfg(not(windows))]
+pub fn hwnd_value() -> isize {
+    0
+}
+
+#[cfg(not(windows))]
+pub fn run_message_loop(_after_dispatch: impl FnMut()) {}
+
+#[cfg(not(windows))]
+pub fn set_poll_timer(_on: bool) {}
+
+#[cfg(not(windows))]
+pub fn post_quit() {}
+
+#[cfg(not(windows))]
+pub fn send_to_resident(_hwnd_value: isize, _kind: u32, _payload: &str) -> bool {
+    false
+}
 
 #[cfg(not(windows))]
 pub fn focus_window(_title: &str) -> bool {

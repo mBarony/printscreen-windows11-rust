@@ -152,9 +152,10 @@ pub fn write_image(target: &SaveTarget, image: &RgbaImage) -> Result<PathBuf> {
     Ok(path)
 }
 
-/// Salva em thread de trabalho e notifica o resultado (toast RF-07/§14).
+/// Salva em thread de trabalho e notifica o resultado (toast RF-07/§14). Via
+/// `jobs`, para o processo não encerrar no meio da gravação.
 pub fn save_in_background(target: SaveTarget, image: RgbaImage) {
-    std::thread::spawn(move || match write_image(&target, &image) {
+    crate::jobs::spawn(move || match write_image(&target, &image) {
         Ok(path) => {
             log::info!("captura salva em {}", path.display());
             let name = path

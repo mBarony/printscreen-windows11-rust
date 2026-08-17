@@ -172,14 +172,15 @@ plataforma compilam como stubs, só para rodar os testes de lógica.
 
 > **Nota sobre alertas de segurança em dependências transitivas**: o
 > `Cargo.lock` registra dependências de todas as plataformas. O que sobra de
-> Linux/macOS ali (`zbus`/`atspi` via acessibilidade do winit, `objc2`…)
-> **não é compilado no binário Windows** — alertas do Dependabot sobre esses
-> crates não afetam o `rustshot.exe`.
+> Linux/macOS ali (`objc2`, `wayland-*`…) **não é compilado no binário
+> Windows** — alertas do Dependabot sobre esses crates não afetam o
+> `rustshot.exe`.
 
 ## Decisões de implementação
 
 - **Widget de atalho**: a tecla `PrtScr` não chega como evento de teclado do egui, então o "clique e pressione a combinação" é complementado por seletores explícitos de modificadores + tecla (único caminho para `PrintScreen`, que já vem nos padrões).
 - **Módulo extra** `settings.rs` para a janela de configurações.
+- **Consumo de memória e alvo único**: o viewport-raiz de 1×1 px mantém um device D3D12 de pé a sessão inteira, então tudo que o wgpu reserva no boot é consumo permanente. Daí os ajustes em `main.rs::wgpu_options` (só `Backends::DX12`, `MemoryHints::MemoryUsage` no lugar dos blocos de 256/64 MiB do padrão, `PowerPreference::LowPower` — reversível por `WGPU_POWER_PREF=high` —, uma frame em voo) e o `platform::memory::trim_working_set()` ao voltar para a bandeja, que devolve ao SO as páginas que a captura tocou. Na mesma direção saíram as fontes embutidas do egui (a UI usa Segoe UI Variable com a Inter como reserva; emoji digitado no editor vira tofu, mas ele já não sobrevivia à exportação) e o `accesskit` — sem provedor de UI Automation, **leitores de tela não enxergam a UI**. O alvo é só Windows 11 x64: build para outra arquitetura falha em `compile_error!`, e em sistema anterior à build 22000 o app mostra uma caixa de mensagem e encerra.
 - **v1.1**: saída fixa em JPG (qualidade 90) e todo o estado ao lado do exe — a v1.0 usava PNG por padrão e `%APPDATA%\RustShot`. O retângulo preto que aparecia no canto do monitor era o viewport-raiz "oculto" do eframe: uma janela realmente invisível não recebe `WM_PAINT` e mataria os atalhos, então a solução é o oposto — a janela fica **visível para o SO**, mas com 1×1 px, fora da área da tela (-32000,-32000), sem ativação, sem redimensionar/maximizar, fora do Alt-Tab (`WS_EX_TOOLWINDOW`) e imune a Alt+F4.
 - **v1.3 (standalone)**: dependências de conveniência substituídas por código próprio chamando Win32 (tabela acima). Efeitos visíveis: as notificações passam de toasts WinRT (que apareciam como "Windows PowerShell") para **balões da bandeja com o nome e o ícone do RustShot**, e o seletor de pasta usa o diálogo clássico do shell. Formatos e comportamento do `config.json` permanecem idênticos.
 - **v1.2**: a captura de região deixou de concluir ao soltar o mouse — a seleção fica **pendente na tela** e o destino é escolhido pelo teclado (`Ctrl+C` copia, `Ctrl+S` salva, novo arrasto refaz, `Esc` cancela); no editor, `Ctrl+C` passou a **fechar a janela** depois de copiar, espelhando o `Ctrl+S`. Detalhe de plataforma: `Ctrl+C` chega ao egui como `Event::Copy` (não como tecla), e é assim que overlay e editor o detectam.
@@ -194,6 +195,8 @@ plataforma compilam como stubs, só para rodar os testes de lógica.
 - As notificações usam balões da bandeja; com "Não incomodar"/Assistente de foco ativos o Windows pode suprimi-las (as capturas continuam sendo salvas normalmente — o resultado está na pasta e no log).
 - "Iniciar com o Windows" grava o caminho absoluto do exe em `HKCU\...\Run`: mover ou renomear a pasta quebra o autostart até o app ser aberto manualmente (ele então corrige o registro); apagar a pasta com o recurso ativo deixa uma entrada órfã (inofensiva) — desative antes de "desinstalar".
 - Interface em pt-BR (multi-idioma no roadmap).
+- Sem suporte a leitores de tela: o provedor de UI Automation (`accesskit`) foi removido em troca de memória.
+- Windows 10 não é suportado: o app se recusa a iniciar em builds anteriores à 22000.
 
 ## Desenvolvimento
 

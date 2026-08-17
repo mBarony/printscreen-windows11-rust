@@ -28,6 +28,7 @@ pub mod memory;
 pub mod msgbox;
 pub mod shell;
 pub mod time;
+pub mod version;
 
 /// UTF-16 terminado em NUL para APIs W do Win32.
 #[cfg(windows)]

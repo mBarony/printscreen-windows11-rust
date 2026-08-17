@@ -1,5 +1,8 @@
 // Recursos embutidos no rustshot.exe: ícone do aplicativo, manifesto DPI
 // (Per-Monitor V2) e bloco de versão exibido nas propriedades do arquivo.
+//
+// A versão aqui tem que acompanhar a do Cargo.toml: o workflow de release lê o
+// VersionInfo do exe compilado e falha se ele não começar com a tag.
 
 #define RT_MANIFEST 24
 
@@ -7,8 +10,8 @@
 1 RT_MANIFEST "rustshot.exe.manifest"
 
 1 VERSIONINFO
-FILEVERSION     1,5,1,0
-PRODUCTVERSION  1,5,1,0
+FILEVERSION     1,6,0,0
+PRODUCTVERSION  1,6,0,0
 FILEOS          0x40004L // VOS_NT_WINDOWS32
 FILETYPE        0x1L     // VFT_APP
 BEGIN
@@ -18,11 +21,11 @@ BEGIN
         BEGIN
             VALUE "CompanyName",      "RustShot"
             VALUE "FileDescription",  "RustShot - captura de tela para Windows 11"
-            VALUE "FileVersion",      "1.5.1"
+            VALUE "FileVersion",      "1.6.0"
             VALUE "InternalName",     "rustshot"
             VALUE "OriginalFilename", "rustshot.exe"
             VALUE "ProductName",      "RustShot"
-            VALUE "ProductVersion",   "1.5.1"
+            VALUE "ProductVersion",   "1.6.0"
             VALUE "LegalCopyright",   "Licenca BSD-3-Clause"
         END
     END

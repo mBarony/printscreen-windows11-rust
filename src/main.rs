@@ -91,6 +91,7 @@ fn main() {
             .with_icon(std::sync::Arc::new(app::app_icon_data())),
         persist_window: false,
         centered: false,
+        wgpu_options: wgpu_options(),
         ..Default::default()
     };
 
@@ -103,6 +104,48 @@ fn main() {
         log::error!("falha fatal no event loop: {err}");
     }
     log::info!("RustShot encerrado");
+}
+
+/// Ajustes de memória do backend wgpu: os padrões do eframe são de aplicativo
+/// de tela cheia, e este vive na bandeja com um viewport-raiz de 1×1 px — o
+/// device D3D12 fica de pé a sessão inteira, então o que ele reserva no boot é
+/// consumo permanente.
+///
+/// * `MemoryUsage`: o alocador do dx12 passa de blocos de 256 MiB (device) e
+///   64 MiB (host-visível, que é RAM do sistema) para 8 MiB e 4 MiB. Sem isso o
+///   primeiro upload — o atlas de fontes, já no boot — reserva um heap UPLOAD
+///   de 64 MiB que fica preso até o app encerrar.
+/// * `LowPower`: em máquina de GPU híbrida escolhe a integrada. Uma ferramenta
+///   de captura não ganha nada da dedicada, e o driver de usuário dela (dezenas
+///   de MB mapeados) é a maior fatia isolada do consumo — além de manter a
+///   placa acordada. `WGPU_POWER_PREF=high` reverte sem recompilar.
+/// * `desired_maximum_frame_latency: 1`: os overlays de seleção cobrem
+///   monitores inteiros; cada buffer de swapchain a menos é um 4K (33 MB) a
+///   menos. Latência baixa é o que interessa aqui, não vazão.
+fn wgpu_options() -> eframe::egui_wgpu::WgpuConfiguration {
+    use eframe::egui_wgpu::{WgpuConfiguration, WgpuSetup};
+
+    let mut options = WgpuConfiguration {
+        desired_maximum_frame_latency: Some(1),
+        ..Default::default()
+    };
+    if let WgpuSetup::CreateNew(setup) = &mut options.wgpu_setup {
+        setup.power_preference =
+            wgpu::PowerPreference::from_env().unwrap_or(wgpu::PowerPreference::LowPower);
+        setup.device_descriptor = std::sync::Arc::new(|_adapter| wgpu::DeviceDescriptor {
+            label: Some("rustshot"),
+            required_features: wgpu::Features::empty(),
+            required_limits: wgpu::Limits {
+                // Igual ao padrão do eframe: textura grande o bastante para a
+                // captura inteira de um monitor 4K/5K.
+                max_texture_dimension_2d: 8192,
+                ..wgpu::Limits::default()
+            },
+            memory_hints: wgpu::MemoryHints::MemoryUsage,
+            trace: wgpu::Trace::Off,
+        });
+    }
+    options
 }
 
 /// Logger em arquivo com rotação simples (`.log` → `.log.old` acima de 2 MB).

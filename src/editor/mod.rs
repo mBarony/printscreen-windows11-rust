@@ -4,6 +4,7 @@
 //! anotações + histórico), `ui` (janela/canvas/toolbar) e `render`
 //! (rasterização final para exportação).
 
+pub mod backdrop;
 pub mod cut;
 pub mod document;
 pub mod icons;

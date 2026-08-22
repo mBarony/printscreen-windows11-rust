@@ -58,24 +58,29 @@ pub(super) fn draw(ctx: &egui::Context, session: &mut EditorSession) {
             };
             let tex_id = texture.id();
 
-            let img_w = session.doc.visible_image().width() as f32;
-            let img_h = session.doc.visible_image().height() as f32;
+            // A textura pode incluir a moldura decorativa; as anotações
+            // vivem no espaço do conteúdo, deslocado dela pela margem.
+            let frame_w = session.doc.visible_image().width() as f32;
+            let frame_h = session.doc.visible_image().height() as f32;
+            let img_w = session.doc.content_image().width() as f32;
+            let img_h = session.doc.content_image().height() as f32;
+            let frame_offset = session.doc.content_offset();
 
             // Primeiro frame: "ajustar à janela" (nunca acima de 100%).
             let zoom = *session.zoom.get_or_insert_with(|| {
                 let avail_px = canvas_rect.size() * ppp;
-                let fit = (avail_px.x / img_w).min(avail_px.y / img_h).min(1.0);
+                let fit = (avail_px.x / frame_w).min(avail_px.y / frame_h).min(1.0);
                 fit.clamp(ZOOM_MIN, ZOOM_MAX)
             });
             if session.pan == Vec2::ZERO && session.drag.is_none() {
                 // Centraliza enquanto o usuário ainda não interagiu.
-                let img_pts = Vec2::new(img_w, img_h) * (zoom / ppp);
+                let img_pts = Vec2::new(frame_w, frame_h) * (zoom / ppp);
                 let free = canvas_rect.size() - img_pts;
                 session.pan = Vec2::new(free.x.max(0.0) / 2.0, free.y.max(0.0) / 2.0);
             }
 
             let to_screen = ToScreen {
-                origin: canvas_rect.min + session.pan,
+                origin: canvas_rect.min + session.pan + Vec2::splat(frame_offset * (zoom / ppp)),
                 scale: zoom / ppp,
             };
 
@@ -135,7 +140,7 @@ pub(super) fn draw(ctx: &egui::Context, session: &mut EditorSession) {
             // Recalcula a transformação (zoom/pan podem ter mudado).
             let zoom = session.zoom.unwrap_or(zoom);
             let to_screen = ToScreen {
-                origin: canvas_rect.min + session.pan,
+                origin: canvas_rect.min + session.pan + Vec2::splat(frame_offset * (zoom / ppp)),
                 scale: zoom / ppp,
             };
 
@@ -379,13 +384,19 @@ pub(super) fn draw(ctx: &egui::Context, session: &mut EditorSession) {
 
             // --- Desenho: imagem + formas confirmadas + preview ---
             let painter = ui.painter_at(canvas_rect);
+            // O retângulo da textura inclui a moldura; o do conteúdo é o que
+            // recorta as anotações.
             let image_rect = Rect::from_min_size(
                 to_screen.pos(Point::new(0.0, 0.0)),
                 Vec2::new(img_w, img_h) * to_screen.scale,
             );
+            let frame_rect = Rect::from_min_size(
+                to_screen.pos(Point::new(-frame_offset, -frame_offset)),
+                Vec2::new(frame_w, frame_h) * to_screen.scale,
+            );
             painter.image(
                 tex_id,
-                image_rect,
+                frame_rect,
                 Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
                 Color32::WHITE,
             );

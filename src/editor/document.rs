@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use crate::imgbuf::RgbaImage;
 
+use super::backdrop::{self, BackdropStyle};
 use super::cut::{self, Band};
 use super::redact;
 use super::spotlight::{self, Spotlight};
@@ -38,6 +39,8 @@ pub enum Op {
     Crop { x: u32, y: u32, w: u32, h: u32 },
     /// Remove uma faixa e junta o que sobrou, arrastando as anotações.
     Cut(Band),
+    /// Troca a moldura decorativa.
+    Backdrop(BackdropStyle),
 }
 
 /// Uma redação aplicada, na forma que o replay compara para decidir se os
@@ -109,10 +112,14 @@ pub struct Document {
 
     // Estado derivado, reconstruído por `replay`.
     image: Arc<RgbaImage>,
-    /// A mesma imagem com as redações já queimadas. É ela que o editor
-    /// mostra e da qual a exportação parte: uma região redigida nunca chega
-    /// à tela nem ao arquivo com o conteúdo original.
+    /// A mesma imagem com as redações e os holofotes já queimados. É dela
+    /// que a exportação parte: uma região redigida nunca chega à tela nem ao
+    /// arquivo com o conteúdo original.
     redacted: Arc<RgbaImage>,
+    /// A anterior dentro da moldura decorativa, quando há uma. É o que a
+    /// textura do editor carrega, para o preview coincidir com o JPG.
+    framed: Arc<RgbaImage>,
+    backdrop: BackdropStyle,
     layers: Vec<Layer>,
     /// Avança quando os pixels visíveis mudam (recorte ou redação) — é o que
     /// diz ao editor para refazer a textura.
@@ -162,6 +169,8 @@ fn apply(op: &Op, image: &mut Arc<RgbaImage>, layers: &mut Vec<Layer>) {
                 layer.shape.shift_for_cut(*band);
             }
         }
+        // A moldura não mexe na imagem: é montada em volta, no fim.
+        Op::Backdrop(_) => {}
     }
 }
 
@@ -178,7 +187,9 @@ impl Document {
             index: 0,
             next_id: 1,
             image: image.clone(),
-            redacted: image,
+            redacted: image.clone(),
+            framed: image,
+            backdrop: BackdropStyle::None,
             layers: Vec::new(),
             pixels_version: 0,
             redactions: Vec::new(),
@@ -189,9 +200,36 @@ impl Document {
         }
     }
 
-    /// Imagem exibida e exportada: já com as redações aplicadas.
+    /// Imagem exibida: conteúdo redigido dentro da moldura, se houver uma.
     pub fn visible_image(&self) -> &Arc<RgbaImage> {
+        &self.framed
+    }
+
+    /// Só o conteúdo, sem moldura — é nesse espaço que as anotações vivem.
+    pub fn content_image(&self) -> &Arc<RgbaImage> {
         &self.redacted
+    }
+
+    /// Deslocamento do conteúdo dentro da imagem exibida, em px. As
+    /// anotações continuam em coordenadas do conteúdo; quem desenha soma
+    /// isto.
+    pub fn content_offset(&self) -> f32 {
+        if self.backdrop == BackdropStyle::None {
+            0.0
+        } else {
+            backdrop::MARGIN.round()
+        }
+    }
+
+    pub fn backdrop(&self) -> BackdropStyle {
+        self.backdrop
+    }
+
+    /// Troca a moldura decorativa — uma operação do histórico como as outras.
+    pub fn set_backdrop(&mut self, style: BackdropStyle) {
+        if style != self.backdrop {
+            self.commit(Op::Backdrop(style));
+        }
     }
 
     /// Selo dos pixels visíveis — muda com recorte e com redação.
@@ -249,14 +287,40 @@ impl Document {
             spotlight::apply(&mut burnt, &lights);
             Arc::new(burnt)
         };
-        if reframed || marks != self.redactions || lights != self.spotlights {
+        // A moldura é a última coisa: ela emoldura o resultado de tudo.
+        let backdrop = self.ops[..self.index]
+            .iter()
+            .rev()
+            .find_map(|op| match op {
+                Op::Backdrop(style) => Some(*style),
+                _ => None,
+            })
+            .unwrap_or(BackdropStyle::None);
+        let framed = if backdrop == BackdropStyle::None {
+            redacted.clone()
+        } else {
+            Arc::new(backdrop::compose(&redacted, backdrop))
+        };
+
+        if reframed
+            || marks != self.redactions
+            || lights != self.spotlights
+            || backdrop != self.backdrop
+        {
             self.redactions = marks;
             self.spotlights = lights;
             self.pixels_version += 1;
         }
+        // Trocar a moldura muda o tamanho do que se vê: o editor precisa
+        // reajustar o enquadramento, como faz depois de um recorte.
+        if backdrop != self.backdrop {
+            self.backdrop = backdrop;
+            self.image_version += 1;
+        }
 
         self.image = image;
         self.redacted = redacted;
+        self.framed = framed;
         self.layers = layers;
     }
 

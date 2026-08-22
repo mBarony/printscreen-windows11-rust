@@ -31,6 +31,8 @@ pub enum Tool {
     Freehand,
     /// Mão livre grosso e translúcido, para marcar sem esconder.
     Highlighter,
+    /// Contador numerado, colocado com um clique.
+    Marker,
     Text,
     /// Recorta a imagem para a região arrastada (issue #5).
     Crop,
@@ -46,6 +48,7 @@ impl Tool {
             Self::Ellipse => "Elipse",
             Self::Freehand => "Mão livre",
             Self::Highlighter => "Marca-texto",
+            Self::Marker => "Marcador",
             Self::Text => "Texto",
             Self::Crop => "Recortar",
         }
@@ -84,8 +87,31 @@ pub enum Shape {
     /// Traço à mão livre já suavizado. `highlight` o transforma em
     /// marca-texto — mesma geometria, outra espessura e opacidade.
     Freehand { points: Vec<Point>, highlight: bool },
+    /// Contador numerado: disco com aro claro e o número no meio.
+    Marker { center: Point, number: u32 },
     Text { anchor: Point, content: String },
 }
+
+/// Geometria do contador numerado, derivada da espessura do traço.
+///
+/// O número não usa negrito: a fonte embutida é só a Regular da Inter, e
+/// carregar uma segunda face pesaria no executável para pouco ganho.
+pub struct MarkerGeometry {
+    pub radius: f32,
+    pub ring_width: f32,
+    pub font_size: f32,
+}
+
+pub fn marker_geometry(stroke_width: f32) -> MarkerGeometry {
+    MarkerGeometry {
+        radius: (stroke_width * 6.0).max(24.0) / 2.0,
+        ring_width: (stroke_width * 0.35).max(1.0),
+        font_size: (stroke_width * 3.2).max(11.0),
+    }
+}
+
+/// Cor do aro e do número do contador.
+pub const MARKER_INK: [u8; 4] = [0xFF, 0xFF, 0xFF, 0xFF];
 
 /// Opacidade do marca-texto sobre uma cor opaca da paleta.
 pub const HIGHLIGHTER_ALPHA: u8 = 120;
@@ -181,6 +207,10 @@ impl Layer {
                     _ => points.windows(2).any(|s| dist_to_segment(p, s[0], s[1]) <= reach),
                 }
             }
+            Shape::Marker { center, .. } => {
+                // O contador pega pelo disco inteiro: ele é opaco.
+                dist(p, *center) <= marker_geometry(self.style.stroke_width).radius + tol
+            }
             Shape::Text { anchor, .. } => {
                 let (w, h) = text_size;
                 p.x >= anchor.x - tol
@@ -203,6 +233,13 @@ impl Layer {
                 Point::new(center.x + rx, center.y + ry),
             )),
             Shape::Freehand { points, .. } => points_bounds(points),
+            Shape::Marker { center, .. } => {
+                let r = marker_geometry(self.style.stroke_width).radius;
+                Some((
+                    Point::new(center.x - r, center.y - r),
+                    Point::new(center.x + r, center.y + r),
+                ))
+            }
             Shape::Text { .. } => None,
         }
     }
@@ -292,6 +329,11 @@ impl Layer {
                 *center = Point::new(min.x + *rx, min.y + *ry);
             }
             Shape::Freehand { points, .. } => rescale_points(points, min, max),
+            // O contador segue o centro da caixa; o diâmetro dele sai da
+            // espessura do traço, ajustável pela roda.
+            Shape::Marker { center, .. } => {
+                *center = Point::new((min.x + max.x) / 2.0, (min.y + max.y) / 2.0);
+            }
             // Linha e seta são redimensionadas pelas pontas; texto, pela roda.
             Shape::Line { .. } | Shape::Arrow { .. } | Shape::Text { .. } => {}
         }
@@ -450,6 +492,7 @@ impl Shape {
             }
             Self::Ellipse { center, .. } => mv(center),
             Self::Freehand { points, .. } => points.iter_mut().for_each(mv),
+            Self::Marker { center, .. } => mv(center),
             Self::Text { anchor, .. } => mv(anchor),
         }
     }
@@ -546,7 +589,9 @@ pub fn shape_from_drag(
         }
         // Rabiscos vêm de uma sequência de pontos, não de um par início–fim.
         Tool::Freehand | Tool::Highlighter => None,
-        Tool::Text | Tool::Select | Tool::Crop => None,
+        // O contador é colocado num clique; texto, mover e recortar têm
+        // fluxos próprios.
+        Tool::Marker | Tool::Text | Tool::Select | Tool::Crop => None,
     }
 }
 

@@ -17,8 +17,8 @@ use crate::storage::{self, SaveTarget};
 
 use super::icons::{self, Icon};
 use super::shapes::{
-    arrow_geometry, normalize, push_sample, shape_from_drag, stroke_appearance,
-    stroke_from_samples, Handle, Layer, Point, Shape, Tool, CORNER_RADIUS_MAX,
+    arrow_geometry, marker_geometry, normalize, push_sample, shape_from_drag, stroke_appearance,
+    stroke_from_samples, Handle, Layer, Point, Shape, Tool, CORNER_RADIUS_MAX, MARKER_INK,
 };
 use super::{
     DragPreview, EditorSession, MoveDrag, ResizeDrag, TextInput, CROP_MIN_SIDE, DUPLICATE_OFFSET,
@@ -652,6 +652,25 @@ fn canvas(ctx: &egui::Context, session: &mut EditorSession) {
 
             if session.text_input.is_none() && !session.confirm_discard {
                 match session.tool {
+                    // O contador é carimbado num clique, sem arrasto.
+                    Tool::Marker => {
+                        if response.hovered() {
+                            ctx.output_mut(|o| o.cursor_icon = CursorIcon::Crosshair);
+                        }
+                        if response.clicked_by(PointerButton::Primary) {
+                            if let Some(p) = response
+                                .interact_pointer_pos()
+                                .or_else(|| response.hover_pos())
+                                .map(|p| clamp_img(to_screen.inverse(p)))
+                            {
+                                let shape = Shape::Marker {
+                                    center: p,
+                                    number: session.doc.next_marker(),
+                                };
+                                session.doc.push(shape, session.style());
+                            }
+                        }
+                    }
                     Tool::Text => {
                         if response.hovered() {
                             ctx.output_mut(|o| o.cursor_icon = CursorIcon::Text);
@@ -952,6 +971,26 @@ fn paint_shape(painter: &egui::Painter, layer: &Layer, ts: ToScreen) {
                 Stroke::new(ts.len(width), color32(color)),
             ));
         }
+        Shape::Marker { center, number } => {
+            let geo = marker_geometry(style.stroke_width);
+            let at = ts.pos(*center);
+            painter.circle(
+                at,
+                ts.len(geo.radius),
+                color32(style.color),
+                Stroke::new(ts.len(geo.ring_width), color32(MARKER_INK)),
+            );
+            painter.text(
+                at,
+                Align2::CENTER_CENTER,
+                number,
+                FontId::new(
+                    ts.len(geo.font_size),
+                    egui::FontFamily::Name(crate::theme::INTER.into()),
+                ),
+                color32(MARKER_INK),
+            );
+        }
         Shape::Text { anchor, content } => {
             painter.text(
                 ts.pos(*anchor),
@@ -1014,6 +1053,10 @@ fn shape_screen_bbox(ctx: &egui::Context, layer: &Layer, ts: ToScreen) -> Rect {
             let (width, _) = stroke_appearance(&layer.style, *highlight);
             let (min, max) = layer.bbox().unwrap_or((Point::new(0.0, 0.0), Point::new(0.0, 0.0)));
             Rect::from_min_max(ts.pos(min), ts.pos(max)).expand(ts.len(width) / 2.0)
+        }
+        Shape::Marker { center, .. } => {
+            let geo = marker_geometry(layer.style.stroke_width);
+            Rect::from_center_size(ts.pos(*center), Vec2::splat(ts.len(geo.radius) * 2.0))
         }
         Shape::Line { a, b } | Shape::Arrow { a, b } => {
             Rect::from_two_pos(ts.pos(*a), ts.pos(*b)).expand(half_stroke)

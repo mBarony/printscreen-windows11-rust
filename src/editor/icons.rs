@@ -21,6 +21,7 @@ pub enum Icon {
     Ellipse,
     Freehand,
     Highlighter,
+    Marker,
     Fill,
     Text,
     Crop,
@@ -42,13 +43,14 @@ impl Icon {
             Tool::Ellipse => Self::Ellipse,
             Tool::Freehand => Self::Freehand,
             Tool::Highlighter => Self::Highlighter,
+            Tool::Marker => Self::Marker,
             Tool::Text => Self::Text,
             Tool::Crop => Self::Crop,
         }
     }
 
     #[cfg(test)]
-    pub const ALL: [Icon; 16] = [
+    pub const ALL: [Icon; 17] = [
         Icon::Move,
         Icon::Line,
         Icon::Arrow,
@@ -56,6 +58,7 @@ impl Icon {
         Icon::Ellipse,
         Icon::Freehand,
         Icon::Highlighter,
+        Icon::Marker,
         Icon::Fill,
         Icon::Text,
         Icon::Crop,
@@ -77,6 +80,7 @@ impl Icon {
             Icon::Ellipse => "ellipse",
             Icon::Freehand => "freehand",
             Icon::Highlighter => "highlighter",
+            Icon::Marker => "marker",
             Icon::Fill => "fill",
             Icon::Text => "text",
             Icon::Crop => "crop",
@@ -160,6 +164,11 @@ pub fn geometry(icon: Icon) -> Vec<Primitive> {
             (0.72, 0.60),
             (0.90, 0.30),
         ])],
+        // Disco com um "1" dentro — o contador numerado.
+        Icon::Marker => vec![
+            Stroke(ellipse(0.5, 0.5, 0.38, 0.38)),
+            Stroke(vec![(0.42, 0.38), (0.52, 0.30), (0.52, 0.70)]),
+        ],
         // Quadrado cheio dentro de um vazado — o par contorno/preenchimento.
         Icon::Fill => vec![
             Stroke(rectangle(0.10, 0.10, 0.90, 0.90)),

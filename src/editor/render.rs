@@ -14,7 +14,9 @@ use crate::error::{Context as _, Result};
 use crate::imgbuf::RgbaImage;
 
 use super::raster;
-use super::shapes::{arrow_geometry, stroke_appearance, Layer, Point, Shape};
+use super::shapes::{
+    arrow_geometry, marker_geometry, stroke_appearance, Layer, Point, Shape, MARKER_INK,
+};
 use super::FONT_BYTES;
 
 /// Rasteriza `captura + anotações` e retorna a imagem final RGBA.
@@ -97,12 +99,53 @@ pub fn render(base: &RgbaImage, layers: &[Layer]) -> Result<RgbaImage> {
                 let path: Vec<(f32, f32)> = points.iter().map(|p| (p.x, p.y)).collect();
                 raster::stroke_polyline(&mut buffer, &path, width, color);
             }
+            Shape::Marker { center, number } => {
+                let geo = marker_geometry(style.stroke_width);
+                raster::fill_ellipse(
+                    &mut buffer,
+                    (center.x, center.y),
+                    geo.radius,
+                    geo.radius,
+                    style.color,
+                );
+                raster::stroke_ellipse(
+                    &mut buffer,
+                    (center.x, center.y),
+                    geo.radius,
+                    geo.radius,
+                    geo.ring_width,
+                    MARKER_INK,
+                );
+                let label = number.to_string();
+                let (w, h) = text_extent(&font, &label, geo.font_size);
+                // Centrado no disco: a caixa medida do número decide a âncora.
+                let anchor = Point::new(center.x - w / 2.0, center.y - h / 2.0);
+                draw_text(&mut buffer, &font, anchor, &label, MARKER_INK, geo.font_size);
+            }
             Shape::Text { anchor, content } => {
                 draw_text(&mut buffer, &font, *anchor, content, style.color, style.font_size);
             }
         }
     }
     Ok(buffer)
+}
+
+/// Largura e altura de uma linha de texto, na mesma métrica que `draw_text`
+/// usa para posicioná-la — é o que permite centralizar o número do contador
+/// no disco sem depender do egui.
+fn text_extent(font: &FontRef<'_>, content: &str, font_size: f32) -> (f32, f32) {
+    let scaled = font.as_scaled(ab_glyph::PxScale::from(font_size.max(1.0)));
+    let mut width = 0.0;
+    let mut previous: Option<ab_glyph::GlyphId> = None;
+    for ch in content.chars().filter(|c| !c.is_control()) {
+        let id = scaled.glyph_id(ch);
+        if let Some(prev) = previous {
+            width += scaled.kern(prev, id);
+        }
+        width += scaled.h_advance(id);
+        previous = Some(id);
+    }
+    (width, scaled.height())
 }
 
 /// Desenha texto ancorado pelo canto superior esquerdo (como o
@@ -301,6 +344,43 @@ mod tests {
         let out = render(&img, &[styled(shape, Style { filled: true, ..style() })]).unwrap();
         assert_eq!(out.pixel(32, 32)[0], 255, "centro cheio");
         assert_eq!(out.pixel(32, 4), [10, 20, 30, 255], "fora da elipse");
+    }
+
+    #[test]
+    fn a_marker_draws_a_disc_with_a_light_ring() {
+        let img = base();
+        let shape = Shape::Marker { center: Point::new(32.0, 32.0), number: 7 };
+        let out = render(&img, &[layer(shape)]).unwrap();
+        // Traço 3 → diâmetro mínimo 24, raio 12.
+        assert_eq!(out.pixel(32, 44 - 1)[0], 255, "borda do disco na cor ativa");
+        assert_eq!(out.pixel(32, 8), [10, 20, 30, 255], "fora do disco");
+        // O número claro aparece no meio, sobre a cor cheia.
+        let center = out.pixel(32, 32);
+        assert!(center[1] > 100 && center[2] > 100, "tinta clara no miolo, veio {center:?}");
+    }
+
+    #[test]
+    fn marker_text_is_centred_regardless_of_the_digit_count() {
+        // Um número de dois dígitos tem de ficar tão centrado quanto um de um
+        // só — é o que a medida do texto na exportação garante.
+        let img = base();
+        let at = Point::new(32.0, 32.0);
+        let one = render(&img, &[layer(Shape::Marker { center: at, number: 1 })]).unwrap();
+        let twelve = render(&img, &[layer(Shape::Marker { center: at, number: 12 })]).unwrap();
+
+        let ink_bounds = |img: &RgbaImage| {
+            let (mut lo, mut hi) = (u32::MAX, 0);
+            for x in 20..45 {
+                // Pixels claros do número, distinguidos do vermelho do disco.
+                if (20..45).any(|y| img.pixel(x, y)[2] > 120) {
+                    lo = lo.min(x);
+                    hi = hi.max(x);
+                }
+            }
+            (lo + hi) / 2
+        };
+        let (a, b) = (ink_bounds(&one), ink_bounds(&twelve));
+        assert!(a.abs_diff(b) <= 1, "centros em {a} e {b}");
     }
 
     #[test]

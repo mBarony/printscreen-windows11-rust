@@ -197,8 +197,12 @@ impl Resident {
             return;
         }
 
+        // As janelas são listadas aqui, no mesmo instante da captura: se o
+        // processo de GUI as enumerasse ao subir, uma janela movida nesse
+        // intervalo apareceria fora de lugar sobre os pixels congelados.
+        let windows = platform::window_list::visible_windows();
         let published = match capture::capture_all_monitors()
-            .and_then(|shots| platform::ipc::publish(&shots))
+            .and_then(|shots| platform::ipc::publish(&shots, &windows))
         {
             Ok(published) => published,
             Err(err) => {

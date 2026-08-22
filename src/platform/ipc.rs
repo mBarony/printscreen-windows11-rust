@@ -16,13 +16,17 @@
 use crate::capture::MonitorShot;
 use crate::error::{err, Result};
 use crate::imgbuf::RgbaImage;
+use crate::platform::window_list::WindowTarget;
 
-/// `RSS1` — identifica o layout abaixo e barra lixo de versão trocada.
-const MAGIC: u32 = 0x3153_5352;
-/// magic + contagem.
-const HEADER_BYTES: usize = 8;
+/// `RSS2` — identifica o layout abaixo e barra lixo de versão trocada. O
+/// `RSS1` não levava a lista de janelas.
+const MAGIC: u32 = 0x3253_5352;
+/// magic + contagem de monitores + contagem de janelas.
+const HEADER_BYTES: usize = 12;
 /// x, y, largura, altura, escala, offset dos pixels.
 const ENTRY_BYTES: usize = 4 + 4 + 4 + 4 + 4 + 8;
+/// x, y, largura, altura, offset do título, bytes do título.
+const WINDOW_BYTES: usize = 4 + 4 + 4 + 4 + 8 + 4;
 
 /// Geometria de um monitor no bloco compartilhado (pixels à parte).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -42,15 +46,24 @@ impl ShotEntry {
     }
 }
 
-/// Monta o bloco inteiro (cabeçalho + pixels) a ser copiado para o mapeamento.
-pub fn encode(shots: &[MonitorShot]) -> Vec<u8> {
-    let pixels_start = HEADER_BYTES + shots.len() * ENTRY_BYTES;
-    let total: usize =
+/// Monta o bloco inteiro (cabeçalho + pixels + janelas) a ser copiado para o
+/// mapeamento.
+///
+/// As janelas viajam junto porque precisam ser enumeradas no **mesmo
+/// instante** da captura: se o processo de GUI as enumerasse ao subir, uns
+/// 300 ms depois, uma janela movida nesse intervalo apareceria no lugar
+/// errado sobre os pixels congelados.
+pub fn encode(shots: &[MonitorShot], windows: &[WindowTarget]) -> Vec<u8> {
+    let pixels_start = HEADER_BYTES + shots.len() * ENTRY_BYTES + windows.len() * WINDOW_BYTES;
+    let titles_start =
         pixels_start + shots.iter().map(|s| s.image.as_raw().len()).sum::<usize>();
+    let total: usize =
+        titles_start + windows.iter().map(|w| w.title.len()).sum::<usize>();
 
     let mut buf = Vec::with_capacity(total);
     buf.extend_from_slice(&MAGIC.to_le_bytes());
     buf.extend_from_slice(&(shots.len() as u32).to_le_bytes());
+    buf.extend_from_slice(&(windows.len() as u32).to_le_bytes());
 
     let mut offset = pixels_start as u64;
     for shot in shots {
@@ -62,10 +75,57 @@ pub fn encode(shots: &[MonitorShot]) -> Vec<u8> {
         buf.extend_from_slice(&offset.to_le_bytes());
         offset += shot.image.as_raw().len() as u64;
     }
+    let mut title_at = titles_start as u64;
+    for window in windows {
+        buf.extend_from_slice(&window.x.to_le_bytes());
+        buf.extend_from_slice(&window.y.to_le_bytes());
+        buf.extend_from_slice(&window.width.to_le_bytes());
+        buf.extend_from_slice(&window.height.to_le_bytes());
+        buf.extend_from_slice(&title_at.to_le_bytes());
+        buf.extend_from_slice(&(window.title.len() as u32).to_le_bytes());
+        title_at += window.title.len() as u64;
+    }
     for shot in shots {
         buf.extend_from_slice(shot.image.as_raw());
     }
+    for window in windows {
+        buf.extend_from_slice(window.title.as_bytes());
+    }
     buf
+}
+
+/// Lê a lista de janelas. Um bloco com lista inválida devolve lista vazia —
+/// a captura por janela deixa de funcionar, mas a captura de região, que é o
+/// principal, continua de pé.
+pub fn decode_windows(buf: &[u8], shot_count: usize) -> Vec<WindowTarget> {
+    if buf.len() < HEADER_BYTES {
+        return Vec::new();
+    }
+    let count = u32::from_le_bytes(buf[8..12].try_into().unwrap()) as usize;
+    let base = HEADER_BYTES + shot_count * ENTRY_BYTES;
+    if count == 0 || buf.len() < base + count * WINDOW_BYTES {
+        return Vec::new();
+    }
+    let mut out = Vec::with_capacity(count);
+    for i in 0..count {
+        let at = base + i * WINDOW_BYTES;
+        let field = |off: usize| -> [u8; 4] { buf[at + off..at + off + 4].try_into().unwrap() };
+        let title_at = u64::from_le_bytes(buf[at + 16..at + 24].try_into().unwrap()) as usize;
+        let title_len = u32::from_le_bytes(field(24)) as usize;
+        // O offset vem de outro processo: sem esta checagem a fatia
+        // indexaria fora do mapeamento.
+        let Some(end) = title_at.checked_add(title_len).filter(|e| *e <= buf.len()) else {
+            return Vec::new();
+        };
+        out.push(WindowTarget {
+            x: i32::from_le_bytes(field(0)),
+            y: i32::from_le_bytes(field(4)),
+            width: u32::from_le_bytes(field(8)),
+            height: u32::from_le_bytes(field(12)),
+            title: String::from_utf8_lossy(&buf[title_at..end]).into_owned(),
+        });
+    }
+    out
 }
 
 /// Lê o cabeçalho e valida que cada faixa de pixels cabe em `len` bytes.
@@ -80,7 +140,8 @@ pub fn decode_header(buf: &[u8], len: usize) -> Result<Vec<ShotEntry>> {
     if count == 0 {
         return Err(err!("bloco compartilhado sem monitores"));
     }
-    if buf.len() < HEADER_BYTES + count * ENTRY_BYTES {
+    let windows = u32::from_le_bytes(buf[8..12].try_into().unwrap()) as usize;
+    if buf.len() < HEADER_BYTES + count * ENTRY_BYTES + windows * WINDOW_BYTES {
         return Err(err!("cabeçalho truncado para {count} monitores"));
     }
 
@@ -176,8 +237,8 @@ mod imp {
     }
 
     /// Cria o mapeamento e copia as capturas para dentro dele.
-    pub fn publish(shots: &[MonitorShot]) -> Result<SharedShots> {
-        let bytes = encode(shots);
+    pub fn publish(shots: &[MonitorShot], windows: &[WindowTarget]) -> Result<SharedShots> {
+        let bytes = encode(shots, windows);
         let len = bytes.len();
         let name = next_name();
         let wide_name = crate::platform::wide(&name);
@@ -209,7 +270,7 @@ mod imp {
     }
 
     /// Abre o mapeamento publicado pelo residente e devolve as capturas.
-    pub fn consume(name: &str, len: usize) -> Result<Vec<MonitorShot>> {
+    pub fn consume(name: &str, len: usize) -> Result<(Vec<MonitorShot>, Vec<WindowTarget>)> {
         let wide_name = crate::platform::wide(name);
         // SAFETY: abre o mapeamento por nome, mapeia `len` bytes para leitura e
         // desfaz a view antes de retornar. Todo acesso ao slice acontece com a
@@ -232,10 +293,14 @@ mod imp {
         }
     }
 
-    unsafe fn read_view(view: MEMORY_MAPPED_VIEW_ADDRESS, len: usize) -> Result<Vec<MonitorShot>> {
+    unsafe fn read_view(
+        view: MEMORY_MAPPED_VIEW_ADDRESS,
+        len: usize,
+    ) -> Result<(Vec<MonitorShot>, Vec<WindowTarget>)> {
         let buf = std::slice::from_raw_parts(view.Value.cast::<u8>(), len);
         let entries = decode_header(buf, len)?;
-        Ok(decode(buf, &entries))
+        let windows = decode_windows(buf, entries.len());
+        Ok((decode(buf, &entries), windows))
     }
 
     /// `Local\rustshot-shots-<pid>-<n>`: por sessão, e único dentro do processo.
@@ -267,7 +332,7 @@ mod tests {
     #[test]
     fn roundtrip_preserves_geometry_and_pixels() {
         let shots = vec![shot(-1920, 0, 4, 3, 10), shot(0, 0, 2, 2, 20)];
-        let buf = encode(&shots);
+        let buf = encode(&shots, &[]);
         let entries = decode_header(&buf, buf.len()).unwrap();
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].x, -1920, "origem negativa sobrevive");
@@ -281,7 +346,7 @@ mod tests {
 
     #[test]
     fn rejects_foreign_or_corrupt_blocks() {
-        let buf = encode(&[shot(0, 0, 2, 2, 1)]);
+        let buf = encode(&[shot(0, 0, 2, 2, 1)], &[]);
 
         assert!(decode_header(&buf[..4], 4).is_err(), "truncado");
         assert!(decode_header(b"XXXX\0\0\0\0", 8).is_err(), "magic errado");
@@ -293,5 +358,37 @@ mod tests {
         let mut zero_count = buf.clone();
         zero_count[4..8].copy_from_slice(&0u32.to_le_bytes());
         assert!(decode_header(&zero_count, zero_count.len()).is_err(), "sem monitores");
+    }
+
+    #[test]
+    fn windows_survive_the_round_trip_with_their_titles() {
+        let shots = vec![shot(0, 0, 2, 2, 1)];
+        let windows = vec![
+            WindowTarget { x: 10, y: 20, width: 300, height: 200, title: "Bloco de notas".into() },
+            WindowTarget { x: -5, y: 0, width: 800, height: 600, title: "Café ☕".into() },
+        ];
+        let buf = encode(&shots, &windows);
+        let entries = decode_header(&buf, buf.len()).unwrap();
+        assert_eq!(decode_windows(&buf, entries.len()), windows);
+    }
+
+    #[test]
+    fn a_block_without_windows_decodes_to_an_empty_list() {
+        let buf = encode(&[shot(0, 0, 2, 2, 1)], &[]);
+        let entries = decode_header(&buf, buf.len()).unwrap();
+        assert!(decode_windows(&buf, entries.len()).is_empty());
+    }
+
+    #[test]
+    fn a_title_pointing_outside_the_block_is_refused() {
+        // O offset vem de outro processo: seguir um ponteiro inválido leria
+        // fora do mapeamento.
+        let windows =
+            vec![WindowTarget { x: 0, y: 0, width: 10, height: 10, title: "x".into() }];
+        let mut buf = encode(&[shot(0, 0, 2, 2, 1)], &windows);
+        let entries = decode_header(&buf, buf.len()).unwrap();
+        let at = HEADER_BYTES + entries.len() * ENTRY_BYTES + 16;
+        buf[at..at + 8].copy_from_slice(&u64::MAX.to_le_bytes());
+        assert!(decode_windows(&buf, entries.len()).is_empty());
     }
 }

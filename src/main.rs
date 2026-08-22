@@ -120,7 +120,7 @@ fn run_gui(request: cli::GuiRequest) {
     let config = config::load().config;
     let task = match request.task {
         cli::GuiTask::Select { shots, len, purpose } => match load_shots(&shots, len) {
-            Ok(shots) => app::Task::Select { shots, purpose },
+            Ok((shots, windows)) => app::Task::Select { shots, windows, purpose },
             Err(err) => {
                 log::error!("capturas não recebidas do residente: {err:#}");
                 notify::toast_error("Falha na captura", &format!("{err:#}"));
@@ -171,12 +171,18 @@ fn run_gui(request: cli::GuiRequest) {
 }
 
 #[cfg(windows)]
-fn load_shots(name: &str, len: usize) -> error::Result<Vec<capture::MonitorShot>> {
+fn load_shots(
+    name: &str,
+    len: usize,
+) -> error::Result<(Vec<capture::MonitorShot>, Vec<platform::window_list::WindowTarget>)> {
     platform::ipc::consume(name, len)
 }
 
 #[cfg(not(windows))]
-fn load_shots(_name: &str, _len: usize) -> error::Result<Vec<capture::MonitorShot>> {
+fn load_shots(
+    _name: &str,
+    _len: usize,
+) -> error::Result<(Vec<capture::MonitorShot>, Vec<platform::window_list::WindowTarget>)> {
     Err(error::err!("memória compartilhada disponível apenas no Windows"))
 }
 

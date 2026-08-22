@@ -78,7 +78,14 @@ fn main() {
             platform::msgbox::info("RustShot", &text);
             0
         }
-        Ok(cli::Mode::EditFile(path)) => run_edit_file(&path),
+        Ok(cli::Mode::EditFile(path)) => run_edit_image(
+            platform::imagefile::load(&path),
+            &format!("Não foi possível abrir {}", path.display()),
+        ),
+        Ok(cli::Mode::EditClipboard) => run_edit_image(
+            platform::clipboard::get_image(),
+            "Não foi possível ler a área de transferência",
+        ),
         Err(err) => {
             // Linha de comando malformada só acontece por engano de quem chamou
             // o exe à mão: reportar e sair, sem tocar em bandeja nem em log.
@@ -92,18 +99,15 @@ fn main() {
     }
 }
 
-/// Abre o editor sobre uma imagem do disco. Devolve o código de saída.
-fn run_edit_file(path: &std::path::Path) -> i32 {
+/// Abre o editor sobre uma imagem já carregada. Devolve o código de saída.
+fn run_edit_image(loaded: error::Result<imgbuf::RgbaImage>, what: &str) -> i32 {
     init_logging(false);
     install_panic_hook();
 
-    let image = match platform::imagefile::load(path) {
+    let image = match loaded {
         Ok(image) => image,
         Err(err) => {
-            platform::msgbox::info(
-                "RustShot — não foi possível abrir a imagem",
-                &format!("{}\n\n{err:#}", path.display()),
-            );
+            platform::msgbox::info("RustShot", &format!("{what}\n\n{err:#}"));
             return 1;
         }
     };
@@ -354,6 +358,7 @@ USO:
     rustshot                      inicia na bandeja do sistema
     rustshot <imagem>             abre a imagem no editor de anotações
     rustshot --file <imagem>      idem, explícito
+    rustshot --clipboard          abre a imagem da área de transferência
     rustshot --help               mostra esta ajuda
     rustshot --version            mostra a versão
 
@@ -371,6 +376,8 @@ CÓDIGOS DE SAÍDA:
         Print(String),
         /// Abrir o editor sobre uma imagem do disco.
         EditFile(std::path::PathBuf),
+        /// Abrir o editor sobre a imagem que está na área de transferência.
+        EditClipboard,
         Gui(GuiRequest),
     }
 
@@ -395,6 +402,7 @@ CÓDIGOS DE SAÍDA:
         let mut parent: isize = 0;
 
         let mut file: Option<std::path::PathBuf> = None;
+        let mut clipboard = false;
 
         let mut args = args.peekable();
         if args.peek().is_none() {
@@ -430,6 +438,7 @@ CÓDIGOS DE SAÍDA:
                     )))
                 }
                 "--file" => file = Some(std::path::PathBuf::from(value()?)),
+                "--clipboard" => clipboard = true,
                 // Um caminho solto abre a imagem: é o que acontece ao
                 // arrastar um arquivo sobre o executável.
                 other if !other.starts_with('-') && file.is_none() => {
@@ -439,10 +448,16 @@ CÓDIGOS DE SAÍDA:
             }
         }
 
+        if clipboard && file.is_some() {
+            return Err("--clipboard não combina com um arquivo".to_owned());
+        }
+        if (clipboard || file.is_some()) && kind.is_some() {
+            return Err("uma imagem não combina com --gui".to_owned());
+        }
+        if clipboard {
+            return Ok(Mode::EditClipboard);
+        }
         if let Some(path) = file {
-            if kind.is_some() {
-                return Err("uma imagem não combina com --gui".to_owned());
-            }
             return Ok(Mode::EditFile(path));
         }
 
@@ -498,6 +513,15 @@ mod tests {
             };
             assert!(path.to_string_lossy().ends_with("tela.png"));
         }
+    }
+
+    #[test]
+    fn the_clipboard_is_its_own_source() {
+        assert!(matches!(parse(args("--clipboard")).unwrap(), Mode::EditClipboard));
+        assert!(
+            parse(args("--clipboard --file foto.png")).is_err(),
+            "duas origens de imagem ao mesmo tempo não fazem sentido"
+        );
     }
 
     #[test]

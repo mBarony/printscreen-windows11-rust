@@ -22,7 +22,9 @@ use std::time::{Duration, Instant};
 
 use crate::config::{self, Config, APP_NAME};
 use crate::hotkeys::{HotkeyAction, Hotkeys};
-use crate::platform::shell::{self, ShellEvent, IPC_BALLOON, IPC_CONFIG_CHANGED};
+use crate::platform::shell::{
+    self, ShellEvent, IPC_BALLOON, IPC_CONFIG_CHANGED, IPC_EDITOR_OPEN,
+};
 use crate::storage::{self, SaveTarget};
 use crate::tray::{self, Tray};
 use crate::{capture, hotkeys, notify, platform};
@@ -48,6 +50,10 @@ mod events {
 /// Um processo de GUI em andamento e o bloco compartilhado que ele está lendo.
 struct GuiChild {
     child: Child,
+    /// O filho já abriu o editor? Enquanto está só no overlay, acionar o
+    /// atalho de novo o encerra; depois do editor, não — haveria trabalho
+    /// do usuário lá dentro.
+    editing: bool,
     /// Mantido vivo até o filho encerrar: fechar o mapeamento antes destruiria
     /// o objeto e o filho abriria o vazio.
     #[cfg(windows)]
@@ -192,8 +198,17 @@ impl Resident {
     /// memória compartilhada.
     #[cfg(windows)]
     fn launch_select(&mut self, purpose: GuiPurpose) {
-        if self.capture_gui.is_some() {
-            self.busy_toast();
+        // Acionar o atalho com o overlay na tela fecha o overlay: é o mesmo
+        // gesto para abrir e para desistir. Com o editor já aberto, não —
+        // ali existe trabalho que um atalho não pode jogar fora.
+        if let Some(gui) = &mut self.capture_gui {
+            if gui.editing {
+                self.busy_toast();
+            } else {
+                let _ = gui.child.kill();
+                self.capture_gui = None;
+                log::info!("overlay dispensado pelo mesmo atalho");
+            }
             return;
         }
 
@@ -225,7 +240,7 @@ impl Resident {
         ];
         match self.spawn_gui(&args) {
             Ok(child) => {
-                self.capture_gui = Some(GuiChild { child, _shots: Some(published) });
+                self.capture_gui = Some(GuiChild { child, editing: false, _shots: Some(published) });
                 shell::set_poll_timer(true);
             }
             Err(err) => notify::toast_error("Falha ao abrir a seleção", &format!("{err}")),
@@ -316,6 +331,7 @@ impl Resident {
         match self.spawn_gui(&args) {
             Ok(child) => {
                 self.settings_gui = Some(GuiChild {
+                    editing: true,
                     child,
                     #[cfg(windows)]
                     _shots: None,
@@ -362,6 +378,11 @@ impl Resident {
                 notify::toast(title, text);
             }
             IPC_CONFIG_CHANGED => self.reload_config(),
+            IPC_EDITOR_OPEN => {
+                if let Some(gui) = &mut self.capture_gui {
+                    gui.editing = true;
+                }
+            }
             other => log::debug!("mensagem IPC desconhecida: {other}"),
         }
     }

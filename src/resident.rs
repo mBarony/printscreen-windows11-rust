@@ -97,7 +97,16 @@ impl Resident {
             }
         }
 
-        let tray = match Tray::new(config.start_with_windows, events::push) {
+        // Uma sessão de edição gravada só sobra quando o editor não fechou
+        // por vontade do usuário: é exatamente o caso de oferecer recuperar.
+        let recoverable = crate::editor::session_file::exists(&config::state_dir());
+        if recoverable {
+            notify::toast(
+                "Edição não salva encontrada",
+                "Use \"Recuperar edição não salva\" no menu da bandeja.",
+            );
+        }
+        let tray = match Tray::new(config.start_with_windows, recoverable, events::push) {
             Ok(tray) => Some(tray),
             Err(err) => {
                 notify::toast_error(
@@ -316,6 +325,7 @@ impl Resident {
             tray::MENU_OPEN_FOLDER => open_folder(&self.config.effective_output_dir()),
             tray::MENU_SETTINGS => self.open_settings(),
             tray::MENU_AUTOSTART => self.toggle_autostart(),
+            tray::MENU_RECOVER => self.launch_recover(),
             tray::MENU_QUIT => self.quit = true,
             other => log::debug!("item de menu desconhecido: {other:#06x}"),
         }
@@ -386,6 +396,27 @@ impl Resident {
             other => log::debug!("mensagem IPC desconhecida: {other}"),
         }
     }
+
+    /// Abre o editor sobre a sessão gravada.
+    #[cfg(windows)]
+    fn launch_recover(&mut self) {
+        if self.capture_gui.is_some() {
+            self.busy_toast();
+            return;
+        }
+        let args = ["--recover", "--parent", &shell::hwnd_value().to_string()];
+        match self.spawn_gui(&args) {
+            Ok(child) => {
+                // Já entra como edição: há trabalho do usuário dentro dela
+                // desde o primeiro quadro.
+                self.capture_gui = Some(GuiChild { child, editing: true, _shots: None });
+            }
+            Err(err) => notify::toast_error("Falha ao recuperar", &format!("{err:#}")),
+        }
+    }
+
+    #[cfg(not(windows))]
+    fn launch_recover(&mut self) {}
 
     /// A janela de configurações gravou o `config.json`: o residente é o dono
     /// dos atalhos e do registro, então relê e reaplica (RF-05, sem reiniciar).

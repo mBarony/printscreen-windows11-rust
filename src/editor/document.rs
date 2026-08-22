@@ -232,6 +232,37 @@ impl Document {
         }
     }
 
+    /// Imagem de origem, antes de qualquer operação — é o que a gravação de
+    /// sessão guarda, já que o resto é reconstruído por replay.
+    pub fn source_image(&self) -> &Arc<RgbaImage> {
+        &self.baseline.image
+    }
+
+    /// Operações registradas e quantas estão aplicadas — o que a gravação
+    /// de sessão precisa para reconstruir o documento depois de um fechamento
+    /// inesperado.
+    pub fn ops(&self) -> &[Op] {
+        &self.ops
+    }
+
+    pub fn applied(&self) -> usize {
+        self.index
+    }
+
+    pub fn next_id(&self) -> u64 {
+        self.next_id
+    }
+
+    /// Recria um documento a partir da imagem de origem e de um log gravado.
+    pub fn restore(image: RgbaImage, ops: Vec<Op>, index: usize, next_id: u64) -> Self {
+        let mut doc = Self::new(image);
+        doc.index = index.min(ops.len());
+        doc.ops = ops;
+        doc.next_id = next_id.max(1);
+        doc.replay();
+        doc
+    }
+
     /// Selo dos pixels visíveis — muda com recorte e com redação.
     pub fn pixels_version(&self) -> u64 {
         self.pixels_version

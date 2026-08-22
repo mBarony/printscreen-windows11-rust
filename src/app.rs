@@ -31,6 +31,8 @@ pub enum Task {
     },
     /// Janela de configurações.
     Settings,
+    /// Editor retomando uma edição gravada — com o histórico inteiro.
+    Recover(Box<crate::editor::document::Document>),
     /// Editor aberto sobre uma imagem que veio do disco.
     ///
     /// Em caixa porque a imagem é de longe o maior campo do enum, e todas as
@@ -84,6 +86,11 @@ impl GuiApp {
                 (Flow::Selecting(session), None)
             }
             Task::Settings => (Flow::Idle, Some(SettingsState::new(config.clone()))),
+            Task::Recover(doc) => {
+                let session =
+                    EditorSession::from_document(next_serial(), *doc, &config.editor);
+                (Flow::Editing(Box::new(session)), None)
+            }
             Task::EditImage(image) => {
                 let session =
                     EditorSession::new(next_serial(), *image, &config.editor);

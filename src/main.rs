@@ -172,6 +172,16 @@ fn run_gui(request: cli::GuiRequest) {
             }
         },
         cli::GuiTask::Settings => app::Task::Settings,
+        cli::GuiTask::Recover => match editor::session_file::load(&config::state_dir()) {
+            Some(doc) => app::Task::Recover(Box::new(doc)),
+            None => {
+                notify::toast_error(
+                    "Nada a recuperar",
+                    "A edição gravada não pôde ser lida.",
+                );
+                return;
+            }
+        },
     };
 
     log::info!("RustShot {} iniciando (GUI)", env!("CARGO_PKG_VERSION"));
@@ -390,6 +400,8 @@ CÓDIGOS DE SAÍDA:
     pub enum GuiTask {
         Select { shots: String, len: usize, purpose: Purpose },
         Settings,
+        /// Retomar a edição gravada em disco.
+        Recover,
     }
 
     /// `--gui select --shots <nome> --len <bytes> --purpose region|edit
@@ -413,6 +425,7 @@ CÓDIGOS DE SAÍDA:
             let mut value = || args.next().ok_or_else(|| format!("{arg} exige um valor"));
             match arg.as_str() {
                 "--gui" => kind = Some(value()?),
+                "--recover" => kind = Some("recover".to_owned()),
                 "--shots" => shots = Some(value()?),
                 "--len" => {
                     let raw = value()?;
@@ -468,6 +481,7 @@ CÓDIGOS DE SAÍDA:
                 purpose: purpose.ok_or("--gui select exige --purpose")?,
             },
             Some("settings") => GuiTask::Settings,
+            Some("recover") => GuiTask::Recover,
             Some(other) => return Err(format!("--gui desconhecido: {other}")),
             None => return Err("use --gui select|settings".to_owned()),
         };
@@ -543,8 +557,15 @@ mod tests {
                 assert_eq!(len, 128);
                 assert_eq!(purpose, Purpose::Edit);
             }
-            GuiTask::Settings => panic!("esperado select"),
+            other => panic!("esperado select, veio {}", std::any::type_name_of_val(&other)),
         }
+    }
+
+    #[test]
+    fn parses_the_recover_request() {
+        let mode = parse(args("--recover --parent 5")).unwrap();
+        let Mode::Gui(request) = mode else { panic!("esperado modo GUI") };
+        assert!(matches!(request.task, GuiTask::Recover));
     }
 
     #[test]

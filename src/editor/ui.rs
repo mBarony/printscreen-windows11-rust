@@ -18,7 +18,8 @@ use crate::storage::{self, SaveTarget};
 use super::icons::{self, Icon};
 use super::shapes::{
     arrow_geometry, marker_geometry, normalize, push_sample, shape_from_drag, stroke_appearance,
-    stroke_from_samples, Handle, Layer, Point, Shape, Tool, CORNER_RADIUS_MAX, MARKER_INK,
+    stroke_from_samples, text_pill_metrics, Handle, Layer, Point, Shape, Tool,
+    CORNER_RADIUS_MAX, MARKER_INK, TEXT_PILL_COLOR,
 };
 use super::{
     DragPreview, EditorSession, MoveDrag, ResizeDrag, TextInput, CROP_MIN_SIDE, DUPLICATE_OFFSET,
@@ -452,6 +453,13 @@ fn toolbar(ctx: &egui::Context, session: &mut EditorSession, target: &SaveTarget
                         .changed()
                     {
                         session.font_size = font.round().clamp(FONT_MIN, FONT_MAX);
+                        restyle_selection(ctx, session);
+                    }
+                    if icon_button(ui, Icon::TextPill, session.text_pill, text_tool)
+                        .on_hover_text("Fundo claro atrás do texto")
+                        .clicked()
+                    {
+                        session.text_pill = !session.text_pill;
                         restyle_selection(ctx, session);
                     }
                 });
@@ -1015,16 +1023,25 @@ fn paint_shape(painter: &egui::Painter, layer: &Layer, ts: ToScreen) {
             );
         }
         Shape::Text { anchor, content } => {
-            painter.text(
-                ts.pos(*anchor),
-                Align2::LEFT_TOP,
-                content,
-                FontId::new(
-                    ts.len(style.font_size),
-                    egui::FontFamily::Name(crate::theme::INTER.into()),
-                ),
-                color32(style.color),
+            let font = FontId::new(
+                ts.len(style.font_size),
+                egui::FontFamily::Name(crate::theme::INTER.into()),
             );
+            let at = ts.pos(*anchor);
+            if style.text_pill {
+                let galley =
+                    painter.layout_no_wrap(content.clone(), font.clone(), Color32::WHITE);
+                // `split` e não `lines`: uma linha final vazia conta.
+                let line_height =
+                    galley.size().y / content.split('\n').count().max(1) as f32;
+                let (pad, radius) = text_pill_metrics(line_height);
+                painter.rect_filled(
+                    Rect::from_min_size(at, galley.size()).expand(pad),
+                    CornerRadius::same(radius.round() as u8),
+                    color32(TEXT_PILL_COLOR),
+                );
+            }
+            painter.text(at, Align2::LEFT_TOP, content, font, color32(style.color));
         }
     }
 }
@@ -1460,21 +1477,26 @@ fn text_input_overlay(ctx: &egui::Context, session: &mut EditorSession, ts: ToSc
         .fixed_pos(pos)
         .order(egui::Order::Foreground)
         .show(ctx, |ui| {
-            let edit = egui::TextEdit::singleline(&mut input.buffer)
+            let edit = egui::TextEdit::multiline(&mut input.buffer)
                 .font(FontId::new(font_pts, egui::FontFamily::Name(crate::theme::INTER.into())))
                 .text_color(color)
                 .hint_text("Texto…")
+                .desired_rows(1)
                 .desired_width(280.0_f32.max(font_pts * 6.0));
             let response = ui.add(edit);
             if !input.focus_requested {
                 response.request_focus();
                 input.focus_requested = true;
             }
-            let enter = ui.input(|i| i.key_pressed(Key::Enter));
+            // Enter agora insere linha; a confirmação é por Ctrl+Enter ou
+            // clicando fora da caixa.
+            let confirm_key = ui.input(|i| {
+                i.key_pressed(Key::Enter) && (i.modifiers.command || i.modifiers.ctrl)
+            });
             let esc = ui.input(|i| i.key_pressed(Key::Escape));
             if esc {
                 cancel = true;
-            } else if enter || (response.lost_focus() && !response.has_focus()) {
+            } else if confirm_key || (response.lost_focus() && !response.has_focus()) {
                 commit = true;
             }
         });

@@ -131,6 +131,8 @@ pub struct EditorSession {
     pub filled: bool,
     /// Raio dos cantos do retângulo, em px da imagem.
     pub corner_radius: f32,
+    /// Texto nasce sobre a pílula clara de leitura.
+    pub text_pill: bool,
     /// Px físicos da tela por px da imagem; `None` = "ajustar à janela" pendente.
     pub zoom: Option<f32>,
     /// Deslocamento da origem da imagem dentro do canvas, em pontos do egui.
@@ -184,6 +186,7 @@ impl EditorSession {
             font_size: defaults.default_font_size.clamp(FONT_MIN, FONT_MAX),
             filled: false,
             corner_radius: 0.0,
+            text_pill: false,
             zoom: None,
             pan: egui::Vec2::ZERO,
             tool_keys: resolve_tool_keys(&defaults.tool_keys),
@@ -210,6 +213,7 @@ impl EditorSession {
             font_size: self.font_size,
             filled: self.filled,
             corner_radius: self.corner_radius,
+            text_pill: self.text_pill,
         }
     }
 

@@ -76,6 +76,19 @@ pub struct Style {
     pub filled: bool,
     /// Raio dos cantos do retângulo, em px da imagem.
     pub corner_radius: f32,
+    /// Texto sobre uma pílula clara, para continuar legível sobre qualquer
+    /// fundo.
+    pub text_pill: bool,
+}
+
+/// Cor da pílula de leitura atrás do texto.
+pub const TEXT_PILL_COLOR: [u8; 4] = [0xF8, 0xF5, 0xEB, 0xFF];
+
+/// Recuo e raio da pílula, derivados da altura da linha.
+pub fn text_pill_metrics(line_height: f32) -> (f32, f32) {
+    let padding = (line_height * 0.18).max(4.0);
+    let radius = (line_height / 4.0).min(6.0);
+    (padding, radius)
 }
 
 /// Raio máximo dos cantos do retângulo, em px da imagem.
@@ -757,6 +770,7 @@ mod tests {
             font_size: 24.0,
             filled: false,
             corner_radius: 0.0,
+            text_pill: false,
         }
     }
 

@@ -2,6 +2,39 @@
 
 Histórico de versões do RustShot. Datas em 2026.
 
+## Não lançado
+
+Primeira leva do port das funcionalidades do
+[omasnap](https://github.com/tobi/omasnap), a ferramenta equivalente para
+Arch Linux. Esta etapa cobre a fundação e a manipulação de anotações; as
+ferramentas de desenho novas vêm a seguir.
+
+- **Anotações continuam editáveis depois de criadas.** A anotação
+  selecionada ganha alças de redimensionamento — as oito da caixa nas formas
+  com área, as duas pontas em linha e seta. `Shift` preserva a proporção num
+  canto ou prende a ponta em 45°. As setas do teclado empurram 1 px (10 px
+  com `Shift`), `Alt+D` duplica e `Delete` apaga. Trocar cor, espessura ou
+  tamanho da fonte com algo selecionado repinta aquela anotação, em vez de
+  valer apenas para a próxima — antes o estilo era congelado no momento da
+  criação e mudá-lo exigia apagar e desenhar de novo.
+- **`Alt` desenha retângulo e elipse a partir do centro**, combinável com
+  `Shift`.
+- **O histórico deixou de guardar cópias da imagem.** Cada edição virou uma
+  operação registrada num log, e o estado visível é reconstruído a partir da
+  imagem de partida. Um recorte custa um retângulo em vez de uma imagem
+  inteira por passo. O log é limitado a 100 operações; ao estourar, a mais
+  antiga é aplicada de vez à imagem de partida (descartá-la sem mais
+  deixaria as anotações no espaço errado).
+- **O rasterizador da exportação ganhou preenchimento**, cantos arredondados
+  e traço contínuo por polilinha, que são a base das ferramentas ainda por
+  vir. O traço contínuo acumula a cobertura de todos os segmentos antes de
+  compor, para as junções não ficarem mais escuras que o resto — o que
+  apareceria em traços translúcidos.
+
+Mudanças internas que podem interessar a quem lê o código: as anotações
+passaram de `Shape` para `Layer { id, shape, style }`, com identidade
+estável; `editor/raster.rs` virou o módulo `editor/raster/`.
+
 ## v1.6.0 — 17/08
 
 Versão dedicada a consumo de memória. O app ocupava ~90 MB parado na bandeja, e

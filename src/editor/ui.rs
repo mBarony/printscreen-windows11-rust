@@ -17,7 +17,8 @@ use crate::storage::{self, SaveTarget};
 
 use super::icons::{self, Icon};
 use super::shapes::{
-    arrow_geometry, normalize, shape_from_drag, Handle, Layer, Point, Shape, Tool,
+    arrow_geometry, normalize, push_sample, shape_from_drag, stroke_appearance,
+    stroke_from_samples, Handle, Layer, Point, Shape, Tool,
 };
 use super::{
     DragPreview, EditorSession, MoveDrag, ResizeDrag, TextInput, CROP_MIN_SIDE, DUPLICATE_OFFSET,
@@ -718,8 +719,13 @@ fn canvas(ctx: &egui::Context, session: &mut EditorSession) {
                                 press_origin.or_else(|| response.interact_pointer_pos())
                             {
                                 let p = clamp_img(to_screen.inverse(origin));
-                                session.drag =
-                                    Some(DragPreview { start: p, current: p, shift, alt });
+                                session.drag = Some(DragPreview {
+                                    start: p,
+                                    current: p,
+                                    shift,
+                                    alt,
+                                    samples: vec![p],
+                                });
                                 // Começar uma área nova descarta a anterior.
                                 session.crop_pending = None;
                             }
@@ -727,6 +733,9 @@ fn canvas(ctx: &egui::Context, session: &mut EditorSession) {
                         if let Some(drag) = &mut session.drag {
                             if let Some(pos) = latest_pos {
                                 drag.current = clamp_img(to_screen.inverse(pos));
+                                if session.tool.is_stroke() {
+                                    push_sample(&mut drag.samples, drag.current);
+                                }
                             }
                             drag.shift = shift;
                             drag.alt = alt;
@@ -741,6 +750,16 @@ fn canvas(ctx: &egui::Context, session: &mut EditorSession) {
                                     if dx >= CROP_MIN_SIDE && dy >= CROP_MIN_SIDE {
                                         session.crop_pending =
                                             Some(normalize(drag.start, drag.current));
+                                    }
+                                } else if session.tool.is_stroke() {
+                                    // Um rabisco é medido pelo caminho
+                                    // percorrido, não pela distância entre as
+                                    // pontas: um círculo começa e termina no
+                                    // mesmo lugar e nem por isso é um clique.
+                                    if let Some(shape) =
+                                        stroke_from_samples(session.tool, &drag.samples)
+                                    {
+                                        session.doc.push(shape, session.style());
                                     }
                                 } else if dx >= 2.0 || dy >= 2.0 {
                                     // Ignora cliques sem arrasto real.
@@ -782,9 +801,12 @@ fn canvas(ctx: &egui::Context, session: &mut EditorSession) {
                 paint_shape(&shape_painter, layer, to_screen);
             }
             if let Some(drag) = &session.drag {
-                if let Some(shape) =
+                let in_progress = if session.tool.is_stroke() {
+                    stroke_from_samples(session.tool, &drag.samples)
+                } else {
                     shape_from_drag(session.tool, drag.start, drag.current, drag.shift, drag.alt)
-                {
+                };
+                if let Some(shape) = in_progress {
                     // A pré-visualização ainda não é uma anotação do
                     // documento: recebe um id provisório só para reusar o
                     // mesmo desenho da forma já criada.
@@ -874,6 +896,15 @@ fn paint_shape(painter: &egui::Painter, layer: &Layer, ts: ToScreen) {
                 stroke,
             ));
         }
+        Shape::Freehand { points, highlight } => {
+            let (width, color) = stroke_appearance(style, *highlight);
+            // Mesma lista de pontos que a exportação percorre: a suavização
+            // já aconteceu quando o traço foi criado.
+            painter.add(egui::Shape::line(
+                points.iter().map(|p| ts.pos(*p)).collect(),
+                Stroke::new(ts.len(width), color32(color)),
+            ));
+        }
         Shape::Text { anchor, content } => {
             painter.text(
                 ts.pos(*anchor),
@@ -931,6 +962,12 @@ fn hit_test(ctx: &egui::Context, layer: &Layer, p: Point, tol: f32, ts: ToScreen
 fn shape_screen_bbox(ctx: &egui::Context, layer: &Layer, ts: ToScreen) -> Rect {
     let half_stroke = ts.len(layer.style.stroke_width) / 2.0;
     match &layer.shape {
+        Shape::Freehand { highlight, .. } => {
+            // O traço do marca-texto é bem mais largo que o do estilo.
+            let (width, _) = stroke_appearance(&layer.style, *highlight);
+            let (min, max) = layer.bbox().unwrap_or((Point::new(0.0, 0.0), Point::new(0.0, 0.0)));
+            Rect::from_min_max(ts.pos(min), ts.pos(max)).expand(ts.len(width) / 2.0)
+        }
         Shape::Line { a, b } | Shape::Arrow { a, b } => {
             Rect::from_two_pos(ts.pos(*a), ts.pos(*b)).expand(half_stroke)
         }

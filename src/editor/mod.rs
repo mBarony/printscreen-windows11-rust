@@ -30,6 +30,9 @@ pub const WINDOW_TITLE: &str = "RustShot — Editor";
 /// clicar antes de `Ctrl+C`/`Ctrl+S` funcionarem.
 pub const FOCUS_CLAIM_FRAMES: u8 = 12;
 
+/// Quantidade de ferramentas do editor — o tamanho da tabela de atalhos.
+pub const TOOL_COUNT: usize = 9;
+
 /// Tolerância do hit-test ao clicar numa anotação com a ferramenta Mover,
 /// em pontos do egui (convertida para px da imagem pelo zoom).
 pub const HIT_TOLERANCE_PTS: f32 = 6.0;
@@ -83,6 +86,8 @@ pub struct DragPreview {
     pub shift: bool,
     /// Faz o ponto de partida virar o centro da forma.
     pub alt: bool,
+    /// Pontos amostrados do gesto — só as ferramentas de rabisco usam.
+    pub samples: Vec<Point>,
 }
 
 /// Caixa de texto inline da ferramenta Texto.
@@ -128,7 +133,7 @@ pub struct EditorSession {
     pub pan: egui::Vec2,
     /// Teclas das ferramentas, já resolvidas do config (issue #4); `None` =
     /// ferramenta sem atalho (a tecla estava tomada por outra).
-    pub tool_keys: [(Tool, Option<egui::Key>); 7],
+    pub tool_keys: [(Tool, Option<egui::Key>); TOOL_COUNT],
     /// `true` = Ctrl+roda dá zoom e a roda pura ajusta o traço/fonte
     /// (papéis trocados em relação ao padrão, issue #4).
     pub ctrl_wheel_zoom: bool,
@@ -209,7 +214,7 @@ impl EditorSession {
 /// tomadas por uma ferramenta anterior não são reatribuídas — a ferramenta
 /// fica sem atalho (`None`) em vez de disputar a tecla (config editado à
 /// mão pode criar duplicatas que a UI de Configurações não deixa salvar).
-pub fn resolve_tool_keys(config: &config::ToolKeysConfig) -> [(Tool, Option<egui::Key>); 7] {
+pub fn resolve_tool_keys(config: &config::ToolKeysConfig) -> [(Tool, Option<egui::Key>); TOOL_COUNT] {
     let defaults = config::ToolKeysConfig::default();
     let entries = [
         (Tool::Select, &config.select, &defaults.select),
@@ -217,6 +222,8 @@ pub fn resolve_tool_keys(config: &config::ToolKeysConfig) -> [(Tool, Option<egui
         (Tool::Arrow, &config.arrow, &defaults.arrow),
         (Tool::Rect, &config.rect, &defaults.rect),
         (Tool::Ellipse, &config.ellipse, &defaults.ellipse),
+        (Tool::Freehand, &config.freehand, &defaults.freehand),
+        (Tool::Highlighter, &config.highlighter, &defaults.highlighter),
         (Tool::Text, &config.text, &defaults.text),
         (Tool::Crop, &config.crop, &defaults.crop),
     ];
@@ -250,9 +257,12 @@ mod tests {
     #[test]
     fn resolve_tool_keys_defaults() {
         let keys = resolve_tool_keys(&ToolKeysConfig::default());
+        assert_eq!(keys.len(), TOOL_COUNT, "toda ferramenta tem uma entrada");
         assert_eq!(keys[0], (Tool::Select, Some(egui::Key::M)));
-        assert_eq!(keys[5], (Tool::Text, Some(egui::Key::T)));
-        assert_eq!(keys[6], (Tool::Crop, Some(egui::Key::C)));
+        assert_eq!(keys[5], (Tool::Freehand, Some(egui::Key::F)));
+        assert_eq!(keys[6], (Tool::Highlighter, Some(egui::Key::H)));
+        assert_eq!(keys[7], (Tool::Text, Some(egui::Key::T)));
+        assert_eq!(keys[8], (Tool::Crop, Some(egui::Key::C)));
     }
 
     #[test]

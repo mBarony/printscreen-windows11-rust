@@ -20,7 +20,7 @@ pub mod stroke;
 // Reexporta o que já tem chamador; as primitivas novas entram aqui conforme
 // as ferramentas que as usam forem ligadas.
 pub use fill::fill_triangle;
-pub use stroke::{stroke_ellipse, stroke_line, stroke_rect};
+pub use stroke::{stroke_ellipse, stroke_line, stroke_polyline, stroke_rect};
 
 use crate::imgbuf::RgbaImage;
 

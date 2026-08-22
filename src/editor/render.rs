@@ -14,7 +14,7 @@ use crate::error::{Context as _, Result};
 use crate::imgbuf::RgbaImage;
 
 use super::raster;
-use super::shapes::{arrow_geometry, Layer, Point, Shape};
+use super::shapes::{arrow_geometry, stroke_appearance, Layer, Point, Shape};
 use super::FONT_BYTES;
 
 /// Rasteriza `captura + anotações` e retorna a imagem final RGBA.
@@ -73,6 +73,11 @@ pub fn render(base: &RgbaImage, layers: &[Layer]) -> Result<RgbaImage> {
                     style.stroke_width,
                     style.color,
                 );
+            }
+            Shape::Freehand { points, highlight } => {
+                let (width, color) = stroke_appearance(style, *highlight);
+                let path: Vec<(f32, f32)> = points.iter().map(|p| (p.x, p.y)).collect();
+                raster::stroke_polyline(&mut buffer, &path, width, color);
             }
             Shape::Text { anchor, content } => {
                 draw_text(&mut buffer, &font, *anchor, content, style.color, style.font_size);
@@ -206,6 +211,31 @@ mod tests {
         let out = render(&img, &[dragged(Tool::Arrow, (8.0, 32.0), (56.0, 32.0))]).unwrap();
         // Perto da ponta (x=54, y=32) deve haver vermelho.
         assert!(out.pixel(53, 32)[0] > 150);
+    }
+
+    #[test]
+    fn freehand_stroke_is_exported() {
+        let img = base();
+        let points: Vec<Point> = (0..6).map(|i| Point::new(8.0 + i as f32 * 9.0, 32.0)).collect();
+        let out = render(&img, &[layer(Shape::Freehand { points, highlight: false })]).unwrap();
+        assert!(out.pixel(30, 32)[0] > 150, "traço no meio do caminho");
+        assert_eq!(out.pixel(30, 8), [10, 20, 30, 255], "fora do traço");
+    }
+
+    #[test]
+    fn the_highlighter_lets_the_image_show_through() {
+        // Sobre o mesmo fundo, o marca-texto tem de deixar a base aparecer —
+        // é o que separa marcar de tapar.
+        let img = base();
+        let points = vec![Point::new(8.0, 32.0), Point::new(56.0, 32.0)];
+        let plain = layer(Shape::Freehand { points: points.clone(), highlight: false });
+        let mark = layer(Shape::Freehand { points, highlight: true });
+
+        let opaque = render(&img, &[plain]).unwrap().pixel(32, 32);
+        let translucent = render(&img, &[mark]).unwrap().pixel(32, 32);
+        assert_eq!(opaque[0], 255, "mão livre cobre");
+        assert!(translucent[0] < opaque[0], "marca-texto não cobre");
+        assert!(translucent[2] > opaque[2], "o azul do fundo sobrevive");
     }
 
     #[test]

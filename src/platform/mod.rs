@@ -22,6 +22,7 @@ pub mod capture;
 pub mod clipboard;
 pub mod dialog;
 pub mod folders;
+pub mod imagefile;
 pub mod instance;
 // Transporte entre processos: só existe no Windows (e sob teste, que exercita a
 // serialização pura em qualquer host).

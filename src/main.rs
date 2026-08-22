@@ -62,16 +62,56 @@ fn main() {
         return;
     }
 
-    match cli::parse(std::env::args().skip(1)) {
-        Ok(cli::Mode::Resident) => run_resident(),
-        Ok(cli::Mode::Gui(request)) => run_gui(request),
+    let code = match cli::parse(std::env::args().skip(1)) {
+        Ok(cli::Mode::Resident) => {
+            run_resident();
+            0
+        }
+        Ok(cli::Mode::Gui(request)) => {
+            run_gui(request);
+            0
+        }
+        // Um app de janela não tem console para escrever: a ajuda e a versão
+        // saem numa caixa de mensagem, que é onde quem clicou duas vezes no
+        // exe vai olhar.
+        Ok(cli::Mode::Print(text)) => {
+            platform::msgbox::info("RustShot", &text);
+            0
+        }
+        Ok(cli::Mode::EditFile(path)) => run_edit_file(&path),
         Err(err) => {
             // Linha de comando malformada só acontece por engano de quem chamou
             // o exe à mão: reportar e sair, sem tocar em bandeja nem em log.
             platform::msgbox::info("RustShot — argumentos inválidos", &err);
+            2
         }
-    }
+    };
     jobs::join_all();
+    if code != 0 {
+        std::process::exit(code);
+    }
+}
+
+/// Abre o editor sobre uma imagem do disco. Devolve o código de saída.
+fn run_edit_file(path: &std::path::Path) -> i32 {
+    init_logging(false);
+    install_panic_hook();
+
+    let image = match platform::imagefile::load(path) {
+        Ok(image) => image,
+        Err(err) => {
+            platform::msgbox::info(
+                "RustShot — não foi possível abrir a imagem",
+                &format!("{}\n\n{err:#}", path.display()),
+            );
+            return 1;
+        }
+    };
+
+    let config = config::load().config;
+    let task = app::Task::EditImage(Box::new(image));
+    run_event_loop(config, task);
+    0
 }
 
 /// Modo residente: instância única, bandeja e loop de mensagens (RF-06/RF-08).
@@ -159,6 +199,37 @@ fn run_gui(request: cli::GuiRequest) {
         ..Default::default()
     };
 
+    run_event_loop_with(config, task, options);
+}
+
+/// Sobe o eframe com a janela-raiz padrão deste processo.
+fn run_event_loop(config: config::Config, task: app::Task) {
+    let options = eframe::NativeOptions {
+        renderer: eframe::Renderer::Wgpu,
+        viewport: egui::ViewportBuilder::default()
+            .with_title(app::ROOT_TITLE)
+            .with_decorations(false)
+            .with_taskbar(false)
+            .with_active(false)
+            .with_resizable(false)
+            .with_maximize_button(false)
+            .with_minimize_button(false)
+            .with_position(egui::Pos2::new(-32000.0, -32000.0))
+            .with_inner_size(egui::Vec2::new(1.0, 1.0))
+            .with_icon(std::sync::Arc::new(app::app_icon_data())),
+        persist_window: false,
+        centered: false,
+        wgpu_options: wgpu_options(),
+        ..Default::default()
+    };
+    run_event_loop_with(config, task, options);
+}
+
+fn run_event_loop_with(
+    config: config::Config,
+    task: app::Task,
+    options: eframe::NativeOptions,
+) {
     let result = eframe::run_native(
         APP_NAME,
         options,
@@ -268,13 +339,38 @@ fn init_logging(rotate: bool) {
     }
 }
 
-/// Linha de comando do modo GUI. Não é interface pública: quem monta esses
-/// argumentos é o próprio residente (`resident::spawn_gui`).
+/// Linha de comando.
+///
+/// A maior parte é interna — quem monta os argumentos `--gui …` é o próprio
+/// residente. O que é público e documentado no `--help`: abrir uma imagem
+/// para anotar, e as consultas `--help`/`--version`.
 mod cli {
     use crate::overlay::Purpose;
 
+    pub const HELP: &str = "\
+RustShot — captura de tela para Windows 11
+
+USO:
+    rustshot                      inicia na bandeja do sistema
+    rustshot <imagem>             abre a imagem no editor de anotações
+    rustshot --file <imagem>      idem, explícito
+    rustshot --help               mostra esta ajuda
+    rustshot --version            mostra a versão
+
+Com o app na bandeja, a captura é pelos atalhos globais configuráveis
+(por padrão Ctrl+PrtScr, Shift+PrtScr e Ctrl+Shift+PrtScr).
+
+CÓDIGOS DE SAÍDA:
+    0  sucesso
+    1  falha ao capturar ou ao abrir a imagem
+    2  erro de uso";
+
     pub enum Mode {
         Resident,
+        /// Só imprimir algo e sair com sucesso.
+        Print(String),
+        /// Abrir o editor sobre uma imagem do disco.
+        EditFile(std::path::PathBuf),
         Gui(GuiRequest),
     }
 
@@ -297,6 +393,8 @@ mod cli {
         let mut len: Option<usize> = None;
         let mut purpose: Option<Purpose> = None;
         let mut parent: isize = 0;
+
+        let mut file: Option<std::path::PathBuf> = None;
 
         let mut args = args.peekable();
         if args.peek().is_none() {
@@ -323,8 +421,29 @@ mod cli {
                     let raw = value()?;
                     parent = raw.parse().map_err(|_| format!("--parent inválido: {raw}"))?;
                 }
+                "--help" | "-h" => return Ok(Mode::Print(HELP.to_owned())),
+                "--version" | "-V" => {
+                    return Ok(Mode::Print(format!(
+                        "{} {}",
+                        env!("CARGO_PKG_NAME"),
+                        env!("CARGO_PKG_VERSION")
+                    )))
+                }
+                "--file" => file = Some(std::path::PathBuf::from(value()?)),
+                // Um caminho solto abre a imagem: é o que acontece ao
+                // arrastar um arquivo sobre o executável.
+                other if !other.starts_with('-') && file.is_none() => {
+                    file = Some(std::path::PathBuf::from(other));
+                }
                 other => return Err(format!("argumento desconhecido: {other}")),
             }
+        }
+
+        if let Some(path) = file {
+            if kind.is_some() {
+                return Err("uma imagem não combina com --gui".to_owned());
+            }
+            return Ok(Mode::EditFile(path));
         }
 
         let task = match kind.as_deref() {
@@ -353,6 +472,37 @@ mod tests {
     #[test]
     fn no_arguments_is_the_resident() {
         assert!(matches!(parse(args("")).unwrap(), Mode::Resident));
+    }
+
+    #[test]
+    fn help_and_version_just_print() {
+        for flag in ["--help", "-h"] {
+            let Mode::Print(text) = parse(args(flag)).unwrap() else {
+                panic!("{flag} devia só imprimir")
+            };
+            assert!(text.contains("USO:"), "a ajuda precisa dizer como usar");
+        }
+        let Mode::Print(text) = parse(args("--version")).unwrap() else {
+            panic!("esperado texto")
+        };
+        assert!(text.contains(env!("CARGO_PKG_VERSION")));
+    }
+
+    #[test]
+    fn an_image_path_opens_the_editor() {
+        // Tanto explícito quanto solto — este último é o arquivo arrastado
+        // sobre o executável.
+        for line in ["--file C:\\fotos\\tela.png", "C:\\fotos\\tela.png"] {
+            let Mode::EditFile(path) = parse(args(line)).unwrap() else {
+                panic!("{line} devia abrir o editor")
+            };
+            assert!(path.to_string_lossy().ends_with("tela.png"));
+        }
+    }
+
+    #[test]
+    fn an_image_does_not_mix_with_the_internal_gui_mode() {
+        assert!(parse(args("--gui settings --parent 1 foto.png")).is_err());
     }
 
     #[test]

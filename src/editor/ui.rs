@@ -16,10 +16,13 @@ use crate::notify;
 use crate::storage::{self, SaveTarget};
 
 use super::icons::{self, Icon};
-use super::shapes::{arrow_geometry, normalize, shape_from_drag, Layer, Point, Shape, Tool};
+use super::shapes::{
+    arrow_geometry, normalize, shape_from_drag, Handle, Layer, Point, Shape, Tool,
+};
 use super::{
-    DragPreview, EditorSession, MoveDrag, TextInput, CROP_MIN_SIDE, FONT_MAX, FONT_MIN,
-    HIT_TOLERANCE_PTS, PALETTE, STROKE_MAX, STROKE_MIN, ZOOM_MAX, ZOOM_MIN,
+    DragPreview, EditorSession, MoveDrag, ResizeDrag, TextInput, CROP_MIN_SIDE, FONT_MAX,
+    FONT_MIN, HANDLE_EDGE_ROOM_PTS, HANDLE_HIT_PTS, HANDLE_RADIUS_PTS, HIT_TOLERANCE_PTS,
+    PALETTE, STROKE_MAX, STROKE_MIN, ZOOM_MAX, ZOOM_MIN,
 };
 
 /// Lado do botão de ícone da toolbar, em pontos.
@@ -193,16 +196,18 @@ fn select_tool(session: &mut EditorSession, tool: Tool) {
 /// Aborta um arrasto de reposicionamento em andamento, restaurando a posição
 /// original da forma (o ponto de undo registrado no início sai do histórico).
 fn cancel_move(session: &mut EditorSession) {
-    if session.move_drag.take().is_some() {
+    let dragging = session.move_drag.take().is_some() | session.resize_drag.take().is_some();
+    if dragging {
         session.doc.abort_move();
     }
 }
 
-/// Ctrl+Z: com um arrasto de reposicionamento em andamento, desfaz só ele;
-/// caso contrário desfaz a última edição. A seleção é limpa porque os
-/// índices das formas podem mudar.
+/// Ctrl+Z: com um arrasto de reposicionamento ou de alça em andamento,
+/// desfaz só ele; caso contrário desfaz a última edição. A seleção é limpa
+/// porque os índices das formas podem mudar.
 fn perform_undo(session: &mut EditorSession) {
-    if session.move_drag.take().is_some() {
+    let dragging = session.move_drag.take().is_some() | session.resize_drag.take().is_some();
+    if dragging {
         session.doc.abort_move();
     } else {
         let before = session.doc.image_version();
@@ -618,37 +623,39 @@ fn canvas(ctx: &egui::Context, session: &mut EditorSession) {
                         }
                     }
                     Tool::Select => {
+                        let hover_handle = (session.move_drag.is_none()
+                            && session.resize_drag.is_none())
+                        .then(|| latest_pos.and_then(|pos| handle_at(session, to_screen, pos)))
+                        .flatten();
                         if response.hovered() {
-                            let icon = if session.move_drag.is_some() {
-                                CursorIcon::Grabbing
-                            } else {
-                                CursorIcon::Default
+                            let icon = match (&session.resize_drag, &session.move_drag) {
+                                (Some(rz), _) => handle_cursor(rz.handle),
+                                (None, Some(_)) => CursorIcon::Grabbing,
+                                _ => hover_handle
+                                    .map(|(_, h)| handle_cursor(h))
+                                    .unwrap_or(CursorIcon::Default),
                             };
                             ctx.output_mut(|o| o.cursor_icon = icon);
                         }
-                        if session.move_drag.is_none() && primary_pressed && response.hovered() {
+                        if session.move_drag.is_none()
+                            && session.resize_drag.is_none()
+                            && primary_pressed
+                            && response.hovered()
+                        {
                             // `press_origin` já foi limpo se o release chegou
                             // no mesmo frame (clique coalescido) — o clique
                             // ainda deve selecionar.
                             if let Some(origin) =
                                 press_origin.or_else(|| response.interact_pointer_pos())
                             {
-                                let p = to_screen.inverse(origin);
-                                let tol = HIT_TOLERANCE_PTS / to_screen.scale;
-                                let hit = session
-                                    .doc
-                                    .layers()
-                                    .iter()
-                                    .enumerate()
-                                    .rev() // a mais recente (pintada por cima) vence
-                                    .find(|(_, layer)| hit_test(ctx, layer, p, tol, to_screen))
-                                    .map(|(index, _)| index);
-                                session.selected = hit;
-                                if let Some(index) = hit {
-                                    session.doc.begin_move();
-                                    session.move_drag =
-                                        Some(MoveDrag { index, last: p, travel: 0.0 });
-                                }
+                                begin_select_drag(ctx, session, to_screen, origin);
+                            }
+                        }
+                        if let Some(rz) = &session.resize_drag {
+                            if let Some(pos) = latest_pos {
+                                let constrain = ui.input(|i| i.modifiers.shift);
+                                let p = to_screen.inverse(pos);
+                                session.doc.resize(rz.index, rz.handle, p, constrain);
                             }
                         }
                         if let Some(mv) = &mut session.move_drag {
@@ -663,6 +670,11 @@ fn canvas(ctx: &egui::Context, session: &mut EditorSession) {
                             }
                         }
                         if primary_released {
+                            // Um arrasto de alça que não mudou nada não vira
+                            // histórico: `end_move` só registra o que mudou.
+                            if session.resize_drag.take().is_some() {
+                                session.doc.end_move();
+                            }
                             if let Some(mv) = session.move_drag.take() {
                                 // Clique parado (sem arrasto real) só
                                 // seleciona: nem o undo nem o redo mudam.
@@ -765,6 +777,7 @@ fn canvas(ctx: &egui::Context, session: &mut EditorSession) {
                 if let Some(layer) = session.selected.and_then(|i| session.doc.layers().get(i)) {
                     let color = ui.visuals().selection.stroke.color;
                     draw_selection_outline(ctx, &painter, layer, to_screen, color);
+                    draw_handles(&painter, layer, to_screen, ui.visuals().selection.bg_fill);
                 }
             }
 
@@ -909,6 +922,82 @@ fn shape_screen_bbox(ctx: &egui::Context, layer: &Layer, ts: ToScreen) -> Rect {
             let size = text_galley(ctx, content, layer.style.font_size, ts).size();
             Rect::from_min_size(ts.pos(*anchor), size)
         }
+    }
+}
+
+/// Press com a ferramenta Mover.
+///
+/// A alça da anotação já selecionada tem prioridade sobre o corpo das
+/// anotações: ela fica *fora* da forma, e sem essa precedência clicar numa
+/// alça selecionaria o que estivesse atrás dela.
+fn begin_select_drag(
+    ctx: &egui::Context,
+    session: &mut EditorSession,
+    ts: ToScreen,
+    origin: Pos2,
+) {
+    if let Some((index, handle)) = handle_at(session, ts, origin) {
+        session.selected = Some(index);
+        session.doc.begin_move();
+        session.resize_drag = Some(ResizeDrag { index, handle });
+        return;
+    }
+
+    let p = ts.inverse(origin);
+    let tol = HIT_TOLERANCE_PTS / ts.scale;
+    let hit = session
+        .doc
+        .layers()
+        .iter()
+        .enumerate()
+        .rev() // a mais recente (pintada por cima) vence
+        .find(|(_, layer)| hit_test(ctx, layer, p, tol, ts))
+        .map(|(index, _)| index);
+    session.selected = hit;
+    if let Some(index) = hit {
+        session.doc.begin_move();
+        session.move_drag = Some(MoveDrag { index, last: p, travel: 0.0 });
+    }
+}
+
+/// Alça da anotação selecionada sob o ponteiro, se houver — a mais próxima,
+/// para alças vizinhas não disputarem o mesmo clique.
+fn handle_at(session: &EditorSession, ts: ToScreen, pos: Pos2) -> Option<(usize, Handle)> {
+    let index = session.selected?;
+    let layer = session.doc.layers().get(index)?;
+    let p = ts.inverse(pos);
+    let tol = HANDLE_HIT_PTS / ts.scale;
+    layer
+        .handles(HANDLE_EDGE_ROOM_PTS / ts.scale)
+        .into_iter()
+        .map(|(handle, at)| {
+            let (dx, dy) = (at.x - p.x, at.y - p.y);
+            (handle, dx * dx + dy * dy)
+        })
+        .filter(|(_, dist_sq)| *dist_sq <= tol * tol)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(handle, _)| (index, handle))
+}
+
+fn handle_cursor(handle: Handle) -> CursorIcon {
+    match handle {
+        Handle::TopLeft | Handle::BottomRight => CursorIcon::ResizeNwSe,
+        Handle::TopRight | Handle::BottomLeft => CursorIcon::ResizeNeSw,
+        Handle::Top | Handle::Bottom => CursorIcon::ResizeVertical,
+        Handle::Left | Handle::Right => CursorIcon::ResizeHorizontal,
+        Handle::Start | Handle::End => CursorIcon::Grab,
+    }
+}
+
+/// Alças de redimensionamento da anotação selecionada.
+fn draw_handles(painter: &egui::Painter, layer: &Layer, ts: ToScreen, fill: Color32) {
+    for (_, at) in layer.handles(HANDLE_EDGE_ROOM_PTS / ts.scale) {
+        painter.circle(
+            ts.pos(at),
+            HANDLE_RADIUS_PTS,
+            fill,
+            Stroke::new(1.0_f32, Color32::WHITE),
+        );
     }
 }
 

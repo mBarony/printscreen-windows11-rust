@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use crate::imgbuf::RgbaImage;
 
-use super::shapes::{Layer, Shape, Style};
+use super::shapes::{Handle, Layer, Point, Shape, Style};
 
 /// Teto do histórico, em operações.
 const MAX_OPS: usize = 100;
@@ -187,6 +187,14 @@ impl Document {
     pub fn translate(&mut self, index: usize, dx: f32, dy: f32) {
         if let Some(layer) = self.layers.get_mut(index) {
             layer.shape.translate(dx, dy);
+        }
+    }
+
+    /// Arrasta uma alça da anotação `index`. Como o movimento, só entra no
+    /// histórico quando o arrasto termina (`end_move`).
+    pub fn resize(&mut self, index: usize, handle: Handle, to: Point, constrain: bool) {
+        if let Some(layer) = self.layers.get_mut(index) {
+            layer.resize(handle, to, constrain);
         }
     }
 

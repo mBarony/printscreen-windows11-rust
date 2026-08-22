@@ -119,6 +119,207 @@ impl Layer {
             }
         }
     }
+
+    /// Caixa envolvente da geometria, em px da imagem (sem a espessura do
+    /// traço). `None` para texto, cuja extensão só é conhecida por quem tem
+    /// a fonte em mãos.
+    pub fn bbox(&self) -> Option<(Point, Point)> {
+        match &self.shape {
+            Shape::Line { a, b } | Shape::Arrow { a, b } => Some(normalize(*a, *b)),
+            Shape::Rect { min, max } => Some((*min, *max)),
+            Shape::Ellipse { center, rx, ry } => Some((
+                Point::new(center.x - rx, center.y - ry),
+                Point::new(center.x + rx, center.y + ry),
+            )),
+            Shape::Text { .. } => None,
+        }
+    }
+
+    /// Alças de redimensionamento, em px da imagem.
+    ///
+    /// Linha e seta expõem só as duas pontas. As formas com área expõem os
+    /// quatro cantos, mais as alças de aresta cujo lado tenha ao menos
+    /// `min_side` — sem esse piso elas se sobreporiam aos cantos e virariam
+    /// um borrão de pontos numa anotação pequena. O texto não tem alça: seu
+    /// tamanho se ajusta pela roda.
+    pub fn handles(&self, min_side: f32) -> Vec<(Handle, Point)> {
+        if let Shape::Line { a, b } | Shape::Arrow { a, b } = &self.shape {
+            return vec![(Handle::Start, *a), (Handle::End, *b)];
+        }
+        let Some((min, max)) = self.bbox() else {
+            return Vec::new();
+        };
+        let (wide, tall) = (max.x - min.x >= min_side, max.y - min.y >= min_side);
+        Handle::BOX
+            .into_iter()
+            .filter(|h| match h {
+                Handle::Top | Handle::Bottom => wide,
+                Handle::Left | Handle::Right => tall,
+                _ => true,
+            })
+            .map(|h| (h, h.position(min, max)))
+            .collect()
+    }
+
+    /// Arrasta a alça `handle` até `to`.
+    ///
+    /// Com `constrain`, cantos preservam a proporção original e pontas de
+    /// linha/seta prendem em múltiplos de 45°. Puxar uma aresta para além da
+    /// oposta vira a forma do avesso e ela continua acompanhando o ponteiro,
+    /// que é o comportamento que não trava o gesto no meio.
+    pub fn resize(&mut self, handle: Handle, to: Point, constrain: bool) {
+        match handle {
+            Handle::Start | Handle::End => self.move_endpoint(handle, to, constrain),
+            _ => self.resize_box(handle, to, constrain),
+        }
+    }
+
+    fn move_endpoint(&mut self, handle: Handle, to: Point, constrain: bool) {
+        let (Shape::Line { a, b } | Shape::Arrow { a, b }) = &mut self.shape else {
+            return;
+        };
+        let (moving, fixed) = if handle == Handle::Start { (&mut *a, *b) } else { (&mut *b, *a) };
+        *moving = if constrain { snap_45(fixed, to) } else { to };
+    }
+
+    fn resize_box(&mut self, handle: Handle, to: Point, constrain: bool) {
+        let Some((mut min, mut max)) = self.bbox() else {
+            return;
+        };
+        let target = if constrain && handle.is_corner() {
+            aspect_locked(handle, min, max, to)
+        } else {
+            to
+        };
+        let (left, top, right, bottom) = handle.edges();
+        if left {
+            min.x = target.x;
+        }
+        if right {
+            max.x = target.x;
+        }
+        if top {
+            min.y = target.y;
+        }
+        if bottom {
+            max.y = target.y;
+        }
+        let (min, max) = normalize(min, max);
+        self.set_bbox(min, max);
+    }
+
+    fn set_bbox(&mut self, min: Point, max: Point) {
+        match &mut self.shape {
+            Shape::Rect { min: lo, max: hi } => {
+                *lo = min;
+                *hi = max;
+            }
+            Shape::Ellipse { center, rx, ry } => {
+                *rx = (max.x - min.x) / 2.0;
+                *ry = (max.y - min.y) / 2.0;
+                *center = Point::new(min.x + *rx, min.y + *ry);
+            }
+            // Linha e seta são redimensionadas pelas pontas; texto, pela roda.
+            Shape::Line { .. } | Shape::Arrow { .. } | Shape::Text { .. } => {}
+        }
+    }
+}
+
+/// Canto oposto ao da alça — o que fica parado durante o arrasto. A alça que
+/// puxa a aresta esquerda gira em torno da direita, e assim por diante.
+fn opposite_corner(handle: Handle, min: Point, max: Point) -> Point {
+    let (left, top, ..) = handle.edges();
+    Point::new(
+        if left { max.x } else { min.x },
+        if top { max.y } else { min.y },
+    )
+}
+
+/// Projeta `to` de modo a preservar a proporção original da caixa, medindo a
+/// partir do canto que não se move. O eixo mais esticado é o que manda.
+fn aspect_locked(handle: Handle, min: Point, max: Point, to: Point) -> Point {
+    let fixed = opposite_corner(handle, min, max);
+    let (w, h) = (max.x - min.x, max.y - min.y);
+    if w.abs() <= f32::EPSILON || h.abs() <= f32::EPSILON {
+        return to;
+    }
+    let (dx, dy) = (to.x - fixed.x, to.y - fixed.y);
+    let scale = (dx.abs() / w).max(dy.abs() / h);
+    Point::new(
+        fixed.x + w * scale * if dx < 0.0 { -1.0 } else { 1.0 },
+        fixed.y + h * scale * if dy < 0.0 { -1.0 } else { 1.0 },
+    )
+}
+
+/// Alça de redimensionamento de uma anotação selecionada.
+///
+/// Formas com área usam as oito do retângulo envolvente; linha e seta usam
+/// as duas pontas, que é o que dá sentido a arrastá-las.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Handle {
+    TopLeft,
+    Top,
+    TopRight,
+    Right,
+    BottomRight,
+    Bottom,
+    BottomLeft,
+    Left,
+    Start,
+    End,
+}
+
+impl Handle {
+    /// As oito alças da caixa, em ordem horária a partir do canto superior
+    /// esquerdo — a mesma ordem usada pelo recorte.
+    pub const BOX: [Handle; 8] = [
+        Handle::TopLeft,
+        Handle::Top,
+        Handle::TopRight,
+        Handle::Right,
+        Handle::BottomRight,
+        Handle::Bottom,
+        Handle::BottomLeft,
+        Handle::Left,
+    ];
+
+    /// Quais arestas da caixa esta alça arrasta: `(esquerda, topo, direita, base)`.
+    pub fn edges(self) -> (bool, bool, bool, bool) {
+        match self {
+            Handle::TopLeft => (true, true, false, false),
+            Handle::Top => (false, true, false, false),
+            Handle::TopRight => (false, true, true, false),
+            Handle::Right => (false, false, true, false),
+            Handle::BottomRight => (false, false, true, true),
+            Handle::Bottom => (false, false, false, true),
+            Handle::BottomLeft => (true, false, false, true),
+            Handle::Left => (true, false, false, false),
+            Handle::Start | Handle::End => (false, false, false, false),
+        }
+    }
+
+    /// Alça de canto move dois eixos — é onde a trava de proporção faz sentido.
+    pub fn is_corner(self) -> bool {
+        let (l, t, r, b) = self.edges();
+        (l || r) && (t || b)
+    }
+
+    /// Posição da alça na caixa `min..max`.
+    pub fn position(self, min: Point, max: Point) -> Point {
+        let cx = (min.x + max.x) / 2.0;
+        let cy = (min.y + max.y) / 2.0;
+        match self {
+            Handle::TopLeft => min,
+            Handle::Top => Point::new(cx, min.y),
+            Handle::TopRight => Point::new(max.x, min.y),
+            Handle::Right => Point::new(max.x, cy),
+            Handle::BottomRight => max,
+            Handle::Bottom => Point::new(cx, max.y),
+            Handle::BottomLeft => Point::new(min.x, max.y),
+            Handle::Left => Point::new(min.x, cy),
+            Handle::Start | Handle::End => min,
+        }
+    }
 }
 
 impl Shape {
@@ -423,6 +624,114 @@ mod tests {
         let (min, max) = normalize(Point::new(50.0, 8.0), Point::new(10.0, 30.0));
         assert_eq!((min.x, min.y), (10.0, 8.0));
         assert_eq!((max.x, max.y), (50.0, 30.0));
+    }
+
+    // -----------------------------------------------------------------------
+    // Alças e redimensionamento
+    // -----------------------------------------------------------------------
+
+    fn rect(min: (f32, f32), max: (f32, f32)) -> Layer {
+        layer(Shape::Rect {
+            min: Point::new(min.0, min.1),
+            max: Point::new(max.0, max.1),
+        })
+    }
+
+    fn bbox_of(l: &Layer) -> ((f32, f32), (f32, f32)) {
+        let (min, max) = l.bbox().unwrap();
+        ((min.x, min.y), (max.x, max.y))
+    }
+
+    #[test]
+    fn a_line_is_resized_by_its_two_endpoints() {
+        let line = layer(Shape::Line { a: Point::new(0.0, 0.0), b: Point::new(10.0, 10.0) });
+        let handles = line.handles(1.0);
+        assert_eq!(handles.len(), 2, "linha não tem caixa, tem pontas");
+        assert_eq!(handles[0].0, Handle::Start);
+        assert_eq!(handles[1].0, Handle::End);
+    }
+
+    #[test]
+    fn edge_handles_only_appear_when_the_side_is_long_enough() {
+        // Fina na vertical: sem alças de topo/base à esquerda e à direita.
+        let wide = rect((0.0, 0.0), (100.0, 4.0));
+        let kinds: Vec<Handle> = wide.handles(20.0).into_iter().map(|(h, _)| h).collect();
+        assert!(kinds.contains(&Handle::Top), "o lado largo comporta a alça");
+        assert!(!kinds.contains(&Handle::Left), "o lado curto não comporta");
+
+        // Pequena nos dois eixos: só os quatro cantos.
+        let tiny = rect((0.0, 0.0), (5.0, 5.0));
+        assert_eq!(tiny.handles(20.0).len(), 4);
+    }
+
+    #[test]
+    fn resizing_moves_only_the_edges_the_handle_owns() {
+        let mut l = rect((10.0, 10.0), (50.0, 50.0));
+        l.resize(Handle::Right, Point::new(80.0, 999.0), false);
+        assert_eq!(bbox_of(&l), ((10.0, 10.0), (80.0, 50.0)), "só a direita cede");
+
+        let mut l = rect((10.0, 10.0), (50.0, 50.0));
+        l.resize(Handle::TopLeft, Point::new(0.0, 4.0), false);
+        assert_eq!(bbox_of(&l), ((0.0, 4.0), (50.0, 50.0)), "canto move dois eixos");
+    }
+
+    #[test]
+    fn dragging_past_the_opposite_edge_flips_the_shape() {
+        // Arrastar a direita para além da esquerda não pode travar o gesto:
+        // a forma vira do avesso e continua acompanhando o ponteiro.
+        let mut l = rect((10.0, 10.0), (50.0, 50.0));
+        l.resize(Handle::Right, Point::new(-30.0, 0.0), false);
+        assert_eq!(bbox_of(&l), ((-30.0, 10.0), (10.0, 50.0)));
+    }
+
+    #[test]
+    fn aspect_lock_keeps_the_original_ratio() {
+        // Caixa 40×20 (2:1): puxar o canto mantém a proporção.
+        let mut l = rect((0.0, 0.0), (40.0, 20.0));
+        l.resize(Handle::BottomRight, Point::new(80.0, 25.0), true);
+        let ((x0, y0), (x1, y1)) = bbox_of(&l);
+        let (w, h) = (x1 - x0, y1 - y0);
+        assert!((w / h - 2.0).abs() < 0.001, "proporção 2:1 preservada, veio {w}×{h}");
+    }
+
+    #[test]
+    fn aspect_lock_is_ignored_on_edge_handles() {
+        // Só cantos movem dois eixos; numa aresta a trava não faria sentido.
+        let mut l = rect((0.0, 0.0), (40.0, 20.0));
+        l.resize(Handle::Right, Point::new(100.0, 0.0), true);
+        assert_eq!(bbox_of(&l), ((0.0, 0.0), (100.0, 20.0)));
+    }
+
+    #[test]
+    fn endpoint_resize_snaps_to_45_when_constrained() {
+        let mut l = layer(Shape::Line { a: Point::new(0.0, 0.0), b: Point::new(10.0, 0.0) });
+        l.resize(Handle::End, Point::new(100.0, 8.0), true);
+        match l.shape {
+            Shape::Line { b, .. } => assert!(b.y.abs() < 0.01, "prende na horizontal"),
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn ellipse_resize_recomputes_center_and_radii() {
+        let mut l = layer(Shape::Ellipse { center: Point::new(50.0, 50.0), rx: 10.0, ry: 10.0 });
+        l.resize(Handle::BottomRight, Point::new(80.0, 70.0), false);
+        match l.shape {
+            Shape::Ellipse { center, rx, ry } => {
+                // Caixa 40..80 × 40..70 → centro (60, 55), raios (20, 15).
+                assert_eq!((center.x, center.y), (60.0, 55.0));
+                assert_eq!((rx, ry), (20.0, 15.0));
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn text_has_no_bbox_or_handles() {
+        // A extensão do texto depende da fonte, que shapes.rs não conhece.
+        let t = layer(Shape::Text { anchor: Point::new(0.0, 0.0), content: "oi".into() });
+        assert!(t.bbox().is_none());
+        assert!(t.handles(1.0).is_empty());
     }
 }
 

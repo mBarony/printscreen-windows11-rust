@@ -14,21 +14,22 @@ use crate::error::{Context as _, Result};
 use crate::imgbuf::RgbaImage;
 
 use super::raster;
-use super::shapes::{arrow_geometry, Point, Shape};
+use super::shapes::{arrow_geometry, Layer, Point, Shape};
 use super::FONT_BYTES;
 
-/// Rasteriza `captura + formas` e retorna a imagem final RGBA.
-pub fn render(base: &RgbaImage, shapes: &[Shape]) -> Result<RgbaImage> {
+/// Rasteriza `captura + anotações` e retorna a imagem final RGBA.
+pub fn render(base: &RgbaImage, layers: &[Layer]) -> Result<RgbaImage> {
     let mut buffer = base.clone();
-    if shapes.is_empty() {
+    if layers.is_empty() {
         return Ok(buffer);
     }
 
     let font = FontRef::try_from_slice(FONT_BYTES).context("fonte embutida inválida")?;
 
-    for shape in shapes {
-        match shape {
-            Shape::Line { a, b, style } => {
+    for layer in layers {
+        let style = &layer.style;
+        match &layer.shape {
+            Shape::Line { a, b } => {
                 raster::stroke_line(
                     &mut buffer,
                     (a.x, a.y),
@@ -37,7 +38,7 @@ pub fn render(base: &RgbaImage, shapes: &[Shape]) -> Result<RgbaImage> {
                     style.color,
                 );
             }
-            Shape::Arrow { a, b, style } => {
+            Shape::Arrow { a, b } => {
                 let geo = arrow_geometry(*a, *b, style.stroke_width);
                 raster::stroke_line(
                     &mut buffer,
@@ -54,7 +55,7 @@ pub fn render(base: &RgbaImage, shapes: &[Shape]) -> Result<RgbaImage> {
                     style.color,
                 );
             }
-            Shape::Rect { min, max, style } => {
+            Shape::Rect { min, max } => {
                 raster::stroke_rect(
                     &mut buffer,
                     (min.x, min.y),
@@ -63,7 +64,7 @@ pub fn render(base: &RgbaImage, shapes: &[Shape]) -> Result<RgbaImage> {
                     style.color,
                 );
             }
-            Shape::Ellipse { center, rx, ry, style } => {
+            Shape::Ellipse { center, rx, ry } => {
                 raster::stroke_ellipse(
                     &mut buffer,
                     (center.x, center.y),
@@ -73,7 +74,7 @@ pub fn render(base: &RgbaImage, shapes: &[Shape]) -> Result<RgbaImage> {
                     style.color,
                 );
             }
-            Shape::Text { anchor, content, style } => {
+            Shape::Text { anchor, content } => {
                 draw_text(&mut buffer, &font, *anchor, content, style.color, style.font_size);
             }
         }
@@ -157,6 +158,16 @@ mod tests {
         Style { color: [255, 0, 0, 255], stroke_width: 3.0, font_size: 16.0 }
     }
 
+    fn layer(shape: Shape) -> Layer {
+        Layer { id: 1, shape, style: style() }
+    }
+
+    fn dragged(tool: Tool, a: (f32, f32), b: (f32, f32)) -> Layer {
+        let shape =
+            shape_from_drag(tool, Point::new(a.0, a.1), Point::new(b.0, b.1), false).unwrap();
+        layer(shape)
+    }
+
     #[test]
     fn render_without_shapes_is_identity() {
         let img = base();
@@ -167,15 +178,7 @@ mod tests {
     #[test]
     fn render_line_touches_pixels() {
         let img = base();
-        let line = shape_from_drag(
-            Tool::Line,
-            Point::new(4.0, 4.0),
-            Point::new(60.0, 60.0),
-            false,
-            style(),
-        )
-        .unwrap();
-        let out = render(&img, &[line]).unwrap();
+        let out = render(&img, &[dragged(Tool::Line, (4.0, 4.0), (60.0, 60.0))]).unwrap();
         assert_ne!(img.as_raw(), out.as_raw());
         // O pixel do meio da diagonal deve ter ficado avermelhado.
         let p = out.pixel(32, 32);
@@ -185,11 +188,7 @@ mod tests {
     #[test]
     fn render_text_touches_pixels() {
         let img = base();
-        let text = Shape::Text {
-            anchor: Point::new(2.0, 2.0),
-            content: "Ok".into(),
-            style: style(),
-        };
+        let text = layer(Shape::Text { anchor: Point::new(2.0, 2.0), content: "Ok".into() });
         let out = render(&img, &[text]).unwrap();
         assert_ne!(img.as_raw(), out.as_raw());
     }
@@ -197,31 +196,33 @@ mod tests {
     #[test]
     fn dimensions_preserved() {
         let img = base();
-        let rect = shape_from_drag(
-            Tool::Rect,
-            Point::new(1.0, 1.0),
-            Point::new(50.0, 40.0),
-            false,
-            style(),
-        )
-        .unwrap();
-        let out = render(&img, &[rect]).unwrap();
+        let out = render(&img, &[dragged(Tool::Rect, (1.0, 1.0), (50.0, 40.0))]).unwrap();
         assert_eq!((out.width(), out.height()), (64, 64));
     }
 
     #[test]
     fn arrow_head_is_filled() {
         let img = base();
-        let arrow = shape_from_drag(
-            Tool::Arrow,
-            Point::new(8.0, 32.0),
-            Point::new(56.0, 32.0),
-            false,
-            style(),
-        )
-        .unwrap();
-        let out = render(&img, &[arrow]).unwrap();
+        let out = render(&img, &[dragged(Tool::Arrow, (8.0, 32.0), (56.0, 32.0))]).unwrap();
         // Perto da ponta (x=54, y=32) deve haver vermelho.
         assert!(out.pixel(53, 32)[0] > 150);
+    }
+
+    #[test]
+    fn each_layer_uses_its_own_style() {
+        // O estilo deixou de morar na forma: duas camadas com a mesma
+        // geometria e cores diferentes têm de sair diferentes.
+        let img = base();
+        let shape = Shape::Rect { min: Point::new(8.0, 8.0), max: Point::new(56.0, 56.0) };
+        let red = Layer { id: 1, shape: shape.clone(), style: style() };
+        let green = Layer {
+            id: 2,
+            shape,
+            style: Style { color: [0, 255, 0, 255], ..style() },
+        };
+        let a = render(&img, &[red]).unwrap();
+        let b = render(&img, &[green]).unwrap();
+        assert!(a.pixel(8, 32)[0] > 150, "primeira camada vermelha");
+        assert!(b.pixel(8, 32)[1] > 150, "segunda camada verde");
     }
 }

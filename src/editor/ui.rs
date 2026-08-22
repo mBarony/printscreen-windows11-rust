@@ -12,12 +12,11 @@ use egui::{
 };
 
 use crate::clipboard;
-use crate::imgbuf::RgbaImage;
 use crate::notify;
 use crate::storage::{self, SaveTarget};
 
 use super::icons::{self, Icon};
-use super::shapes::{arrow_geometry, normalize, shape_from_drag, Point, Shape, Tool};
+use super::shapes::{arrow_geometry, normalize, shape_from_drag, Layer, Point, Shape, Tool};
 use super::{
     DragPreview, EditorSession, MoveDrag, TextInput, CROP_MIN_SIDE, FONT_MAX, FONT_MIN,
     HIT_TOLERANCE_PTS, PALETTE, STROKE_MAX, STROKE_MIN, ZOOM_MAX, ZOOM_MIN,
@@ -206,18 +205,18 @@ fn perform_undo(session: &mut EditorSession) {
     if session.move_drag.take().is_some() {
         session.doc.abort_move();
     } else {
-        let before = session.doc.image().clone();
+        let before = session.doc.image_version();
         session.doc.undo();
-        refit_if_image_changed(session, &before);
+        refit_if_image_changed(session, before);
     }
     session.selected = None;
 }
 
 fn perform_redo(session: &mut EditorSession) {
     cancel_move(session);
-    let before = session.doc.image().clone();
+    let before = session.doc.image_version();
     session.doc.redo();
-    refit_if_image_changed(session, &before);
+    refit_if_image_changed(session, before);
     session.selected = None;
 }
 
@@ -245,9 +244,14 @@ fn apply_crop(session: &mut EditorSession) {
     session.selected = None;
 }
 
-/// A imagem mudou de conteúdo/tamanho: recria a textura e reajusta a vista.
-fn refit_if_image_changed(session: &mut EditorSession, before: &std::sync::Arc<RgbaImage>) {
-    if !std::sync::Arc::ptr_eq(before, session.doc.image()) {
+/// A imagem mudou de enquadramento: recria a textura e reajusta a vista.
+///
+/// O documento reconstrói a imagem a cada operação, então comparar o `Arc`
+/// acusaria mudança sempre que houvesse um recorte no histórico — e desfazer
+/// uma anotação jogaria fora o zoom e o pan do usuário. O selo só avança
+/// quando os recortes aplicados mudam.
+fn refit_if_image_changed(session: &mut EditorSession, before: u64) {
+    if before != session.doc.image_version() {
         reset_view(session);
     }
 }
@@ -633,11 +637,11 @@ fn canvas(ctx: &egui::Context, session: &mut EditorSession) {
                                 let tol = HIT_TOLERANCE_PTS / to_screen.scale;
                                 let hit = session
                                     .doc
-                                    .shapes()
+                                    .layers()
                                     .iter()
                                     .enumerate()
                                     .rev() // a mais recente (pintada por cima) vence
-                                    .find(|(_, shape)| hit_test(ctx, shape, p, tol, to_screen))
+                                    .find(|(_, layer)| hit_test(ctx, layer, p, tol, to_screen))
                                     .map(|(index, _)| index);
                                 session.selected = hit;
                                 if let Some(index) = hit {
@@ -711,9 +715,8 @@ fn canvas(ctx: &egui::Context, session: &mut EditorSession) {
                                         drag.start,
                                         drag.current,
                                         drag.shift,
-                                        session.style(),
                                     ) {
-                                        session.doc.push(shape);
+                                        session.doc.push(shape, session.style());
                                     }
                                 }
                             }
@@ -740,17 +743,17 @@ fn canvas(ctx: &egui::Context, session: &mut EditorSession) {
             // não pode aparecer no editor — WYSIWYG inclusive depois de um
             // recorte ou de arrastar uma anotação para fora.
             let shape_painter = ui.painter_at(image_rect.intersect(canvas_rect));
-            for shape in session.doc.shapes() {
-                paint_shape(&shape_painter, shape, to_screen);
+            for layer in session.doc.layers() {
+                paint_shape(&shape_painter, layer, to_screen);
             }
             if let Some(drag) = &session.drag {
-                if let Some(preview) = shape_from_drag(
-                    session.tool,
-                    drag.start,
-                    drag.current,
-                    drag.shift,
-                    session.style(),
-                ) {
+                if let Some(shape) =
+                    shape_from_drag(session.tool, drag.start, drag.current, drag.shift)
+                {
+                    // A pré-visualização ainda não é uma anotação do
+                    // documento: recebe um id provisório só para reusar o
+                    // mesmo desenho da forma já criada.
+                    let preview = Layer { id: 0, shape, style: session.style() };
                     paint_shape(&shape_painter, &preview, to_screen);
                 }
             }
@@ -759,9 +762,9 @@ fn canvas(ctx: &egui::Context, session: &mut EditorSession) {
             // no painter sem clip, para continuar visível se a anotação foi
             // arrastada para fora da imagem.
             if session.tool == Tool::Select {
-                if let Some(shape) = session.selected.and_then(|i| session.doc.shapes().get(i)) {
+                if let Some(layer) = session.selected.and_then(|i| session.doc.layers().get(i)) {
                     let color = ui.visuals().selection.stroke.color;
-                    draw_selection_outline(ctx, &painter, shape, to_screen, color);
+                    draw_selection_outline(ctx, &painter, layer, to_screen, color);
                 }
             }
 
@@ -802,49 +805,48 @@ fn canvas(ctx: &egui::Context, session: &mut EditorSession) {
         });
 }
 
-/// Converte uma forma para primitivas do egui — geometria idêntica à da
+/// Converte uma anotação para primitivas do egui — geometria idêntica à da
 /// exportação (`render.rs`), mudando apenas a escala.
-fn paint_shape(painter: &egui::Painter, shape: &Shape, ts: ToScreen) {
-    match shape {
-        Shape::Line { a, b, style } => {
-            painter.line_segment(
-                [ts.pos(*a), ts.pos(*b)],
-                Stroke::new(ts.len(style.stroke_width), color32(style.color)),
-            );
+fn paint_shape(painter: &egui::Painter, layer: &Layer, ts: ToScreen) {
+    let style = &layer.style;
+    let stroke = Stroke::new(ts.len(style.stroke_width), color32(style.color));
+    match &layer.shape {
+        Shape::Line { a, b } => {
+            painter.line_segment([ts.pos(*a), ts.pos(*b)], stroke);
         }
-        Shape::Arrow { a, b, style } => {
+        Shape::Arrow { a, b } => {
             let geo = arrow_geometry(*a, *b, style.stroke_width);
-            painter.line_segment(
-                [ts.pos(geo.shaft_a), ts.pos(geo.shaft_b)],
-                Stroke::new(ts.len(style.stroke_width), color32(style.color)),
-            );
+            painter.line_segment([ts.pos(geo.shaft_a), ts.pos(geo.shaft_b)], stroke);
             painter.add(egui::Shape::convex_polygon(
                 geo.head.iter().map(|p| ts.pos(*p)).collect(),
                 color32(style.color),
                 Stroke::NONE,
             ));
         }
-        Shape::Rect { min, max, style } => {
+        Shape::Rect { min, max } => {
             painter.rect_stroke(
                 Rect::from_min_max(ts.pos(*min), ts.pos(*max)),
                 CornerRadius::ZERO,
-                Stroke::new(ts.len(style.stroke_width), color32(style.color)),
+                stroke,
                 StrokeKind::Middle,
             );
         }
-        Shape::Ellipse { center, rx, ry, style } => {
+        Shape::Ellipse { center, rx, ry } => {
             painter.add(egui::Shape::ellipse_stroke(
                 ts.pos(*center),
                 Vec2::new(ts.len(*rx), ts.len(*ry)),
-                Stroke::new(ts.len(style.stroke_width), color32(style.color)),
+                stroke,
             ));
         }
-        Shape::Text { anchor, content, style } => {
+        Shape::Text { anchor, content } => {
             painter.text(
                 ts.pos(*anchor),
                 Align2::LEFT_TOP,
                 content,
-                FontId::new(ts.len(style.font_size), egui::FontFamily::Name(crate::theme::INTER.into())),
+                FontId::new(
+                    ts.len(style.font_size),
+                    egui::FontFamily::Name(crate::theme::INTER.into()),
+                ),
                 color32(style.color),
             );
         }
@@ -876,33 +878,35 @@ fn text_galley(
     })
 }
 
-/// Hit-test de uma forma no espaço da imagem; a variante Text é medida com a
-/// fonte real para a caixa coincidir com o que está na tela.
-fn hit_test(ctx: &egui::Context, shape: &Shape, p: Point, tol: f32, ts: ToScreen) -> bool {
-    let text_size = match shape {
-        Shape::Text { content, style, .. } => {
-            let size = text_galley(ctx, content, style.font_size, ts).size();
+/// Hit-test de uma anotação no espaço da imagem; a variante Text é medida com
+/// a fonte real para a caixa coincidir com o que está na tela.
+fn hit_test(ctx: &egui::Context, layer: &Layer, p: Point, tol: f32, ts: ToScreen) -> bool {
+    let text_size = match &layer.shape {
+        Shape::Text { content, .. } => {
+            let size = text_galley(ctx, content, layer.style.font_size, ts).size();
             (size.x / ts.scale, size.y / ts.scale)
         }
         _ => (0.0, 0.0),
     };
-    shape.hit_test(p, tol, text_size)
+    layer.hit_test(p, tol, text_size)
 }
 
-/// Retângulo (em pontos de tela) que envolve a forma, traço incluído.
-fn shape_screen_bbox(ctx: &egui::Context, shape: &Shape, ts: ToScreen) -> Rect {
-    match shape {
-        Shape::Line { a, b, style } | Shape::Arrow { a, b, style } => {
-            Rect::from_two_pos(ts.pos(*a), ts.pos(*b)).expand(ts.len(style.stroke_width) / 2.0)
+/// Retângulo (em pontos de tela) que envolve a anotação, traço incluído.
+fn shape_screen_bbox(ctx: &egui::Context, layer: &Layer, ts: ToScreen) -> Rect {
+    let half_stroke = ts.len(layer.style.stroke_width) / 2.0;
+    match &layer.shape {
+        Shape::Line { a, b } | Shape::Arrow { a, b } => {
+            Rect::from_two_pos(ts.pos(*a), ts.pos(*b)).expand(half_stroke)
         }
-        Shape::Rect { min, max, style } => Rect::from_min_max(ts.pos(*min), ts.pos(*max))
-            .expand(ts.len(style.stroke_width) / 2.0),
-        Shape::Ellipse { center, rx, ry, style } => {
+        Shape::Rect { min, max } => {
+            Rect::from_min_max(ts.pos(*min), ts.pos(*max)).expand(half_stroke)
+        }
+        Shape::Ellipse { center, rx, ry } => {
             Rect::from_center_size(ts.pos(*center), Vec2::new(ts.len(*rx), ts.len(*ry)) * 2.0)
-                .expand(ts.len(style.stroke_width) / 2.0)
+                .expand(half_stroke)
         }
-        Shape::Text { anchor, content, style } => {
-            let size = text_galley(ctx, content, style.font_size, ts).size();
+        Shape::Text { anchor, content } => {
+            let size = text_galley(ctx, content, layer.style.font_size, ts).size();
             Rect::from_min_size(ts.pos(*anchor), size)
         }
     }
@@ -912,11 +916,11 @@ fn shape_screen_bbox(ctx: &egui::Context, shape: &Shape, ts: ToScreen) -> Rect {
 fn draw_selection_outline(
     ctx: &egui::Context,
     painter: &egui::Painter,
-    shape: &Shape,
+    layer: &Layer,
     ts: ToScreen,
     color: Color32,
 ) {
-    let rect = shape_screen_bbox(ctx, shape, ts).expand(5.0);
+    let rect = shape_screen_bbox(ctx, layer, ts).expand(5.0);
     let stroke = Stroke::new(1.5_f32, color);
     let corners = [
         rect.left_top(),
@@ -1054,12 +1058,9 @@ fn commit_text_input(session: &mut EditorSession) {
         session.text_input = None;
         return;
     }
-    let shape = Shape::Text {
-        anchor: input.anchor,
-        content: input.buffer.clone(),
-        style: session.style(),
-    };
-    session.doc.push(shape);
+    let shape = Shape::Text { anchor: input.anchor, content: input.buffer.clone() };
+    let style = session.style();
+    session.doc.push(shape, style);
     session.text_input = None;
 }
 
@@ -1074,8 +1075,8 @@ fn commit_text_input(session: &mut EditorSession) {
 fn copy_and_close(session: &mut EditorSession) {
     commit_text_input(session);
     let base = session.doc.image().clone();
-    let shapes = session.doc.shapes().to_vec();
-    crate::jobs::spawn(move || match super::render::render(&base, &shapes) {
+    let layers = session.doc.layers().to_vec();
+    crate::jobs::spawn(move || match super::render::render(&base, &layers) {
         Ok(final_image) => match clipboard::copy_image(&final_image) {
             Ok(()) => notify::toast(
                 "Copiado para a área de transferência",
@@ -1092,9 +1093,9 @@ fn copy_and_close(session: &mut EditorSession) {
 fn save_and_close(session: &mut EditorSession, target: &SaveTarget) {
     commit_text_input(session);
     let base = session.doc.image().clone();
-    let shapes = session.doc.shapes().to_vec();
+    let layers = session.doc.layers().to_vec();
     let target = target.clone();
-    crate::jobs::spawn(move || match super::render::render(&base, &shapes) {
+    crate::jobs::spawn(move || match super::render::render(&base, &layers) {
         Ok(final_image) => match storage::write_image(&target, &final_image) {
             Ok(path) => {
                 let name = path

@@ -58,11 +58,67 @@ pub struct Style {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Shape {
-    Line { a: Point, b: Point, style: Style },
-    Arrow { a: Point, b: Point, style: Style },
-    Rect { min: Point, max: Point, style: Style },
-    Ellipse { center: Point, rx: f32, ry: f32, style: Style },
-    Text { anchor: Point, content: String, style: Style },
+    Line { a: Point, b: Point },
+    Arrow { a: Point, b: Point },
+    Rect { min: Point, max: Point },
+    Ellipse { center: Point, rx: f32, ry: f32 },
+    Text { anchor: Point, content: String },
+}
+
+/// Uma anotação no documento: geometria, aparência e uma identidade estável.
+///
+/// O `id` é o que permite ao histórico referir-se a uma anotação depois que
+/// os índices mudaram (uma exclusão no meio da lista desloca todo o resto),
+/// e o `style` vive aqui — fora das variantes de [`Shape`] — para que trocar
+/// a cor ou a espessura de uma anotação já criada não dependa de saber qual
+/// é a forma dela.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Layer {
+    pub id: u64,
+    pub shape: Shape,
+    pub style: Style,
+}
+
+impl Layer {
+    /// `p` está a até `tol` px (espaço da imagem) do traço da anotação?
+    ///
+    /// `text_size` é o tamanho `(largura, altura)` do texto renderizado —
+    /// medido pelo chamador, que tem acesso à fonte — e só é usado na
+    /// variante `Text` (caixa `anchor..anchor+text_size` expandida por `tol`).
+    pub fn hit_test(&self, p: Point, tol: f32, text_size: (f32, f32)) -> bool {
+        let reach = tol + self.style.stroke_width / 2.0;
+        match &self.shape {
+            Shape::Line { a, b } => dist_to_segment(p, *a, *b) <= reach,
+            Shape::Arrow { a, b } => {
+                let geo = arrow_geometry(*a, *b, self.style.stroke_width);
+                dist_to_segment(p, geo.shaft_a, geo.shaft_b) <= reach
+                    || point_in_triangle(p, geo.head)
+                    || (0..3).any(|i| dist_to_segment(p, geo.head[i], geo.head[(i + 1) % 3]) <= tol)
+            }
+            Shape::Rect { min, max } => {
+                let corners = [*min, Point::new(max.x, min.y), *max, Point::new(min.x, max.y)];
+                (0..4).any(|i| dist_to_segment(p, corners[i], corners[(i + 1) % 4]) <= reach)
+            }
+            Shape::Ellipse { center, rx, ry } => {
+                // Contorno amostrado em segmentos: robusto inclusive para
+                // elipses degeneradas (um arrasto quase-linear cria rx≈0 ou
+                // ry≈0, cujo traço é um segmento).
+                const N: usize = 32;
+                let pt = |i: usize| {
+                    let a = i as f32 / N as f32 * std::f32::consts::TAU;
+                    Point::new(center.x + rx * a.cos(), center.y + ry * a.sin())
+                };
+                (0..N).any(|i| dist_to_segment(p, pt(i), pt(i + 1)) <= reach)
+            }
+            Shape::Text { anchor, .. } => {
+                let (w, h) = text_size;
+                p.x >= anchor.x - tol
+                    && p.x <= anchor.x + w + tol
+                    && p.y >= anchor.y - tol
+                    && p.y <= anchor.y + h + tol
+            }
+        }
+    }
 }
 
 impl Shape {
@@ -73,59 +129,16 @@ impl Shape {
             p.y += dy;
         };
         match self {
-            Self::Line { a, b, .. } | Self::Arrow { a, b, .. } => {
+            Self::Line { a, b } | Self::Arrow { a, b } => {
                 mv(a);
                 mv(b);
             }
-            Self::Rect { min, max, .. } => {
+            Self::Rect { min, max } => {
                 mv(min);
                 mv(max);
             }
             Self::Ellipse { center, .. } => mv(center),
             Self::Text { anchor, .. } => mv(anchor),
-        }
-    }
-
-    /// `p` está a até `tol` px (espaço da imagem) do traço da forma?
-    ///
-    /// `text_size` é o tamanho `(largura, altura)` do texto renderizado —
-    /// medido pelo chamador, que tem acesso à fonte — e só é usado na
-    /// variante `Text` (caixa `anchor..anchor+text_size` expandida por `tol`).
-    pub fn hit_test(&self, p: Point, tol: f32, text_size: (f32, f32)) -> bool {
-        match self {
-            Self::Line { a, b, style } => {
-                dist_to_segment(p, *a, *b) <= tol + style.stroke_width / 2.0
-            }
-            Self::Arrow { a, b, style } => {
-                let geo = arrow_geometry(*a, *b, style.stroke_width);
-                dist_to_segment(p, geo.shaft_a, geo.shaft_b) <= tol + style.stroke_width / 2.0
-                    || point_in_triangle(p, geo.head)
-                    || (0..3).any(|i| dist_to_segment(p, geo.head[i], geo.head[(i + 1) % 3]) <= tol)
-            }
-            Self::Rect { min, max, style } => {
-                let corners = [*min, Point::new(max.x, min.y), *max, Point::new(min.x, max.y)];
-                let reach = tol + style.stroke_width / 2.0;
-                (0..4).any(|i| dist_to_segment(p, corners[i], corners[(i + 1) % 4]) <= reach)
-            }
-            Self::Ellipse { center, rx, ry, style } => {
-                // Contorno amostrado em segmentos: robusto inclusive para
-                // elipses degeneradas (um arrasto quase-linear cria rx≈0 ou
-                // ry≈0, cujo traço é um segmento).
-                const N: usize = 32;
-                let reach = tol + style.stroke_width / 2.0;
-                let pt = |i: usize| {
-                    let a = i as f32 / N as f32 * std::f32::consts::TAU;
-                    Point::new(center.x + rx * a.cos(), center.y + ry * a.sin())
-                };
-                (0..N).any(|i| dist_to_segment(p, pt(i), pt(i + 1)) <= reach)
-            }
-            Self::Text { anchor, .. } => {
-                let (w, h) = text_size;
-                p.x >= anchor.x - tol
-                    && p.x <= anchor.x + w + tol
-                    && p.y >= anchor.y - tol
-                    && p.y <= anchor.y + h + tol
-            }
         }
     }
 }
@@ -168,16 +181,16 @@ fn point_in_triangle(p: Point, t: [Point; 3]) -> bool {
 /// `shift` restringe: linha/seta em ângulos de 45°, retângulo em quadrado,
 /// elipse em círculo. Retorna `None` para as ferramentas Texto, Mover e
 /// Recortar (fluxos próprios).
-pub fn shape_from_drag(tool: Tool, a: Point, mut b: Point, shift: bool, style: Style) -> Option<Shape> {
+pub fn shape_from_drag(tool: Tool, a: Point, mut b: Point, shift: bool) -> Option<Shape> {
     match tool {
         Tool::Line | Tool::Arrow => {
             if shift {
                 b = snap_45(a, b);
             }
             Some(if tool == Tool::Line {
-                Shape::Line { a, b, style }
+                Shape::Line { a, b }
             } else {
-                Shape::Arrow { a, b, style }
+                Shape::Arrow { a, b }
             })
         }
         Tool::Rect => {
@@ -185,7 +198,7 @@ pub fn shape_from_drag(tool: Tool, a: Point, mut b: Point, shift: bool, style: S
                 b = snap_square(a, b);
             }
             let (min, max) = normalize(a, b);
-            Some(Shape::Rect { min, max, style })
+            Some(Shape::Rect { min, max })
         }
         Tool::Ellipse => {
             if shift {
@@ -198,7 +211,6 @@ pub fn shape_from_drag(tool: Tool, a: Point, mut b: Point, shift: bool, style: S
                 center: Point::new(min.x + rx, min.y + ry),
                 rx,
                 ry,
-                style,
             })
         }
         Tool::Text | Tool::Select | Tool::Crop => None,
@@ -284,34 +296,24 @@ mod tests {
         Style { color: [255, 0, 0, 255], stroke_width: 3.0, font_size: 24.0 }
     }
 
+    fn layer(shape: Shape) -> Layer {
+        Layer { id: 1, shape, style: style() }
+    }
+
     #[test]
     fn shift_makes_square() {
-        let s = shape_from_drag(
-            Tool::Rect,
-            Point::new(10.0, 10.0),
-            Point::new(50.0, 20.0),
-            true,
-            style(),
-        )
-        .unwrap();
+        let s = shape_from_drag(Tool::Rect, Point::new(10.0, 10.0), Point::new(50.0, 20.0), true)
+            .unwrap();
         match s {
-            Shape::Rect { min, max, .. } => {
-                assert_eq!(max.x - min.x, max.y - min.y);
-            }
+            Shape::Rect { min, max } => assert_eq!(max.x - min.x, max.y - min.y),
             _ => panic!("esperava Rect"),
         }
     }
 
     #[test]
     fn shift_snaps_line_to_45() {
-        let s = shape_from_drag(
-            Tool::Line,
-            Point::new(0.0, 0.0),
-            Point::new(100.0, 8.0),
-            true,
-            style(),
-        )
-        .unwrap();
+        let s = shape_from_drag(Tool::Line, Point::new(0.0, 0.0), Point::new(100.0, 8.0), true)
+            .unwrap();
         match s {
             Shape::Line { b, .. } => {
                 assert!(b.y.abs() < 0.01, "linha quase horizontal deve virar horizontal");
@@ -329,25 +331,17 @@ mod tests {
 
     #[test]
     fn translate_moves_every_variant() {
-        let mut rect = Shape::Rect {
-            min: Point::new(10.0, 10.0),
-            max: Point::new(20.0, 30.0),
-            style: style(),
-        };
+        let mut rect = Shape::Rect { min: Point::new(10.0, 10.0), max: Point::new(20.0, 30.0) };
         rect.translate(5.0, -3.0);
         match rect {
-            Shape::Rect { min, max, .. } => {
+            Shape::Rect { min, max } => {
                 assert_eq!((min.x, min.y), (15.0, 7.0));
                 assert_eq!((max.x, max.y), (25.0, 27.0));
             }
             _ => unreachable!(),
         }
 
-        let mut text = Shape::Text {
-            anchor: Point::new(1.0, 2.0),
-            content: "oi".into(),
-            style: style(),
-        };
+        let mut text = Shape::Text { anchor: Point::new(1.0, 2.0), content: "oi".into() };
         text.translate(-1.0, -2.0);
         match text {
             Shape::Text { anchor, .. } => assert_eq!((anchor.x, anchor.y), (0.0, 0.0)),
@@ -357,45 +351,29 @@ mod tests {
 
     #[test]
     fn hit_test_line_edge_and_miss() {
-        let line = Shape::Line {
-            a: Point::new(0.0, 0.0),
-            b: Point::new(100.0, 0.0),
-            style: style(), // traço 3 → meia-espessura 1.5
-        };
+        // Traço 3 → meia-espessura 1,5.
+        let line = layer(Shape::Line { a: Point::new(0.0, 0.0), b: Point::new(100.0, 0.0) });
         assert!(line.hit_test(Point::new(50.0, 3.0), 2.0, (0.0, 0.0)));
         assert!(!line.hit_test(Point::new(50.0, 10.0), 2.0, (0.0, 0.0)));
     }
 
     #[test]
     fn hit_test_rect_border_not_interior() {
-        let rect = Shape::Rect {
-            min: Point::new(10.0, 10.0),
-            max: Point::new(50.0, 50.0),
-            style: style(),
-        };
+        let rect = layer(Shape::Rect { min: Point::new(10.0, 10.0), max: Point::new(50.0, 50.0) });
         assert!(rect.hit_test(Point::new(10.0, 30.0), 2.0, (0.0, 0.0)), "borda esquerda");
         assert!(!rect.hit_test(Point::new(30.0, 30.0), 2.0, (0.0, 0.0)), "miolo vazio");
     }
 
     #[test]
     fn hit_test_ellipse_ring_not_center() {
-        let ellipse = Shape::Ellipse {
-            center: Point::new(50.0, 50.0),
-            rx: 20.0,
-            ry: 10.0,
-            style: style(),
-        };
+        let ellipse = layer(Shape::Ellipse { center: Point::new(50.0, 50.0), rx: 20.0, ry: 10.0 });
         assert!(ellipse.hit_test(Point::new(70.0, 50.0), 2.0, (0.0, 0.0)), "contorno em rx");
         assert!(!ellipse.hit_test(Point::new(50.0, 50.0), 2.0, (0.0, 0.0)), "centro vazio");
     }
 
     #[test]
     fn hit_test_arrow_head() {
-        let arrow = Shape::Arrow {
-            a: Point::new(0.0, 50.0),
-            b: Point::new(100.0, 50.0),
-            style: style(),
-        };
+        let arrow = layer(Shape::Arrow { a: Point::new(0.0, 50.0), b: Point::new(100.0, 50.0) });
         // Dentro do triângulo da ponta (comprimento 12 = 4×3).
         assert!(arrow.hit_test(Point::new(95.0, 50.0), 0.0, (0.0, 0.0)));
         assert!(!arrow.hit_test(Point::new(95.0, 60.0), 2.0, (0.0, 0.0)));
@@ -403,11 +381,7 @@ mod tests {
 
     #[test]
     fn hit_test_text_uses_measured_box() {
-        let text = Shape::Text {
-            anchor: Point::new(10.0, 10.0),
-            content: "abc".into(),
-            style: style(),
-        };
+        let text = layer(Shape::Text { anchor: Point::new(10.0, 10.0), content: "abc".into() });
         assert!(text.hit_test(Point::new(30.0, 20.0), 2.0, (40.0, 16.0)));
         assert!(!text.hit_test(Point::new(60.0, 40.0), 2.0, (40.0, 16.0)));
     }
@@ -415,28 +389,29 @@ mod tests {
     #[test]
     fn hit_test_degenerate_ellipse_is_reachable() {
         // Arrasto vertical puro cria rx = 0: o traço é um segmento vertical.
-        let ellipse = Shape::Ellipse {
-            center: Point::new(50.0, 50.0),
-            rx: 0.0,
-            ry: 30.0,
-            style: style(),
-        };
+        let ellipse = layer(Shape::Ellipse { center: Point::new(50.0, 50.0), rx: 0.0, ry: 30.0 });
         assert!(ellipse.hit_test(Point::new(50.0, 65.0), 2.0, (0.0, 0.0)), "sobre o traço");
         assert!(!ellipse.hit_test(Point::new(60.0, 50.0), 2.0, (0.0, 0.0)), "longe do traço");
+    }
+
+    #[test]
+    fn hit_test_follows_the_layer_stroke_width() {
+        // O alcance sai do estilo da camada, não da forma: engrossar o traço
+        // aumenta a área agarrável.
+        let shape = Shape::Line { a: Point::new(0.0, 0.0), b: Point::new(100.0, 0.0) };
+        let thin = Layer { id: 1, shape: shape.clone(), style: style() };
+        let thick = Layer { id: 2, shape, style: Style { stroke_width: 20.0, ..style() } };
+        let p = Point::new(50.0, 9.0);
+        assert!(!thin.hit_test(p, 1.0, (0.0, 0.0)));
+        assert!(thick.hit_test(p, 1.0, (0.0, 0.0)));
     }
 
     #[test]
     fn crop_and_select_have_no_drag_shape() {
         for tool in [Tool::Crop, Tool::Select, Tool::Text] {
             assert!(
-                shape_from_drag(
-                    tool,
-                    Point::new(0.0, 0.0),
-                    Point::new(10.0, 10.0),
-                    false,
-                    style()
-                )
-                .is_none(),
+                shape_from_drag(tool, Point::new(0.0, 0.0), Point::new(10.0, 10.0), false)
+                    .is_none(),
                 "{} tem fluxo próprio",
                 tool.label()
             );
@@ -450,3 +425,4 @@ mod tests {
         assert_eq!((max.x, max.y), (50.0, 30.0));
     }
 }
+

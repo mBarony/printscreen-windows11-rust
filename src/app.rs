@@ -37,7 +37,10 @@ fn next_serial() -> u64 {
 pub enum Flow {
     Idle,
     Selecting(SelectSession),
-    Editing(EditorSession),
+    /// Em caixa: a sessão de edição é de longe a maior variante (o documento
+    /// carrega imagem base e log de operações), e sem a indireção todo `Flow`
+    /// — inclusive o `Idle` — pagaria esse tamanho.
+    Editing(Box<EditorSession>),
 }
 
 pub struct AppShared {
@@ -125,11 +128,11 @@ impl GuiApp {
                         SelectedAction::OpenEditor => {
                             let mut shared = self.shared.lock().unwrap();
                             let defaults = shared.config.editor.clone();
-                            shared.flow = Flow::Editing(EditorSession::new(
+                            shared.flow = Flow::Editing(Box::new(EditorSession::new(
                                 next_serial(),
                                 cropped,
                                 &defaults,
-                            ));
+                            )));
                         }
                     }
                 }

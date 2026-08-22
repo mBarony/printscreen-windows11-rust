@@ -35,6 +35,8 @@ pub enum Tool {
     Marker,
     /// Amostra uma cor da imagem e volta para a ferramenta anterior.
     Eyedropper,
+    /// Apaga uma região da imagem, sem volta.
+    Redact,
     Text,
     /// Recorta a imagem para a região arrastada (issue #5).
     Crop,
@@ -52,6 +54,7 @@ impl Tool {
             Self::Highlighter => "Marca-texto",
             Self::Marker => "Marcador",
             Self::Eyedropper => "Conta-gotas",
+            Self::Redact => "Redação",
             Self::Text => "Texto",
             Self::Crop => "Recortar",
         }
@@ -79,6 +82,8 @@ pub struct Style {
     /// Texto sobre uma pílula clara, para continuar legível sobre qualquer
     /// fundo.
     pub text_pill: bool,
+    /// Como a redação apaga: mosaico sintético ou cor chapada.
+    pub redaction: RedactionStyle,
 }
 
 /// Cor da pílula de leitura atrás do texto.
@@ -91,8 +96,14 @@ pub fn text_pill_metrics(line_height: f32) -> (f32, f32) {
     (padding, radius)
 }
 
+/// Lado mínimo de uma redação, em px da imagem: menor que isso ela não
+/// esconderia nada e seria só um risco na imagem.
+pub const REDACTION_MIN_SIDE: f32 = 5.0;
+
 /// Raio máximo dos cantos do retângulo, em px da imagem.
 pub const CORNER_RADIUS_MAX: f32 = 24.0;
+
+pub use super::redact::RedactionStyle;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Shape {
@@ -105,6 +116,9 @@ pub enum Shape {
     Freehand { points: Vec<Point>, highlight: bool },
     /// Contador numerado: disco com aro claro e o número no meio.
     Marker { center: Point, number: u32 },
+    /// Região apagada da imagem. `seed` mantém o mosaico estável entre
+    /// quadros e muda ao duplicar.
+    Redaction { min: Point, max: Point, seed: u32 },
     Text { anchor: Point, content: String },
 }
 
@@ -227,6 +241,10 @@ impl Layer {
                 // O contador pega pelo disco inteiro: ele é opaco.
                 dist(p, *center) <= marker_geometry(self.style.stroke_width).radius + tol
             }
+            Shape::Redaction { min, max, .. } => {
+                // Região opaca: pega pelo corpo inteiro.
+                p.x >= min.x - tol && p.x <= max.x + tol && p.y >= min.y - tol && p.y <= max.y + tol
+            }
             Shape::Text { anchor, .. } => {
                 let (w, h) = text_size;
                 p.x >= anchor.x - tol
@@ -249,6 +267,7 @@ impl Layer {
                 Point::new(center.x + rx, center.y + ry),
             )),
             Shape::Freehand { points, .. } => points_bounds(points),
+            Shape::Redaction { min, max, .. } => Some((*min, *max)),
             Shape::Marker { center, .. } => {
                 let r = marker_geometry(self.style.stroke_width).radius;
                 Some((
@@ -345,6 +364,14 @@ impl Layer {
                 *center = Point::new(min.x + *rx, min.y + *ry);
             }
             Shape::Freehand { points, .. } => rescale_points(points, min, max),
+            Shape::Redaction { min: lo, max: hi, .. } => {
+                // Piso: uma redação de área nula não esconderia nada.
+                *lo = min;
+                *hi = Point::new(
+                    max.x.max(min.x + REDACTION_MIN_SIDE),
+                    max.y.max(min.y + REDACTION_MIN_SIDE),
+                );
+            }
             // O contador segue o centro da caixa; o diâmetro dele sai da
             // espessura do traço, ajustável pela roda.
             Shape::Marker { center, .. } => {
@@ -509,6 +536,10 @@ impl Shape {
             Self::Ellipse { center, .. } => mv(center),
             Self::Freehand { points, .. } => points.iter_mut().for_each(mv),
             Self::Marker { center, .. } => mv(center),
+            Self::Redaction { min, max, .. } => {
+                mv(min);
+                mv(max);
+            }
             Self::Text { anchor, .. } => mv(anchor),
         }
     }
@@ -607,6 +638,11 @@ pub fn shape_from_drag(
         Tool::Freehand | Tool::Highlighter => None,
         // O contador é colocado num clique; texto, mover e recortar têm
         // fluxos próprios.
+        Tool::Redact => {
+            let (min, max) = normalize(centered_start(a, b, alt), b);
+            // A semente é preenchida por quem cria, com uma fresca.
+            Some(Shape::Redaction { min, max, seed: 0 })
+        }
         Tool::Marker | Tool::Eyedropper | Tool::Text | Tool::Select | Tool::Crop => None,
     }
 }
@@ -771,6 +807,7 @@ mod tests {
             filled: false,
             corner_radius: 0.0,
             text_pill: false,
+            redaction: RedactionStyle::default(),
         }
     }
 

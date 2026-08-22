@@ -95,6 +95,8 @@ pub(super) fn paint_shape(painter: &egui::Painter, layer: &Layer, ts: ToScreen) 
                 color32(MARKER_INK),
             );
         }
+        // A região redigida já faz parte da textura da imagem.
+        Shape::Redaction { .. } => {}
         Shape::Text { anchor, content } => {
             let font = FontId::new(
                 ts.len(style.font_size),
@@ -171,6 +173,7 @@ pub(super) fn shape_screen_bbox(ctx: &egui::Context, layer: &Layer, ts: ToScreen
             let geo = marker_geometry(layer.style.stroke_width);
             Rect::from_center_size(ts.pos(*center), Vec2::splat(ts.len(geo.radius) * 2.0))
         }
+        Shape::Redaction { min, max, .. } => Rect::from_min_max(ts.pos(*min), ts.pos(*max)),
         Shape::Line { a, b } | Shape::Arrow { a, b } => {
             Rect::from_two_pos(ts.pos(*a), ts.pos(*b)).expand(half_stroke)
         }

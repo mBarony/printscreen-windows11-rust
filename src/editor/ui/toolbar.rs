@@ -9,10 +9,7 @@ use egui::{
 use crate::storage::SaveTarget;
 
 use crate::editor::icons::{self, Icon};
-use crate::editor::shapes::{
-    Tool,
-    CORNER_RADIUS_MAX,
-};
+use crate::editor::shapes::{RedactionStyle, Tool, CORNER_RADIUS_MAX};
 use crate::editor::{
     EditorSession,
     FONT_MAX, FONT_MIN, PALETTE, STROKE_MAX,
@@ -22,7 +19,9 @@ use super::{
     apply_crop, copy_and_close, perform_redo, perform_undo, request_close, save_and_close,
     select_tool,
 };
-use super::interact::{restyle_selection, selected_is_text, selected_shape_takes_fill};
+use super::interact::{
+    restyle_selection, selected_is_redaction, selected_is_text, selected_shape_takes_fill,
+};
 
 /// Lado do botão de ícone da toolbar, em pontos.
 pub(super) const ICON_BUTTON: f32 = 26.0;
@@ -186,6 +185,26 @@ pub(super) fn draw(ctx: &egui::Context, session: &mut EditorSession, target: &Sa
                         .changed()
                     {
                         session.corner_radius = radius.round().clamp(0.0, CORNER_RADIUS_MAX);
+                        restyle_selection(ctx, session);
+                    }
+                });
+
+                // --- Modo da redação: mosaico ou cor chapada ---
+                let redacting = session.tool == Tool::Redact || selected_is_redaction(session);
+                ui.add_enabled_ui(redacting, |ui| {
+                    let solid = session.redaction == RedactionStyle::Solid;
+                    if icon_button(ui, Icon::Redact, solid, redacting)
+                        .on_hover_text(format!(
+                            "Redação: {} (clique para alternar)",
+                            session.redaction.label()
+                        ))
+                        .clicked()
+                    {
+                        session.redaction = if solid {
+                            RedactionStyle::Pixelate
+                        } else {
+                            RedactionStyle::Solid
+                        };
                         restyle_selection(ctx, session);
                     }
                 });

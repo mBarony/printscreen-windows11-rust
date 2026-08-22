@@ -16,7 +16,8 @@ use std::sync::Arc;
 
 use crate::imgbuf::RgbaImage;
 
-use super::shapes::{Handle, Layer, Point, Shape, Style};
+use super::redact;
+use super::shapes::{Handle, Layer, Point, RedactionStyle, Shape, Style};
 
 /// Teto do histórico, em operações.
 const MAX_OPS: usize = 100;
@@ -33,6 +34,31 @@ pub enum Op {
     Delete(Vec<u64>),
     /// Recorta a imagem e desloca as anotações junto.
     Crop { x: u32, y: u32, w: u32, h: u32 },
+}
+
+/// Uma redação aplicada, na forma que o replay compara para decidir se os
+/// pixels visíveis mudaram.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct RedactionMark {
+    min: Point,
+    max: Point,
+    style: RedactionStyle,
+    seed: u32,
+}
+
+fn redaction_marks(layers: &[Layer]) -> Vec<RedactionMark> {
+    layers
+        .iter()
+        .filter_map(|layer| match &layer.shape {
+            Shape::Redaction { min, max, seed } => Some(RedactionMark {
+                min: *min,
+                max: *max,
+                style: layer.style.redaction,
+                seed: *seed,
+            }),
+            _ => None,
+        })
+        .collect()
 }
 
 /// Ponto de partida do replay: imagem e anotações já consolidadas.
@@ -54,7 +80,16 @@ pub struct Document {
 
     // Estado derivado, reconstruído por `replay`.
     image: Arc<RgbaImage>,
+    /// A mesma imagem com as redações já queimadas. É ela que o editor
+    /// mostra e da qual a exportação parte: uma região redigida nunca chega
+    /// à tela nem ao arquivo com o conteúdo original.
+    redacted: Arc<RgbaImage>,
     layers: Vec<Layer>,
+    /// Avança quando os pixels visíveis mudam (recorte ou redação) — é o que
+    /// diz ao editor para refazer a textura.
+    pixels_version: u64,
+    /// Redações aplicadas no último replay.
+    redactions: Vec<RedactionMark>,
 
     /// Recortes aplicados no último replay, e um selo que só avança quando
     /// eles mudam. O replay reconstrói a imagem toda vez, então o `Arc` é
@@ -106,16 +141,25 @@ impl Document {
             ops: Vec::new(),
             index: 0,
             next_id: 1,
-            image,
+            image: image.clone(),
+            redacted: image,
             layers: Vec::new(),
+            pixels_version: 0,
+            redactions: Vec::new(),
             crops: Vec::new(),
             image_version: 0,
             pending: None,
         }
     }
 
-    pub fn image(&self) -> &Arc<RgbaImage> {
-        &self.image
+    /// Imagem exibida e exportada: já com as redações aplicadas.
+    pub fn visible_image(&self) -> &Arc<RgbaImage> {
+        &self.redacted
+    }
+
+    /// Selo dos pixels visíveis — muda com recorte e com redação.
+    pub fn pixels_version(&self) -> u64 {
+        self.pixels_version
     }
 
     pub fn layers(&self) -> &[Layer] {
@@ -140,11 +184,33 @@ impl Document {
             }
             apply(op, &mut image, &mut layers);
         }
-        if crops != self.crops {
+
+        let reframed = crops != self.crops;
+        if reframed {
             self.crops = crops;
             self.image_version += 1;
         }
+
+        // As redações queimam a imagem antes de qualquer coisa ser desenhada
+        // por cima: uma seta sobre a área redigida continua visível, e o que
+        // estava embaixo não volta nem na tela nem no arquivo.
+        let marks = redaction_marks(&layers);
+        let redacted = if marks.is_empty() {
+            image.clone()
+        } else {
+            let mut burnt = (*image).clone();
+            for mark in &marks {
+                redact::apply(&mut burnt, mark.min, mark.max, mark.style, mark.seed);
+            }
+            Arc::new(burnt)
+        };
+        if reframed || marks != self.redactions {
+            self.redactions = marks;
+            self.pixels_version += 1;
+        }
+
         self.image = image;
+        self.redacted = redacted;
         self.layers = layers;
     }
 
@@ -205,6 +271,11 @@ impl Document {
         let mut shape = source.shape.clone();
         let style = source.style;
         shape.translate(dx, dy);
+        // A cópia de uma redação ganha semente própria: dois mosaicos
+        // idênticos denunciariam que escondem a mesma coisa.
+        if let Shape::Redaction { seed, .. } = &mut shape {
+            *seed = redact::fresh_seed();
+        }
         Some(self.push(shape, style))
     }
 
@@ -311,6 +382,7 @@ mod tests {
             filled: false,
             corner_radius: 0.0,
             text_pill: false,
+            redaction: RedactionStyle::default(),
         }
     }
 
@@ -468,6 +540,74 @@ mod tests {
     }
 
     #[test]
+    fn a_redaction_burns_the_visible_image_and_undo_brings_it_back() {
+        let mut doc = doc();
+        let before = doc.visible_image().pixel(20, 20);
+        let shape = Shape::Redaction {
+            min: Point::new(10.0, 10.0),
+            max: Point::new(40.0, 30.0),
+            seed: 5,
+        };
+        // Sólida: numa imagem de cor única o mosaico devolveria a própria cor
+        // (a paleta sai da região), e o teste não provaria nada.
+        doc.push(shape, Style { redaction: RedactionStyle::Solid, ..style() });
+
+        assert_ne!(doc.visible_image().pixel(20, 20), before, "a região foi apagada");
+        assert_eq!(
+            doc.visible_image().pixel(60, 40),
+            before,
+            "fora da região, nada muda"
+        );
+
+        // A redação é uma anotação como as outras: desfazer devolve os pixels,
+        // porque o replay parte sempre da imagem de origem.
+        doc.undo();
+        assert_eq!(doc.visible_image().pixel(20, 20), before);
+    }
+
+    #[test]
+    fn the_pixels_version_only_moves_when_the_pixels_do() {
+        let mut doc = doc();
+        let start = doc.pixels_version();
+        doc.push(rect(0.0, 0.0), style());
+        assert_eq!(doc.pixels_version(), start, "uma seta não mexe nos pixels");
+
+        doc.push(
+            Shape::Redaction {
+                min: Point::new(4.0, 4.0),
+                max: Point::new(20.0, 20.0),
+                seed: 3,
+            },
+            style(),
+        );
+        assert_ne!(doc.pixels_version(), start, "a redação mexe");
+    }
+
+    #[test]
+    fn duplicating_a_redaction_gives_it_a_new_mosaic() {
+        let mut doc = doc();
+        doc.push(
+            Shape::Redaction {
+                min: Point::new(4.0, 4.0),
+                max: Point::new(40.0, 30.0),
+                seed: 11,
+            },
+            style(),
+        );
+        doc.duplicate(0, 0.0, 0.0).unwrap();
+        let seeds: Vec<u32> = doc
+            .layers()
+            .iter()
+            .filter_map(|l| match l.shape {
+                Shape::Redaction { seed, .. } => Some(seed),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(seeds.len(), 2);
+        assert_ne!(seeds[0], seeds[1], "duas redações iguais se denunciariam");
+    }
+
+    #[test]
     fn delete_removes_the_layer_and_is_undoable() {
         let mut doc = doc();
         doc.push(rect(0.0, 0.0), style());
@@ -497,7 +637,7 @@ mod tests {
         doc.push(rect(30.0, 20.0), style());
         doc.crop(10, 5, 32, 24);
 
-        assert_eq!((doc.image().width(), doc.image().height()), (32, 24));
+        assert_eq!((doc.visible_image().width(), doc.visible_image().height()), (32, 24));
         // A anotação acompanha o conteúdo: (30,20) − (10,5) = (20,15).
         assert_eq!(shapes(&doc), vec![rect(20.0, 15.0)]);
     }
@@ -509,11 +649,11 @@ mod tests {
         doc.crop(10, 5, 32, 24);
 
         doc.undo();
-        assert_eq!((doc.image().width(), doc.image().height()), (64, 48));
+        assert_eq!((doc.visible_image().width(), doc.visible_image().height()), (64, 48));
         assert_eq!(shapes(&doc), vec![rect(30.0, 20.0)], "anotação volta ao lugar");
 
         doc.redo();
-        assert_eq!((doc.image().width(), doc.image().height()), (32, 24));
+        assert_eq!((doc.visible_image().width(), doc.visible_image().height()), (32, 24));
         assert_eq!(shapes(&doc), vec![rect(20.0, 15.0)]);
     }
 
@@ -524,14 +664,14 @@ mod tests {
         doc.crop(10, 5, 40, 40);
         doc.crop(5, 5, 20, 20);
 
-        assert_eq!((doc.image().width(), doc.image().height()), (20, 20));
+        assert_eq!((doc.visible_image().width(), doc.visible_image().height()), (20, 20));
         assert_eq!(shapes(&doc), vec![rect(15.0, 10.0)]);
 
         // Cada recorte é um passo próprio no histórico.
         doc.undo();
-        assert_eq!((doc.image().width(), doc.image().height()), (40, 40));
+        assert_eq!((doc.visible_image().width(), doc.visible_image().height()), (40, 40));
         doc.undo();
-        assert_eq!((doc.image().width(), doc.image().height()), (64, 48));
+        assert_eq!((doc.visible_image().width(), doc.visible_image().height()), (64, 48));
         // Resta a criação da anotação — só então o histórico se esgota.
         assert!(doc.can_undo());
         doc.undo();
@@ -543,7 +683,7 @@ mod tests {
         let mut doc = doc();
         // Pedido maior que a imagem: o recorte para na borda, sem panicar.
         doc.crop(60, 40, 999, 999);
-        assert_eq!((doc.image().width(), doc.image().height()), (4, 8));
+        assert_eq!((doc.visible_image().width(), doc.visible_image().height()), (4, 8));
     }
 
     #[test]
@@ -562,7 +702,7 @@ mod tests {
             doc.undo();
         }
         assert_eq!(
-            (doc.image().width(), doc.image().height()),
+            (doc.visible_image().width(), doc.visible_image().height()),
             (40, 40),
             "o recorte consolidado continua valendo"
         );

@@ -219,8 +219,8 @@ impl GuiApp {
             }
             Flow::Editing(session) => {
                 let id = egui::ViewportId::from_hash_of(("editor", session.serial));
-                let img_w = session.doc.image().width() as f32;
-                let img_h = session.doc.image().height() as f32;
+                let img_w = session.doc.visible_image().width() as f32;
+                let img_h = session.doc.visible_image().height() as f32;
                 let size = egui::Vec2::new(
                     (img_w + 24.0).clamp(660.0, 1280.0),
                     (img_h + 110.0).clamp(480.0, 860.0),

@@ -112,7 +112,7 @@ pub(super) fn close_edit_run(session: &mut EditorSession) {
 /// A cor amostrada é sempre opaca: o que interessa é o tom que está na tela,
 /// não a transparência do buffer.
 pub(super) fn pick_color(ctx: &egui::Context, session: &mut EditorSession, p: Point) {
-    let image = session.doc.image();
+    let image = session.doc.visible_image();
     let (w, h) = (image.width(), image.height());
     if w == 0 || h == 0 {
         return;
@@ -137,6 +137,14 @@ pub(super) fn selected_shape_takes_fill(session: &EditorSession) -> bool {
         .is_some_and(|layer| {
             matches!(layer.shape, Shape::Rect { .. } | Shape::Ellipse { .. })
         })
+}
+
+/// A anotação selecionada é uma redação?
+pub(super) fn selected_is_redaction(session: &EditorSession) -> bool {
+    session
+        .selected
+        .and_then(|i| session.doc.layers().get(i))
+        .is_some_and(|layer| matches!(layer.shape, Shape::Redaction { .. }))
 }
 
 /// A anotação selecionada é um texto?
@@ -176,7 +184,7 @@ pub(super) fn duplicate_offset(session: &EditorSession, index: usize) -> (f32, f
     let Some((min, max)) = bounds else {
         return (dx, dy); // texto: sem caixa conhecida aqui, vale o padrão
     };
-    let (w, h) = (session.doc.image().width() as f32, session.doc.image().height() as f32);
+    let (w, h) = (session.doc.visible_image().width() as f32, session.doc.visible_image().height() as f32);
     if min.x + dx < 0.0 && max.x - dx <= w {
         dx = -dx;
     }

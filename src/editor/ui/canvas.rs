@@ -1,14 +1,15 @@
 //! Canvas do editor: zoom, pan, criação de formas e composição do quadro.
 
 use egui::{
-    Align2, Color32, ColorImage, CursorIcon, FontId, PointerButton,
-    Pos2, Rect, Sense, TextureOptions, Vec2,
+    Align2, Color32, ColorImage, CornerRadius, CursorIcon, FontId, PointerButton,
+    Pos2, Rect, Sense, Stroke, StrokeKind, TextureOptions, Vec2,
 };
 
 
+use crate::editor::redact;
 use crate::editor::shapes::{
-    normalize, push_sample, shape_from_drag,
-    stroke_from_samples, Layer, Point, Shape, Tool,
+    normalize, push_sample, shape_from_drag, stroke_from_samples, Layer, Point, Shape, Tool,
+    REDACTION_MIN_SIDE,
 };
 use crate::editor::{
     DragPreview, EditorSession, TextInput, CROP_MIN_SIDE,
@@ -35,10 +36,17 @@ pub(super) fn draw(ctx: &egui::Context, session: &mut EditorSession) {
             let canvas_rect = ui.available_rect_before_wrap();
             let response = ui.allocate_rect(canvas_rect, Sense::click_and_drag());
 
+            // A textura carrega a imagem já redigida, então precisa ser
+            // refeita sempre que os pixels visíveis mudam — não só quando o
+            // enquadramento muda.
+            if session.texture_version != session.doc.pixels_version() {
+                session.texture = None;
+                session.texture_version = session.doc.pixels_version();
+            }
             let texture = {
                 let doc = &session.doc;
                 session.texture.get_or_insert_with(|| {
-                    let img = doc.image();
+                    let img = doc.visible_image();
                     let color = ColorImage::from_rgba_unmultiplied(
                         [img.width() as usize, img.height() as usize],
                         img.as_raw(),
@@ -49,8 +57,8 @@ pub(super) fn draw(ctx: &egui::Context, session: &mut EditorSession) {
             };
             let tex_id = texture.id();
 
-            let img_w = session.doc.image().width() as f32;
-            let img_h = session.doc.image().height() as f32;
+            let img_w = session.doc.visible_image().width() as f32;
+            let img_h = session.doc.visible_image().height() as f32;
 
             // Primeiro frame: "ajustar à janela" (nunca acima de 100%).
             let zoom = *session.zoom.get_or_insert_with(|| {
@@ -335,13 +343,21 @@ pub(super) fn draw(ctx: &egui::Context, session: &mut EditorSession) {
                                     }
                                 } else if dx >= 2.0 || dy >= 2.0 {
                                     // Ignora cliques sem arrasto real.
-                                    if let Some(shape) = shape_from_drag(
+                                    if let Some(mut shape) = shape_from_drag(
                                         session.tool,
                                         drag.start,
                                         drag.current,
                                         drag.shift,
                                         drag.alt,
                                     ) {
+                                        if let Shape::Redaction { min, max, seed } = &mut shape {
+                                            // Uma redação minúscula não
+                                            // esconderia nada; e cada uma leva
+                                            // a própria semente.
+                                            max.x = max.x.max(min.x + REDACTION_MIN_SIDE);
+                                            max.y = max.y.max(min.y + REDACTION_MIN_SIDE);
+                                            *seed = redact::fresh_seed();
+                                        }
                                         session.doc.push(shape, session.style());
                                     }
                                 }
@@ -379,11 +395,29 @@ pub(super) fn draw(ctx: &egui::Context, session: &mut EditorSession) {
                     shape_from_drag(session.tool, drag.start, drag.current, drag.shift, drag.alt)
                 };
                 if let Some(shape) = in_progress {
-                    // A pré-visualização ainda não é uma anotação do
-                    // documento: recebe um id provisório só para reusar o
-                    // mesmo desenho da forma já criada.
-                    let preview = Layer { id: 0, shape, style: session.style() };
-                    paint_shape(&shape_painter, &preview, to_screen);
+                    if let Shape::Redaction { min, max, .. } = &shape {
+                        // A redação só existe depois de queimada na imagem;
+                        // durante o arrasto, o que se mostra é a área que
+                        // será apagada.
+                        let area = Rect::from_min_max(to_screen.pos(*min), to_screen.pos(*max));
+                        shape_painter.rect_filled(
+                            area,
+                            CornerRadius::ZERO,
+                            Color32::from_black_alpha(170),
+                        );
+                        shape_painter.rect_stroke(
+                            area,
+                            CornerRadius::ZERO,
+                            Stroke::new(1.5_f32, Color32::WHITE),
+                            StrokeKind::Middle,
+                        );
+                    } else {
+                        // A pré-visualização ainda não é uma anotação do
+                        // documento: recebe um id provisório só para reusar o
+                        // mesmo desenho da forma já criada.
+                        let preview = Layer { id: 0, shape, style: session.style() };
+                        paint_shape(&shape_painter, &preview, to_screen);
+                    }
                 }
             }
 

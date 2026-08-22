@@ -7,6 +7,7 @@
 pub mod document;
 pub mod icons;
 pub mod raster;
+pub mod redact;
 pub mod render;
 pub mod shapes;
 pub mod ui;
@@ -31,7 +32,7 @@ pub const WINDOW_TITLE: &str = "RustShot — Editor";
 pub const FOCUS_CLAIM_FRAMES: u8 = 12;
 
 /// Quantidade de ferramentas do editor — o tamanho da tabela de atalhos.
-pub const TOOL_COUNT: usize = 11;
+pub const TOOL_COUNT: usize = 12;
 
 /// Tolerância do hit-test ao clicar numa anotação com a ferramenta Mover,
 /// em pontos do egui (convertida para px da imagem pelo zoom).
@@ -123,6 +124,8 @@ pub struct EditorSession {
     /// Imagem base + anotações + histórico (o recorte muda a imagem).
     pub doc: Document,
     pub texture: Option<egui::TextureHandle>,
+    /// Versão dos pixels que a textura carrega, para saber quando refazê-la.
+    pub texture_version: u64,
     pub tool: Tool,
     pub color: [u8; 4],
     pub stroke_width: f32,
@@ -133,6 +136,8 @@ pub struct EditorSession {
     pub corner_radius: f32,
     /// Texto nasce sobre a pílula clara de leitura.
     pub text_pill: bool,
+    /// Como a redação apaga a região.
+    pub redaction: shapes::RedactionStyle,
     /// Px físicos da tela por px da imagem; `None` = "ajustar à janela" pendente.
     pub zoom: Option<f32>,
     /// Deslocamento da origem da imagem dentro do canvas, em pontos do egui.
@@ -180,6 +185,7 @@ impl EditorSession {
             serial,
             doc: Document::new(image),
             texture: None,
+            texture_version: 0,
             tool: Tool::Arrow,
             color: config::parse_color(&defaults.default_color),
             stroke_width: defaults.default_stroke_width.clamp(STROKE_MIN, STROKE_MAX),
@@ -187,6 +193,7 @@ impl EditorSession {
             filled: false,
             corner_radius: 0.0,
             text_pill: false,
+            redaction: shapes::RedactionStyle::default(),
             zoom: None,
             pan: egui::Vec2::ZERO,
             tool_keys: resolve_tool_keys(&defaults.tool_keys),
@@ -214,6 +221,7 @@ impl EditorSession {
             filled: self.filled,
             corner_radius: self.corner_radius,
             text_pill: self.text_pill,
+            redaction: self.redaction,
         }
     }
 
@@ -242,6 +250,7 @@ pub fn resolve_tool_keys(config: &config::ToolKeysConfig) -> [(Tool, Option<egui
         (Tool::Highlighter, &config.highlighter, &defaults.highlighter),
         (Tool::Marker, &config.marker, &defaults.marker),
         (Tool::Eyedropper, &config.eyedropper, &defaults.eyedropper),
+        (Tool::Redact, &config.redact, &defaults.redact),
         (Tool::Text, &config.text, &defaults.text),
         (Tool::Crop, &config.crop, &defaults.crop),
     ];
@@ -281,8 +290,9 @@ mod tests {
         assert_eq!(keys[6], (Tool::Highlighter, Some(egui::Key::H)));
         assert_eq!(keys[7], (Tool::Marker, Some(egui::Key::N)));
         assert_eq!(keys[8], (Tool::Eyedropper, Some(egui::Key::I)));
-        assert_eq!(keys[9], (Tool::Text, Some(egui::Key::T)));
-        assert_eq!(keys[10], (Tool::Crop, Some(egui::Key::C)));
+        assert_eq!(keys[9], (Tool::Redact, Some(egui::Key::D)));
+        assert_eq!(keys[10], (Tool::Text, Some(egui::Key::T)));
+        assert_eq!(keys[11], (Tool::Crop, Some(egui::Key::C)));
     }
 
     #[test]

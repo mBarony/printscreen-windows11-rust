@@ -16,6 +16,7 @@ pub const MENU_OPEN_FOLDER: u16 = 0x1004;
 pub const MENU_SETTINGS: u16 = 0x1005;
 pub const MENU_AUTOSTART: u16 = 0x1006;
 pub const MENU_QUIT: u16 = 0x1007;
+pub const MENU_RECOVER: u16 = 0x1008;
 
 /// Ícone RGBA cru embutido (gerado do mesmo desenho do icon.ico).
 static ICON_32: &[u8] = include_bytes!("../assets/icon-32.rgba");
@@ -30,13 +31,24 @@ impl Tray {
     /// (RF-06) e registra o handler de eventos.
     pub fn new(
         autostart_checked: bool,
+        recoverable: bool,
         handler: impl Fn(ShellEvent) + Send + Sync + 'static,
     ) -> Result<Self> {
-        let menu = [
+        let mut menu = vec![
             MenuEntry::Item { id: MENU_CAPTURE_FULLSCREEN, label: "Capturar tela cheia" },
             MenuEntry::Item { id: MENU_CAPTURE_REGION, label: "Capturar região" },
             MenuEntry::Item { id: MENU_CAPTURE_EDIT, label: "Capturar e editar" },
-            MenuEntry::Separator,
+        ];
+        // Só aparece quando há de fato o que recuperar — um item permanente
+        // e quase sempre inerte só ocuparia espaço.
+        if recoverable {
+            menu.push(MenuEntry::Separator);
+            menu.push(MenuEntry::Item {
+                id: MENU_RECOVER,
+                label: "Recuperar edição não salva",
+            });
+        }
+        menu.extend([
             MenuEntry::Item { id: MENU_OPEN_FOLDER, label: "Abrir pasta de capturas" },
             MenuEntry::Item { id: MENU_SETTINGS, label: "Configurações…" },
             MenuEntry::Check {
@@ -46,7 +58,7 @@ impl Tray {
             },
             MenuEntry::Separator,
             MenuEntry::Item { id: MENU_QUIT, label: "Sair" },
-        ];
+        ]);
         shell::init(
             crate::config::APP_NAME,
             (ICON_32, 32, 32),

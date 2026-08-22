@@ -12,6 +12,7 @@ pub mod raster;
 pub mod redact;
 pub mod spotlight;
 pub mod render;
+pub mod session_file;
 pub mod shapes;
 pub mod ui;
 
@@ -186,13 +187,23 @@ pub struct EditorSession {
     pub focus_frames: u8,
     /// Sessão terminou (salvou ou descartou); a janela fecha no próximo frame.
     pub finished: bool,
+    /// Quantas operações já foram gravadas em disco, e se a imagem de origem
+    /// já foi. A imagem não muda, então vai uma vez só.
+    pub saved_ops: Option<usize>,
+    pub source_saved: bool,
 }
 
 impl EditorSession {
     pub fn new(serial: u64, image: RgbaImage, defaults: &EditorConfig) -> Self {
+        Self::from_document(serial, Document::new(image), defaults)
+    }
+
+    /// Abre a sessão sobre um documento já pronto — é como uma edição
+    /// recuperada volta, com o histórico intacto.
+    pub fn from_document(serial: u64, doc: Document, defaults: &EditorConfig) -> Self {
         Self {
             serial,
-            doc: Document::new(image),
+            doc,
             texture: None,
             texture_version: 0,
             tool: Tool::Arrow,
@@ -223,6 +234,8 @@ impl EditorSession {
             confirm_discard: false,
             focus_frames: FOCUS_CLAIM_FRAMES,
             finished: false,
+            saved_ops: None,
+            source_saved: false,
         }
     }
 

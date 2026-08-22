@@ -121,6 +121,7 @@ pub fn show(ctx: &egui::Context, session: &mut EditorSession, target: &SaveTarge
 
     handle_layer_keys(ctx, session);
     settle_edit_run(ctx, session);
+    persist_session(session);
 
     // Botão X da janela → mesmo fluxo do Esc (com confirmação se preciso).
     if ctx.input(|i| i.viewport().close_requested()) && !session.finished {
@@ -310,6 +311,7 @@ pub(super) fn copy_and_close(session: &mut EditorSession) {
         },
         Err(err) => notify::toast_error("Falha ao renderizar anotações", &format!("{err:#}")),
     });
+    forget_session();
     session.finished = true;
 }
 
@@ -334,6 +336,7 @@ pub(super) fn save_and_close(session: &mut EditorSession, target: &SaveTarget) {
         },
         Err(err) => notify::toast_error("Falha ao renderizar anotações", &format!("{err:#}")),
     });
+    forget_session();
     session.finished = true;
 }
 
@@ -365,7 +368,8 @@ pub(super) fn request_close(session: &mut EditorSession) {
     if session.dirty() {
         session.confirm_discard = true;
     } else {
-        session.finished = true;
+        forget_session();
+    session.finished = true;
     }
 }
 
@@ -380,7 +384,8 @@ pub(super) fn confirm_discard_modal(ctx: &egui::Context, session: &mut EditorSes
             ui.horizontal(|ui| {
                 if ui.button("Descartar").clicked() {
                     session.confirm_discard = false;
-                    session.finished = true;
+                    forget_session();
+    session.finished = true;
                 }
                 if ui.button("Continuar editando").clicked() {
                     session.confirm_discard = false;
@@ -392,3 +397,36 @@ pub(super) fn confirm_discard_modal(ctx: &egui::Context, session: &mut EditorSes
     }
 }
 
+
+/// Grava a sessão em disco quando ela muda, para um fechamento inesperado
+/// não levar o trabalho junto.
+///
+/// A imagem de origem vai uma vez só — ela não muda, e reescrever dezenas de
+/// MB a cada anotação seria absurdo. O log, que é pequeno, vai sempre que o
+/// número de operações aplicadas muda.
+fn persist_session(session: &mut EditorSession) {
+    let applied = session.doc.applied();
+    if session.saved_ops == Some(applied) {
+        return;
+    }
+    let dir = crate::config::state_dir();
+    if !session.source_saved {
+        if let Err(err) = super::session_file::save_source(&session.doc, &dir) {
+            // Falhar aqui não pode atrapalhar a edição: perde-se a rede de
+            // segurança, não o trabalho em andamento.
+            log::warn!("sessão não pôde ser gravada: {err:#}");
+            session.saved_ops = Some(applied);
+            return;
+        }
+        session.source_saved = true;
+    }
+    if let Err(err) = super::session_file::save_log(&session.doc, &dir) {
+        log::warn!("log da sessão não pôde ser gravado: {err:#}");
+    }
+    session.saved_ops = Some(applied);
+}
+
+/// Apaga a sessão gravada: o editor terminou por vontade do usuário.
+pub(super) fn forget_session() {
+    super::session_file::clear(&crate::config::state_dir());
+}

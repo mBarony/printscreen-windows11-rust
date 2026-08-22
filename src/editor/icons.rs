@@ -23,6 +23,7 @@ pub enum Icon {
     Highlighter,
     Marker,
     Eyedropper,
+    Redact,
     Fill,
     TextPill,
     Text,
@@ -47,13 +48,14 @@ impl Icon {
             Tool::Highlighter => Self::Highlighter,
             Tool::Marker => Self::Marker,
             Tool::Eyedropper => Self::Eyedropper,
+            Tool::Redact => Self::Redact,
             Tool::Text => Self::Text,
             Tool::Crop => Self::Crop,
         }
     }
 
     #[cfg(test)]
-    pub const ALL: [Icon; 19] = [
+    pub const ALL: [Icon; 20] = [
         Icon::Move,
         Icon::Line,
         Icon::Arrow,
@@ -63,6 +65,7 @@ impl Icon {
         Icon::Highlighter,
         Icon::Marker,
         Icon::Eyedropper,
+        Icon::Redact,
         Icon::Fill,
         Icon::TextPill,
         Icon::Text,
@@ -87,6 +90,7 @@ impl Icon {
             Icon::Highlighter => "highlighter",
             Icon::Marker => "marker",
             Icon::Eyedropper => "eyedropper",
+            Icon::Redact => "redact",
             Icon::Fill => "fill",
             Icon::TextPill => "text_pill",
             Icon::Text => "text",
@@ -181,6 +185,13 @@ pub fn geometry(icon: Icon) -> Vec<Primitive> {
             Fill(vec![(0.62, 0.10), (0.90, 0.38), (0.74, 0.54), (0.46, 0.26)]),
             Stroke(vec![(0.52, 0.32), (0.20, 0.64)]),
             Fill(vec![(0.08, 0.92), (0.14, 0.62), (0.38, 0.86)]),
+        ],
+        // Retângulo com um xadrez dentro — a área coberta pelo mosaico.
+        Icon::Redact => vec![
+            Stroke(rectangle(0.10, 0.16, 0.90, 0.84)),
+            Fill(rectangle(0.22, 0.28, 0.46, 0.50)),
+            Fill(rectangle(0.54, 0.50, 0.78, 0.72)),
+            Fill(rectangle(0.54, 0.28, 0.78, 0.38)),
         ],
         // Quadrado cheio dentro de um vazado — o par contorno/preenchimento.
         Icon::Fill => vec![

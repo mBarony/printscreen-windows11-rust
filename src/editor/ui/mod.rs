@@ -237,7 +237,7 @@ pub(super) fn perform_redo(session: &mut EditorSession) {
 /// nas demais ferramentas).
 pub(super) fn apply_crop(session: &mut EditorSession) {
     let Some((min, max)) = session.crop_pending.take() else { return };
-    let (img_w, img_h) = (session.doc.image().width(), session.doc.image().height());
+    let (img_w, img_h) = (session.doc.visible_image().width(), session.doc.visible_image().height());
 
     // A região já vem clampeada à imagem; floor/ceil preferem incluir o
     // pixel de borda a perdê-lo. `x`/`y` param um pixel antes do fim para
@@ -294,7 +294,7 @@ pub(super) fn commit_text_input(session: &mut EditorSession) {
 /// confirma (ou reporta a falha) na sequência.
 pub(super) fn copy_and_close(session: &mut EditorSession) {
     commit_text_input(session);
-    let base = session.doc.image().clone();
+    let base = session.doc.visible_image().clone();
     let layers = session.doc.layers().to_vec();
     crate::jobs::spawn(move || match super::render::render(&base, &layers) {
         Ok(final_image) => match clipboard::copy_image(&final_image) {
@@ -312,7 +312,7 @@ pub(super) fn copy_and_close(session: &mut EditorSession) {
 /// Ctrl+S: renderiza, salva na pasta configurada e fecha o editor (RF-04).
 pub(super) fn save_and_close(session: &mut EditorSession, target: &SaveTarget) {
     commit_text_input(session);
-    let base = session.doc.image().clone();
+    let base = session.doc.visible_image().clone();
     let layers = session.doc.layers().to_vec();
     let target = target.clone();
     crate::jobs::spawn(move || match super::render::render(&base, &layers) {

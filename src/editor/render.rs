@@ -123,6 +123,9 @@ pub fn render(base: &RgbaImage, layers: &[Layer]) -> Result<RgbaImage> {
                 let anchor = Point::new(center.x - w / 2.0, center.y - h / 2.0);
                 draw_text(&mut buffer, &font, anchor, &label, MARKER_INK, geo.font_size);
             }
+            // Já queimada na imagem de partida (ver `document::replay`), e
+            // de propósito: o que for desenhado depois fica por cima dela.
+            Shape::Redaction { .. } => {}
             Shape::Text { anchor, content } => {
                 if style.text_pill {
                     let block = text_block_extent(&font, content, style.font_size);
@@ -248,7 +251,7 @@ fn blend_pixel(buffer: &mut RgbaImage, x: i64, y: i64, color: [u8; 4], coverage:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::editor::shapes::{shape_from_drag, Style, Tool};
+    use crate::editor::shapes::{shape_from_drag, RedactionStyle, Style, Tool};
 
     fn base() -> RgbaImage {
         RgbaImage::filled(64, 64, [10, 20, 30, 255])
@@ -262,6 +265,7 @@ mod tests {
             filled: false,
             corner_radius: 0.0,
             text_pill: false,
+            redaction: RedactionStyle::default(),
         }
     }
 

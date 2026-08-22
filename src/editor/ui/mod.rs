@@ -181,7 +181,9 @@ pub(super) fn select_tool(session: &mut EditorSession, tool: Tool) {
     } else {
         session.tool_before_eyedropper = None;
         session.selected = None;
+        session.selection.clear();
     }
+    session.marquee = None;
     session.tool = tool;
     // Sair da ferramenta Recortar descarta a região ainda não confirmada.
     session.crop_pending = None;
@@ -218,6 +220,7 @@ pub(super) fn perform_undo(session: &mut EditorSession) {
         refit_if_image_changed(session, before);
     }
     session.selected = None;
+    session.selection.clear();
 }
 
 pub(super) fn perform_redo(session: &mut EditorSession) {
@@ -349,9 +352,14 @@ pub(super) fn request_close(session: &mut EditorSession) {
         // Primeiro Esc apenas descarta a área de recorte marcada.
         return;
     }
+    if session.marquee.take().is_some() {
+        // Primeiro Esc abandona o laço em andamento.
+        return;
+    }
     cancel_move(session);
     if session.selected.take().is_some() {
         // Primeiro Esc apenas desfaz a seleção.
+        session.selection.clear();
         return;
     }
     if session.dirty() {

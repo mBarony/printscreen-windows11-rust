@@ -66,7 +66,14 @@ pub struct Style {
     pub stroke_width: f32,
     /// Tamanho da fonte, em px no espaço da imagem (ferramenta Texto).
     pub font_size: f32,
+    /// Retângulo e elipse saem cheios em vez de só contornados.
+    pub filled: bool,
+    /// Raio dos cantos do retângulo, em px da imagem.
+    pub corner_radius: f32,
 }
+
+/// Raio máximo dos cantos do retângulo, em px da imagem.
+pub const CORNER_RADIUS_MAX: f32 = 24.0;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Shape {
@@ -136,6 +143,16 @@ impl Layer {
                     || (0..3).any(|i| dist_to_segment(p, geo.head[i], geo.head[(i + 1) % 3]) <= tol)
             }
             Shape::Rect { min, max } => {
+                // Uma forma cheia é agarrável pelo miolo; uma vazada, só
+                // pelo contorno — o interior dela ainda é a imagem.
+                if self.style.filled
+                    && p.x >= min.x - reach
+                    && p.x <= max.x + reach
+                    && p.y >= min.y - reach
+                    && p.y <= max.y + reach
+                {
+                    return true;
+                }
                 let corners = [*min, Point::new(max.x, min.y), *max, Point::new(min.x, max.y)];
                 (0..4).any(|i| dist_to_segment(p, corners[i], corners[(i + 1) % 4]) <= reach)
             }
@@ -144,6 +161,9 @@ impl Layer {
                 // elipses degeneradas (um arrasto quase-linear cria rx≈0 ou
                 // ry≈0, cujo traço é um segmento).
                 const N: usize = 32;
+                if self.style.filled && inside_ellipse(p, *center, rx + reach, ry + reach) {
+                    return true;
+                }
                 let pt = |i: usize| {
                     let a = i as f32 / N as f32 * std::f32::consts::TAU;
                     Point::new(center.x + rx * a.cos(), center.y + ry * a.sin())
@@ -452,6 +472,16 @@ fn dist_to_segment(p: Point, a: Point, b: Point) -> f32 {
     dist(p, Point::new(a.x + t * dx, a.y + t * dy))
 }
 
+/// `p` está dentro da elipse de raios `(rx, ry)` centrada em `center`?
+fn inside_ellipse(p: Point, center: Point, rx: f32, ry: f32) -> bool {
+    if rx <= f32::EPSILON || ry <= f32::EPSILON {
+        return false;
+    }
+    let nx = (p.x - center.x) / rx;
+    let ny = (p.y - center.y) / ry;
+    nx * nx + ny * ny <= 1.0
+}
+
 fn point_in_triangle(p: Point, t: [Point; 3]) -> bool {
     let cross =
         |o: Point, a: Point, b: Point| (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
@@ -673,7 +703,13 @@ mod tests {
     use super::*;
 
     fn style() -> Style {
-        Style { color: [255, 0, 0, 255], stroke_width: 3.0, font_size: 24.0 }
+        Style {
+            color: [255, 0, 0, 255],
+            stroke_width: 3.0,
+            font_size: 24.0,
+            filled: false,
+            corner_radius: 0.0,
+        }
     }
 
     fn layer(shape: Shape) -> Layer {
@@ -742,6 +778,25 @@ mod tests {
         let rect = layer(Shape::Rect { min: Point::new(10.0, 10.0), max: Point::new(50.0, 50.0) });
         assert!(rect.hit_test(Point::new(10.0, 30.0), 2.0, (0.0, 0.0)), "borda esquerda");
         assert!(!rect.hit_test(Point::new(30.0, 30.0), 2.0, (0.0, 0.0)), "miolo vazio");
+    }
+
+    #[test]
+    fn a_filled_shape_is_grabbable_by_its_interior() {
+        // Uma forma vazada só pega pelo contorno: o miolo dela ainda é a
+        // imagem, e clicar ali tem de continuar alcançando o que está atrás.
+        let shape = Shape::Rect { min: Point::new(10.0, 10.0), max: Point::new(50.0, 50.0) };
+        let middle = Point::new(30.0, 30.0);
+        let hollow = Layer { id: 1, shape: shape.clone(), style: style() };
+        let solid = Layer { id: 2, shape, style: Style { filled: true, ..style() } };
+        assert!(!hollow.hit_test(middle, 2.0, (0.0, 0.0)));
+        assert!(solid.hit_test(middle, 2.0, (0.0, 0.0)));
+
+        let ellipse = Shape::Ellipse { center: Point::new(50.0, 50.0), rx: 20.0, ry: 10.0 };
+        let hollow = Layer { id: 3, shape: ellipse.clone(), style: style() };
+        let solid = Layer { id: 4, shape: ellipse, style: Style { filled: true, ..style() } };
+        let center = Point::new(50.0, 50.0);
+        assert!(!hollow.hit_test(center, 2.0, (0.0, 0.0)));
+        assert!(solid.hit_test(center, 2.0, (0.0, 0.0)));
     }
 
     #[test]

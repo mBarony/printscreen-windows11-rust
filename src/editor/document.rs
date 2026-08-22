@@ -287,7 +287,13 @@ mod tests {
     }
 
     fn style() -> Style {
-        Style { color: [255, 0, 0, 255], stroke_width: 3.0, font_size: 24.0 }
+        Style {
+            color: [255, 0, 0, 255],
+            stroke_width: 3.0,
+            font_size: 24.0,
+            filled: false,
+            corner_radius: 0.0,
+        }
     }
 
     fn line() -> Shape {

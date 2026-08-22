@@ -21,6 +21,7 @@ pub enum Icon {
     Ellipse,
     Freehand,
     Highlighter,
+    Fill,
     Text,
     Crop,
     Undo,
@@ -47,7 +48,7 @@ impl Icon {
     }
 
     #[cfg(test)]
-    pub const ALL: [Icon; 15] = [
+    pub const ALL: [Icon; 16] = [
         Icon::Move,
         Icon::Line,
         Icon::Arrow,
@@ -55,6 +56,7 @@ impl Icon {
         Icon::Ellipse,
         Icon::Freehand,
         Icon::Highlighter,
+        Icon::Fill,
         Icon::Text,
         Icon::Crop,
         Icon::Undo,
@@ -75,6 +77,7 @@ impl Icon {
             Icon::Ellipse => "ellipse",
             Icon::Freehand => "freehand",
             Icon::Highlighter => "highlighter",
+            Icon::Fill => "fill",
             Icon::Text => "text",
             Icon::Crop => "crop",
             Icon::Undo => "undo",
@@ -157,6 +160,11 @@ pub fn geometry(icon: Icon) -> Vec<Primitive> {
             (0.72, 0.60),
             (0.90, 0.30),
         ])],
+        // Quadrado cheio dentro de um vazado — o par contorno/preenchimento.
+        Icon::Fill => vec![
+            Stroke(rectangle(0.10, 0.10, 0.90, 0.90)),
+            Fill(rectangle(0.30, 0.30, 0.70, 0.70)),
+        ],
         // Ponta chanfrada do marcador, sobre o rastro que ele deixa.
         Icon::Highlighter => vec![
             Fill(vec![(0.20, 0.62), (0.62, 0.18), (0.82, 0.34), (0.40, 0.76)]),

@@ -24,6 +24,7 @@ pub enum Icon {
     Marker,
     Eyedropper,
     Fill,
+    TextPill,
     Text,
     Crop,
     Undo,
@@ -52,7 +53,7 @@ impl Icon {
     }
 
     #[cfg(test)]
-    pub const ALL: [Icon; 18] = [
+    pub const ALL: [Icon; 19] = [
         Icon::Move,
         Icon::Line,
         Icon::Arrow,
@@ -63,6 +64,7 @@ impl Icon {
         Icon::Marker,
         Icon::Eyedropper,
         Icon::Fill,
+        Icon::TextPill,
         Icon::Text,
         Icon::Crop,
         Icon::Undo,
@@ -86,6 +88,7 @@ impl Icon {
             Icon::Marker => "marker",
             Icon::Eyedropper => "eyedropper",
             Icon::Fill => "fill",
+            Icon::TextPill => "text_pill",
             Icon::Text => "text",
             Icon::Crop => "crop",
             Icon::Undo => "undo",
@@ -183,6 +186,12 @@ pub fn geometry(icon: Icon) -> Vec<Primitive> {
         Icon::Fill => vec![
             Stroke(rectangle(0.10, 0.10, 0.90, 0.90)),
             Fill(rectangle(0.30, 0.30, 0.70, 0.70)),
+        ],
+        // "A" sobre a pílula que fica atrás do texto.
+        Icon::TextPill => vec![
+            Stroke(rectangle(0.06, 0.30, 0.94, 0.74)),
+            Stroke(vec![(0.30, 0.66), (0.50, 0.38), (0.70, 0.66)]),
+            Stroke(vec![(0.37, 0.56), (0.63, 0.56)]),
         ],
         // Ponta chanfrada do marcador, sobre o rastro que ele deixa.
         Icon::Highlighter => vec![

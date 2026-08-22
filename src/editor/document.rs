@@ -310,6 +310,7 @@ mod tests {
             font_size: 24.0,
             filled: false,
             corner_radius: 0.0,
+            text_pill: false,
         }
     }
 

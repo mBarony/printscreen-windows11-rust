@@ -15,7 +15,8 @@ use crate::imgbuf::RgbaImage;
 
 use super::raster;
 use super::shapes::{
-    arrow_geometry, marker_geometry, stroke_appearance, Layer, Point, Shape, MARKER_INK,
+    arrow_geometry, marker_geometry, stroke_appearance, text_pill_metrics, Layer, Point, Shape,
+    MARKER_INK, TEXT_PILL_COLOR,
 };
 use super::FONT_BYTES;
 
@@ -123,6 +124,17 @@ pub fn render(base: &RgbaImage, layers: &[Layer]) -> Result<RgbaImage> {
                 draw_text(&mut buffer, &font, anchor, &label, MARKER_INK, geo.font_size);
             }
             Shape::Text { anchor, content } => {
+                if style.text_pill {
+                    let block = text_block_extent(&font, content, style.font_size);
+                    let (pad, radius) = text_pill_metrics(block.line_height);
+                    raster::fill_rect(
+                        &mut buffer,
+                        (anchor.x - pad, anchor.y - pad),
+                        (anchor.x + block.width + pad, anchor.y + block.height + pad),
+                        radius,
+                        TEXT_PILL_COLOR,
+                    );
+                }
                 draw_text(&mut buffer, &font, *anchor, content, style.color, style.font_size);
             }
         }
@@ -146,6 +158,28 @@ fn text_extent(font: &FontRef<'_>, content: &str, font_size: f32) -> (f32, f32) 
         previous = Some(id);
     }
     (width, scaled.height())
+}
+
+/// Extensão de um bloco de texto: largura da linha mais larga e altura de
+/// todas elas somadas, na mesma métrica que `draw_text` usa para desenhá-lo.
+fn text_block_extent(font: &FontRef<'_>, content: &str, font_size: f32) -> TextBlock {
+    let scaled = font.as_scaled(ab_glyph::PxScale::from(font_size.max(1.0)));
+    let line_height = scaled.height() + scaled.line_gap();
+    let mut width: f32 = 0.0;
+    let mut lines = 0;
+    // `split` e não `lines`: uma linha final vazia continua ocupando espaço,
+    // e é assim que `draw_text` a desenha.
+    for line in content.split('\n') {
+        width = width.max(text_extent(font, line, font_size).0);
+        lines += 1;
+    }
+    TextBlock { width, height: line_height * lines.max(1) as f32, line_height }
+}
+
+struct TextBlock {
+    width: f32,
+    height: f32,
+    line_height: f32,
 }
 
 /// Desenha texto ancorado pelo canto superior esquerdo (como o
@@ -227,6 +261,7 @@ mod tests {
             font_size: 16.0,
             filled: false,
             corner_radius: 0.0,
+            text_pill: false,
         }
     }
 
@@ -381,6 +416,36 @@ mod tests {
         };
         let (a, b) = (ink_bounds(&one), ink_bounds(&twelve));
         assert!(a.abs_diff(b) <= 1, "centros em {a} e {b}");
+    }
+
+    #[test]
+    fn the_reading_pill_sits_behind_the_text() {
+        let img = base();
+        let shape = Shape::Text { anchor: Point::new(20.0, 20.0), content: "Ok".into() };
+        let plain = render(&img, &[layer(shape.clone())]).unwrap();
+        let on_pill = render(
+            &img,
+            &[styled(shape, Style { text_pill: true, ..style() })],
+        )
+        .unwrap();
+        // Logo acima e à esquerda da âncora cai o recuo da pílula.
+        assert_eq!(plain.pixel(18, 18), [10, 20, 30, 255], "sem pílula, o fundo aparece");
+        let pill = on_pill.pixel(18, 18);
+        assert!(pill[0] > 200 && pill[1] > 200 && pill[2] > 200, "creme claro, veio {pill:?}");
+    }
+
+    #[test]
+    fn a_multiline_text_grows_downwards() {
+        let img = RgbaImage::filled(120, 120, [10, 20, 30, 255]);
+        let one = Shape::Text { anchor: Point::new(8.0, 8.0), content: "Ok".into() };
+        let two = Shape::Text { anchor: Point::new(8.0, 8.0), content: "Ok\nOk".into() };
+
+        let lowest_ink = |img: &RgbaImage| {
+            (0..120).rev().find(|&y| (0..120).any(|x| img.pixel(x, y)[0] > 100))
+        };
+        let a = lowest_ink(&render(&img, &[layer(one)]).unwrap()).unwrap();
+        let b = lowest_ink(&render(&img, &[layer(two)]).unwrap()).unwrap();
+        assert!(b > a, "a segunda linha desce ({a} → {b})");
     }
 
     #[test]

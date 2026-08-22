@@ -198,6 +198,7 @@ pub fn show(ctx: &egui::Context, state: &mut SettingsState) {
                         (Tool::Ellipse, &mut tk.ellipse),
                         (Tool::Freehand, &mut tk.freehand),
                         (Tool::Highlighter, &mut tk.highlighter),
+                        (Tool::Marker, &mut tk.marker),
                         (Tool::Text, &mut tk.text),
                         (Tool::Crop, &mut tk.crop),
                     ] {
@@ -402,6 +403,7 @@ fn tool_key_conflicts(keys: &ToolKeysConfig) -> Vec<(Tool, Tool)> {
         (Tool::Ellipse, &keys.ellipse, &defaults.ellipse),
         (Tool::Freehand, &keys.freehand, &defaults.freehand),
         (Tool::Highlighter, &keys.highlighter, &defaults.highlighter),
+        (Tool::Marker, &keys.marker, &defaults.marker),
         (Tool::Text, &keys.text, &defaults.text),
         (Tool::Crop, &keys.crop, &defaults.crop),
     ];

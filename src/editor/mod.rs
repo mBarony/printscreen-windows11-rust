@@ -31,7 +31,7 @@ pub const WINDOW_TITLE: &str = "RustShot — Editor";
 pub const FOCUS_CLAIM_FRAMES: u8 = 12;
 
 /// Quantidade de ferramentas do editor — o tamanho da tabela de atalhos.
-pub const TOOL_COUNT: usize = 9;
+pub const TOOL_COUNT: usize = 10;
 
 /// Tolerância do hit-test ao clicar numa anotação com a ferramenta Mover,
 /// em pontos do egui (convertida para px da imagem pelo zoom).
@@ -232,6 +232,7 @@ pub fn resolve_tool_keys(config: &config::ToolKeysConfig) -> [(Tool, Option<egui
         (Tool::Ellipse, &config.ellipse, &defaults.ellipse),
         (Tool::Freehand, &config.freehand, &defaults.freehand),
         (Tool::Highlighter, &config.highlighter, &defaults.highlighter),
+        (Tool::Marker, &config.marker, &defaults.marker),
         (Tool::Text, &config.text, &defaults.text),
         (Tool::Crop, &config.crop, &defaults.crop),
     ];
@@ -269,8 +270,9 @@ mod tests {
         assert_eq!(keys[0], (Tool::Select, Some(egui::Key::M)));
         assert_eq!(keys[5], (Tool::Freehand, Some(egui::Key::F)));
         assert_eq!(keys[6], (Tool::Highlighter, Some(egui::Key::H)));
-        assert_eq!(keys[7], (Tool::Text, Some(egui::Key::T)));
-        assert_eq!(keys[8], (Tool::Crop, Some(egui::Key::C)));
+        assert_eq!(keys[7], (Tool::Marker, Some(egui::Key::N)));
+        assert_eq!(keys[8], (Tool::Text, Some(egui::Key::T)));
+        assert_eq!(keys[9], (Tool::Crop, Some(egui::Key::C)));
     }
 
     #[test]

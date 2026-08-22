@@ -173,6 +173,23 @@ impl Document {
         id
     }
 
+    /// Número do próximo contador: um a mais que o maior entre os que estão
+    /// na tela.
+    ///
+    /// A sequência acompanha o que se vê, não o histórico: apagar o contador
+    /// de maior número faz o próximo reusá-lo, em vez de deixar um buraco na
+    /// numeração.
+    pub fn next_marker(&self) -> u32 {
+        self.layers
+            .iter()
+            .filter_map(|layer| match layer.shape {
+                Shape::Marker { number, .. } => Some(number),
+                _ => None,
+            })
+            .max()
+            .map_or(1, |highest| highest + 1)
+    }
+
     /// Remove a anotação de índice `index`.
     pub fn delete(&mut self, index: usize) {
         let Some(layer) = self.layers.get(index) else {
@@ -414,6 +431,39 @@ mod tests {
         doc.end_move();
         assert_eq!(doc.layers()[0].id, id, "trocar o estilo não cria outra anotação");
         assert_eq!(doc.layers().len(), 1);
+    }
+
+    fn marker(n: u32) -> Shape {
+        Shape::Marker { center: Point::new(n as f32 * 10.0, 10.0), number: n }
+    }
+
+    #[test]
+    fn marker_numbering_follows_what_is_on_screen() {
+        let mut doc = doc();
+        assert_eq!(doc.next_marker(), 1, "o primeiro contador é o 1");
+        doc.push(marker(1), style());
+        doc.push(marker(2), style());
+        doc.push(marker(3), style());
+        assert_eq!(doc.next_marker(), 4);
+
+        // Apagar o maior devolve o número: a sequência acompanha a tela, não
+        // o histórico.
+        doc.delete(2);
+        assert_eq!(doc.next_marker(), 3);
+
+        // Apagar um do meio não renumera os outros nem reusa o buraco.
+        doc.push(marker(3), style());
+        doc.delete(1);
+        assert_eq!(doc.next_marker(), 4);
+    }
+
+    #[test]
+    fn undoing_a_marker_frees_its_number_again() {
+        let mut doc = doc();
+        doc.push(marker(1), style());
+        doc.push(marker(2), style());
+        doc.undo();
+        assert_eq!(doc.next_marker(), 2, "o 2 volta a estar livre");
     }
 
     #[test]

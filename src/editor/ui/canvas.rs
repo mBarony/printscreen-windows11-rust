@@ -6,6 +6,7 @@ use egui::{
 };
 
 
+use crate::editor::cut::Band;
 use crate::editor::redact;
 use crate::editor::shapes::{
     normalize, push_sample, shape_from_drag, stroke_from_samples, Layer, Point, Shape, Tool,
@@ -16,13 +17,13 @@ use crate::editor::{
     FONT_MAX, FONT_MIN, STROKE_MAX,
     STROKE_MIN, ZOOM_MAX, ZOOM_MIN,
 };
-use super::{cancel_move, ToScreen};
+use super::{cancel_move, reset_view, ToScreen};
 use super::interact::{
     begin_select_drag, handle_at, handle_cursor, pick_color,
     restyle_selection, selected_is_text,
 };
 use super::paint::{
-    draw_crop_overlay, draw_handles, draw_selection_outline, paint_shape,
+    draw_crop_overlay, draw_cut_preview, draw_handles, draw_selection_outline, paint_shape,
 };
 use super::text::text_input_overlay;
 
@@ -324,7 +325,16 @@ pub(super) fn draw(ctx: &egui::Context, session: &mut EditorSession) {
                             if let Some(drag) = session.drag.take() {
                                 let dx = (drag.current.x - drag.start.x).abs();
                                 let dy = (drag.current.y - drag.start.y).abs();
-                                if session.tool == Tool::Crop {
+                                if session.tool == Tool::Cut {
+                                    // Diferente do recorte, o corte não
+                                    // espera confirmação: o gesto já diz tudo.
+                                    let band = Band::from_drag(drag.start, drag.current);
+                                    if band.width() > 0 {
+                                        session.doc.cut(band);
+                                        reset_view(session);
+                                        session.selected = None;
+                                    }
+                                } else if session.tool == Tool::Crop {
                                     // Área pequena demais foi engano: nada a
                                     // confirmar (o recorte só sai no Enter).
                                     if dx >= CROP_MIN_SIDE && dy >= CROP_MIN_SIDE {
@@ -387,6 +397,11 @@ pub(super) fn draw(ctx: &egui::Context, session: &mut EditorSession) {
             let shape_painter = ui.painter_at(image_rect.intersect(canvas_rect));
             for layer in session.doc.layers() {
                 paint_shape(&shape_painter, layer, to_screen);
+            }
+            if session.tool == Tool::Cut {
+                if let Some(drag) = &session.drag {
+                    draw_cut_preview(&shape_painter, drag, to_screen, img_w, img_h);
+                }
             }
             if let Some(drag) = &session.drag {
                 let in_progress = if session.tool.is_stroke() {

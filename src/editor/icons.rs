@@ -29,6 +29,7 @@ pub enum Icon {
     TextPill,
     Text,
     Crop,
+    Cut,
     Undo,
     Redo,
     Copy,
@@ -53,11 +54,12 @@ impl Icon {
             Tool::Spotlight => Self::Spotlight,
             Tool::Text => Self::Text,
             Tool::Crop => Self::Crop,
+            Tool::Cut => Self::Cut,
         }
     }
 
     #[cfg(test)]
-    pub const ALL: [Icon; 21] = [
+    pub const ALL: [Icon; 22] = [
         Icon::Move,
         Icon::Line,
         Icon::Arrow,
@@ -73,6 +75,7 @@ impl Icon {
         Icon::TextPill,
         Icon::Text,
         Icon::Crop,
+        Icon::Cut,
         Icon::Undo,
         Icon::Redo,
         Icon::Copy,
@@ -99,6 +102,7 @@ impl Icon {
             Icon::TextPill => "text_pill",
             Icon::Text => "text",
             Icon::Crop => "crop",
+            Icon::Cut => "cut",
             Icon::Undo => "undo",
             Icon::Redo => "redo",
             Icon::Copy => "copy",
@@ -189,6 +193,14 @@ pub fn geometry(icon: Icon) -> Vec<Primitive> {
             Fill(vec![(0.62, 0.10), (0.90, 0.38), (0.74, 0.54), (0.46, 0.26)]),
             Stroke(vec![(0.52, 0.32), (0.20, 0.64)]),
             Fill(vec![(0.08, 0.92), (0.14, 0.62), (0.38, 0.86)]),
+        ],
+        // Duas metades separadas por uma costura tracejada.
+        Icon::Cut => vec![
+            Stroke(rectangle(0.10, 0.08, 0.90, 0.34)),
+            Stroke(rectangle(0.10, 0.66, 0.90, 0.92)),
+            Stroke(vec![(0.12, 0.50), (0.30, 0.50)]),
+            Stroke(vec![(0.42, 0.50), (0.60, 0.50)]),
+            Stroke(vec![(0.72, 0.50), (0.90, 0.50)]),
         ],
         // Lente com raios saindo dela — o foco de luz.
         Icon::Spotlight => vec![

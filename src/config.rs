@@ -193,6 +193,7 @@ pub struct ToolKeysConfig {
     pub spotlight: String,
     pub text: String,
     pub crop: String,
+    pub cut: String,
 }
 
 impl Default for ToolKeysConfig {
@@ -211,6 +212,7 @@ impl Default for ToolKeysConfig {
             spotlight: "O".into(),
             text: "T".into(),
             crop: "C".into(),
+            cut: "X".into(),
         }
     }
 }
@@ -328,6 +330,7 @@ impl Config {
                 spotlight: tool_key("spotlight", &defaults.editor.tool_keys.spotlight),
                 text: tool_key("text", &defaults.editor.tool_keys.text),
                 crop: tool_key("crop", &defaults.editor.tool_keys.crop),
+                cut: tool_key("cut", &defaults.editor.tool_keys.cut),
             },
             ctrl_wheel: editor_value
                 .and_then(|e| e.get("ctrl_wheel"))
@@ -397,6 +400,7 @@ impl Config {
                             ("spotlight", json::s(&self.editor.tool_keys.spotlight)),
                             ("text", json::s(&self.editor.tool_keys.text)),
                             ("crop", json::s(&self.editor.tool_keys.crop)),
+                            ("cut", json::s(&self.editor.tool_keys.cut)),
                         ]),
                     ),
                     ("ctrl_wheel", json::s(self.editor.ctrl_wheel.as_str())),

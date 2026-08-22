@@ -4,6 +4,7 @@
 //! anotações + histórico), `ui` (janela/canvas/toolbar) e `render`
 //! (rasterização final para exportação).
 
+pub mod cut;
 pub mod document;
 pub mod icons;
 pub mod raster;
@@ -33,7 +34,7 @@ pub const WINDOW_TITLE: &str = "RustShot — Editor";
 pub const FOCUS_CLAIM_FRAMES: u8 = 12;
 
 /// Quantidade de ferramentas do editor — o tamanho da tabela de atalhos.
-pub const TOOL_COUNT: usize = 13;
+pub const TOOL_COUNT: usize = 14;
 
 /// Tolerância do hit-test ao clicar numa anotação com a ferramenta Mover,
 /// em pontos do egui (convertida para px da imagem pelo zoom).
@@ -262,6 +263,7 @@ pub fn resolve_tool_keys(config: &config::ToolKeysConfig) -> [(Tool, Option<egui
         (Tool::Spotlight, &config.spotlight, &defaults.spotlight),
         (Tool::Text, &config.text, &defaults.text),
         (Tool::Crop, &config.crop, &defaults.crop),
+        (Tool::Cut, &config.cut, &defaults.cut),
     ];
     let mut used: Vec<egui::Key> = Vec::new();
     entries.map(|(tool, configured, fallback)| {
@@ -303,6 +305,7 @@ mod tests {
         assert_eq!(keys[10], (Tool::Spotlight, Some(egui::Key::O)));
         assert_eq!(keys[11], (Tool::Text, Some(egui::Key::T)));
         assert_eq!(keys[12], (Tool::Crop, Some(egui::Key::C)));
+        assert_eq!(keys[13], (Tool::Cut, Some(egui::Key::X)));
     }
 
     #[test]

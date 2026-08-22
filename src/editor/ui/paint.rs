@@ -16,6 +16,8 @@ use crate::editor::{
     HANDLE_EDGE_ROOM_PTS, HANDLE_RADIUS_PTS,
 };
 use super::ToScreen;
+use crate::editor::cut::{Axis, Band};
+use crate::editor::DragPreview;
 
 pub(super) fn paint_shape(painter: &egui::Painter, layer: &Layer, ts: ToScreen) {
     let style = &layer.style;
@@ -298,4 +300,48 @@ pub(super) fn draw_crop_overlay(
         FontId::proportional(12.0),
         Color32::WHITE,
     );
+}
+
+/// Faixa que o corte vai remover, durante o arrasto.
+///
+/// O véu escuro marca o que sai e as duas linhas claras mostram onde ficará
+/// a costura — é o que deixa claro que as duas metades vão se encostar, em
+/// vez de a imagem ficar com um buraco.
+pub(super) fn draw_cut_preview(
+    painter: &egui::Painter,
+    drag: &DragPreview,
+    ts: ToScreen,
+    img_w: f32,
+    img_h: f32,
+) {
+    let band = Band::from_drag(drag.start, drag.current);
+    if band.width() == 0 {
+        return;
+    }
+    let (start, end) = (band.start as f32, band.end as f32);
+    let area = match band.axis {
+        Axis::Horizontal => Rect::from_min_max(
+            ts.pos(Point::new(0.0, start)),
+            ts.pos(Point::new(img_w, end)),
+        ),
+        Axis::Vertical => Rect::from_min_max(
+            ts.pos(Point::new(start, 0.0)),
+            ts.pos(Point::new(end, img_h)),
+        ),
+    };
+    painter.rect_filled(area, CornerRadius::ZERO, Color32::from_black_alpha(175));
+    let seam = Stroke::new(1.5_f32, Color32::from_white_alpha(190));
+    let (a, b) = match band.axis {
+        Axis::Horizontal => (
+            [area.left_top(), area.right_top()],
+            [area.left_bottom(), area.right_bottom()],
+        ),
+        Axis::Vertical => (
+            [area.left_top(), area.left_bottom()],
+            [area.right_top(), area.right_bottom()],
+        ),
+    };
+    for edge in [a, b] {
+        painter.extend(egui::Shape::dashed_line(&edge, seam, 5.0, 4.0));
+    }
 }

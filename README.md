@@ -9,17 +9,37 @@ Aplicação standalone de captura de tela para **Windows 11 (x64)**, escrita em 
 | Modo | Atalho padrão | Comportamento |
 |---|---|---|
 | **Tela cheia** | `Ctrl+PrtScr` | Captura e salva automaticamente na pasta configurada |
-| **Região** | `Shift+PrtScr` | Congela a tela, você arrasta um retângulo; a seleção fica na tela até você decidir: `Ctrl+C` copia para a área de transferência, `Ctrl+S` salva como arquivo (arrastar de novo refaz; `Esc` cancela) |
+| **Região** | `Shift+PrtScr` | Congela a tela, você arrasta um retângulo; a seleção fica na tela até você decidir: `Ctrl+C` copia para a área de transferência, `Ctrl+S` salva como arquivo (arrastar de novo refaz; `Esc` cancela). `Space` alterna para escolher uma **janela** inteira, `Ctrl+A` pega o monitor todo |
 | **Região + edição** | `Ctrl+Shift+PrtScr` | Como acima, mas abre o editor de anotações |
 
-- **Editor de anotações**: linha (`L`), seta (`S`), retângulo (`R`), elipse (`E`), mão livre (`F`), marca-texto (`H`), marcador numerado (`N`), conta-gotas (`I`) e texto (`T`); **Recortar** (`C`) mantém apenas a área arrastada (confirme com `Enter`), levando as anotações junto e podendo ser desfeita; 8 cores + seletor livre, espessura 1–12 px, fonte 12–72 px (`Ctrl+scroll` ajusta a espessura — ou a fonte, com Texto ativo); retângulo e elipse podem sair preenchidos, e o retângulo aceita cantos arredondados; o texto é multilinha (`Ctrl+Enter` confirma) e pode ganhar uma pílula clara de fundo para continuar legível sobre qualquer imagem; as teclas das ferramentas e o papel da roda (traço×zoom) são configuráveis na janela de Configurações; `Ctrl+Z`/`Ctrl+Y` desfaz/refaz; `Shift` restringe a forma (45°/quadrado/círculo) e `Alt` a desenha a partir do centro; a roda do mouse dá zoom (25–400%) e o botão do meio faz pan; `Ctrl+C` copia a imagem anotada para a área de transferência e fecha o editor; `Ctrl+S` salva como arquivo e fecha; `Esc` descarta (confirmando se houver edições).
-- **Anotações continuam editáveis**: com a ferramenta **Mover** (`M`), clique numa anotação para selecioná-la — a imagem só é mesclada ao salvar/copiar. Arraste o corpo para reposicionar ou as **alças** para redimensionar (linha e seta têm as duas pontas; `Shift` preserva a proporção ou prende em 45°). As setas do teclado empurram 1 px, ou 10 px com `Shift`; `Alt+D` duplica; `Delete` apaga. Trocar a cor, a espessura ou o tamanho da fonte com algo selecionado **repinta a anotação** em vez de valer só para a próxima.
+- **Editor de anotações**: linha (`L`), seta (`S`), retângulo (`R`), elipse (`E`), mão livre (`F`), marca-texto (`H`), marcador numerado (`N`), conta-gotas (`I`), **redação** (`D`), **holofote** (`O`), **cortar faixa** (`X`) e texto (`T`); **Recortar** (`C`) mantém apenas a área arrastada (confirme com `Enter`), levando as anotações junto e podendo ser desfeita; 8 cores + seletor livre, espessura 1–12 px, fonte 12–72 px (`Ctrl+scroll` ajusta a espessura — ou a fonte, com Texto ativo); retângulo e elipse podem sair preenchidos, e o retângulo aceita cantos arredondados; o texto é multilinha (`Ctrl+Enter` confirma) e pode ganhar uma pílula clara de fundo para continuar legível sobre qualquer imagem; as teclas das ferramentas e o papel da roda (traço×zoom) são configuráveis na janela de Configurações; `Ctrl+Z`/`Ctrl+Y` desfaz/refaz; `Shift` restringe a forma (45°/quadrado/círculo) e `Alt` a desenha a partir do centro; a roda do mouse dá zoom (25–400%) e o botão do meio faz pan; `Ctrl+C` copia a imagem anotada para a área de transferência e fecha o editor; `Ctrl+S` salva como arquivo e fecha; `Esc` descarta (confirmando se houver edições).
+- **Esconder, destacar, encurtar**: a **redação** (`D`) apaga uma região de vez — em mosaico sintético (o padrão) ou cor chapada; o **holofote** (`O`) escurece o resto da imagem e amplia o que ficou dentro; **cortar faixa** (`X`) remove uma tira da imagem e junta o que sobrou, levando as anotações junto. Um botão da toolbar põe a captura sobre um **fundo decorativo** com sombra, em quatro variações.
+- **Anotações continuam editáveis**: com a ferramenta **Mover** (`M`), clique numa anotação para selecioná-la — ou arraste a partir de um ponto vazio para **laçar várias**, que passam a se mover e a ser apagadas em bloco — a imagem só é mesclada ao salvar/copiar. Arraste o corpo para reposicionar ou as **alças** para redimensionar (linha e seta têm as duas pontas; `Shift` preserva a proporção ou prende em 45°). As setas do teclado empurram 1 px, ou 10 px com `Shift`; `Alt+D` duplica; `Delete` apaga. Trocar a cor, a espessura ou o tamanho da fonte com algo selecionado **repinta a anotação** em vez de valer só para a próxima. Se o editor fechar sem querer, o menu da bandeja oferece **recuperar a edição não salva** — com o histórico de desfazer intacto.
 - **Multi-monitor e DPI alto**: capturas em pixels físicos, manifesto **Per-Monitor V2** embutido, suporte a escalas mistas (100–300%) e coordenadas negativas. Escopo da tela cheia configurável: todos os monitores compostos, apenas o principal, ou o monitor sob o cursor.
 - **Bandeja do sistema**: a aplicação não tem janela principal — menu com os três modos, abrir pasta de capturas, configurações, "Iniciar com o Windows" e Sair.
 - **Configuração persistente** em `config.json` (leitura tolerante; arquivo corrompido é renomeado para `.bak` e recriado). Alterações têm efeito imediato, sem reiniciar.
 - **Instância única**: uma segunda instância notifica e encerra.
 - **Visual Windows 11 (Fluent)**: tema claro/escuro seguindo o sistema, cor de destaque do Windows, cards e cantos arredondados, fonte **Segoe UI Variable** na interface — o texto das anotações permanece na Inter embutida, garantindo que o preview do editor seja idêntico ao JPG exportado.
 - Saída sempre em JPG (qualidade 90); nomes `screenshot_2026-08-02_14-30-05.jpg` com sufixos `_1`, `_2`… em caso de colisão; notificação de confirmação (balão da bandeja, com o nome e o ícone do RustShot) a cada captura salva.
+
+## Linha de comando
+
+O uso normal é pela bandeja e pelos atalhos globais. Para scripts e atalhos
+externos, o executável também aceita:
+
+```powershell
+rustshot                          # inicia na bandeja
+rustshot foto.png                 # abre a imagem no editor (idem --file)
+rustshot --clipboard              # abre a imagem da área de transferência
+rustshot --capture-fullscreen     # captura e salva, sem abrir janela
+rustshot --capture-fullscreen --copy --save
+rustshot --help                   # ajuda completa
+rustshot --version
+```
+
+Códigos de saída: `0` sucesso, `1` falha ao capturar ou abrir a imagem, `2`
+erro de uso. Região e janela não têm modo "sem janela": as duas exigem uma
+seleção na tela.
 
 ## Build
 
@@ -140,11 +160,11 @@ que você vê é o que sai no JPG.
 | `hotkeys.rs` | registro/re-registro dos atalhos globais |
 | `capture.rs` | enumeração de monitores e captura (GDI), composição, crop |
 | `overlay.rs` | viewports de seleção de região |
-| `editor/` | `ui.rs` (janela), `shapes.rs` (modelo das anotações), `document.rs` (log de operações + desfazer), `render.rs` e `raster/` (exportação) |
+| `editor/` | `ui/` (janela, toolbar, canvas, interação), `shapes.rs` (modelo das anotações), `document.rs` (log de operações + desfazer), `render.rs` e `raster/` (exportação), `redact.rs`, `spotlight.rs`, `cut.rs`, `backdrop.rs` (ferramentas que mexem em pixels), `session_file.rs` (edição gravada em disco) |
 | `settings.rs` | janela de configurações (RF-05) |
 | `theme.rs` | tema Fluent (Win11): paleta claro/escuro, cor de destaque, fontes, widgets |
 | `clipboard.rs` / `storage.rs` / `tray.rs` / `notify.rs` | cópia, salvamento, bandeja, notificações |
-| `platform/` | camada Win32 própria (shell/bandeja/atalhos, captura GDI, clipboard, registro, diálogos…) |
+| `platform/` | camada Win32 própria (shell/bandeja/atalhos, captura GDI, lista de janelas via DWM, leitura de imagem via GDI+, clipboard, registro, diálogos…) |
 | `jpeg/` / `imgbuf.rs` / `json.rs` / `error.rs` | codificador JPEG incorporado, buffer de imagem, JSON e erro próprios |
 
 ## Dependências

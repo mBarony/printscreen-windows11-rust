@@ -6,8 +6,7 @@ Histórico de versões do RustShot. Datas em 2026.
 
 Port das funcionalidades do
 [omasnap](https://github.com/tobi/omasnap), a ferramenta equivalente para
-Arch Linux. Esta leva cobre a fundação, a manipulação de anotações e as
-ferramentas de desenho vetoriais.
+Arch Linux.
 
 **Ferramentas novas**
 
@@ -28,8 +27,52 @@ ferramentas de desenho vetoriais.
   **pílula clara** opcional atrás, para o texto continuar legível sobre
   qualquer fundo.
 
+**Esconder, destacar, encurtar**
+
+- **Redação** (`D`): apaga uma região de vez. O modo padrão é um mosaico
+  **sintético** — as amostras servem só para descobrir os seis tons que
+  dominam a região, as posições delas são descartadas, e cada bloco recebe um
+  desses tons sorteado por um gerador semeado. Um pixelate por média, que é
+  como quase todo mundo faz, preserva informação e sobre texto deixa um
+  padrão que ataques de despixelização exploram; este não deixa. Há também o
+  modo de cor chapada.
+- **Holofote** (`O`): escurece o resto da imagem e amplia o que ficou dentro,
+  com recorte em elipse, retângulo ou retângulo arredondado. Ele amostra a
+  imagem **já redigida**, então ampliar uma área censurada não revela nada.
+- **Cortar faixa** (`X`): remove uma tira da imagem e junta o que sobrou,
+  para encurtar uma captura longa sem perder as pontas. As anotações
+  acompanham; as que estavam dentro da faixa encostam na costura.
+- **Fundos decorativos**: a captura sobre um degradê com sombra, em quatro
+  variações, do jeito que uma imagem de tela costuma ser publicada.
+
+**Captura**
+
+- **Captura por janela**: `Space` no overlay alterna entre arrastar uma
+  região e escolher uma janela; o ponteiro destaca a que está sob ele, as
+  setas navegam e `Enter` captura. `Ctrl+A` pega o monitor inteiro. A posição
+  do ponteiro em px aparece ao lado dele enquanto nada está selecionado.
+- **O mesmo atalho dispensa o overlay**: acioná-lo com a seleção na tela
+  fecha o overlay em vez de avisar que o app está ocupado. Com o editor
+  aberto o aviso continua — ali há trabalho que um atalho não pode descartar.
+
+**Abrir, recuperar, automatizar**
+
+- **Abrir imagens existentes**: `rustshot <imagem>` (ou arrastar o arquivo
+  sobre o executável) abre o editor direto sobre ela; `--clipboard` faz o
+  mesmo com a imagem da área de transferência.
+- **A edição sobrevive a um fechamento inesperado**: o editor grava a sessão
+  enquanto se trabalha, e o menu da bandeja oferece recuperá-la — com o
+  histórico de desfazer intacto, porque o que se grava é o log de operações e
+  não a imagem achatada.
+- **Linha de comando**: `--help`, `--version`, códigos de saída e
+  `--capture-fullscreen [--copy] [--save]`, que captura e sai sem abrir
+  janela.
+
 **Edição e fundação**
 
+- **Seleção múltipla**: arrastar a partir de um ponto vazio laça as
+  anotações que couberem inteiramente dentro; elas passam a se mover e a ser
+  apagadas em bloco, cada gesto como um único passo de desfazer.
 - **Anotações continuam editáveis depois de criadas.** A anotação
   selecionada ganha alças de redimensionamento — as oito da caixa nas formas
   com área, as duas pontas em linha e seta. `Shift` preserva a proporção num
@@ -47,8 +90,8 @@ ferramentas de desenho vetoriais.
   antiga é aplicada de vez à imagem de partida (descartá-la sem mais
   deixaria as anotações no espaço errado).
 - **O rasterizador da exportação ganhou preenchimento**, cantos arredondados
-  e traço contínuo por polilinha, que são a base das ferramentas ainda por
-  vir. O traço contínuo acumula a cobertura de todos os segmentos antes de
+  e traço contínuo por polilinha, que são a base das ferramentas acima. O
+  traço contínuo acumula a cobertura de todos os segmentos antes de
   compor, para as junções não ficarem mais escuras que o resto — o que
   apareceria em traços translúcidos.
 
@@ -56,7 +99,9 @@ Mudanças internas que podem interessar a quem lê o código: as anotações
 passaram de `Shape` para `Layer { id, shape, style }`, com identidade
 estável; `editor/raster.rs` virou o módulo `editor/raster/`; e
 `editor/ui.rs`, que tinha chegado a 1.620 linhas, virou o diretório
-`editor/ui/` com uma responsabilidade por arquivo.
+`editor/ui/` com uma responsabilidade por arquivo. O bloco de memória
+compartilhada entre residente e GUI passou de `RSS1` para `RSS2`, porque
+agora leva também a lista de janelas.
 
 ## v1.6.0 — 17/08
 

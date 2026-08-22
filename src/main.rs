@@ -82,6 +82,7 @@ fn main() {
             platform::imagefile::load(&path),
             &format!("Não foi possível abrir {}", path.display()),
         ),
+        Ok(cli::Mode::QuickCapture { copy, save }) => run_quick_capture(copy, save),
         Ok(cli::Mode::EditClipboard) => run_edit_image(
             platform::clipboard::get_image(),
             "Não foi possível ler a área de transferência",
@@ -96,6 +97,43 @@ fn main() {
     jobs::join_all();
     if code != 0 {
         std::process::exit(code);
+    }
+}
+
+/// Captura a tela e entrega o resultado sem abrir janela nenhuma.
+fn run_quick_capture(copy: bool, save: bool) -> i32 {
+    init_logging(false);
+    install_panic_hook();
+
+    let config = config::load().config;
+    let image = match capture::capture_fullscreen(config.fullscreen_scope) {
+        Ok(image) => image,
+        Err(err) => {
+            platform::msgbox::info("RustShot", &format!("Falha na captura\n\n{err:#}"));
+            return 1;
+        }
+    };
+
+    let mut failed = false;
+    if copy {
+        if let Err(err) = clipboard::copy_image(&image) {
+            log::error!("falha ao copiar: {err:#}");
+            failed = true;
+        }
+    }
+    if save {
+        match storage::write_image(&storage::SaveTarget::from_config(&config), &image) {
+            Ok(path) => log::info!("captura salva em {}", path.display()),
+            Err(err) => {
+                log::error!("falha ao salvar: {err:#}");
+                failed = true;
+            }
+        }
+    }
+    if failed {
+        1
+    } else {
+        0
     }
 }
 
@@ -369,11 +407,15 @@ USO:
     rustshot <imagem>             abre a imagem no editor de anotações
     rustshot --file <imagem>      idem, explícito
     rustshot --clipboard          abre a imagem da área de transferência
+    rustshot --capture-fullscreen [--copy] [--save]
+                                  captura a tela e sai, sem abrir janela
     rustshot --help               mostra esta ajuda
     rustshot --version            mostra a versão
 
-Com o app na bandeja, a captura é pelos atalhos globais configuráveis
-(por padrão Ctrl+PrtScr, Shift+PrtScr e Ctrl+Shift+PrtScr).
+Sem --copy nem --save, a captura de tela cheia é salva na pasta configurada.
+Região e janela exigem a seleção na tela, e por isso vêm pelos atalhos
+globais configuráveis (por padrão Ctrl+PrtScr, Shift+PrtScr e
+Ctrl+Shift+PrtScr) ou pelo menu da bandeja.
 
 CÓDIGOS DE SAÍDA:
     0  sucesso
@@ -388,6 +430,8 @@ CÓDIGOS DE SAÍDA:
         EditFile(std::path::PathBuf),
         /// Abrir o editor sobre a imagem que está na área de transferência.
         EditClipboard,
+        /// Capturar a tela e sair, sem janela nenhuma.
+        QuickCapture { copy: bool, save: bool },
         Gui(GuiRequest),
     }
 
@@ -415,6 +459,9 @@ CÓDIGOS DE SAÍDA:
 
         let mut file: Option<std::path::PathBuf> = None;
         let mut clipboard = false;
+        let mut fullscreen = false;
+        let mut copy = false;
+        let mut save = false;
 
         let mut args = args.peekable();
         if args.peek().is_none() {
@@ -452,6 +499,9 @@ CÓDIGOS DE SAÍDA:
                 }
                 "--file" => file = Some(std::path::PathBuf::from(value()?)),
                 "--clipboard" => clipboard = true,
+                "--capture-fullscreen" => fullscreen = true,
+                "--copy" => copy = true,
+                "--save" => save = true,
                 // Um caminho solto abre a imagem: é o que acontece ao
                 // arrastar um arquivo sobre o executável.
                 other if !other.starts_with('-') && file.is_none() => {
@@ -461,6 +511,18 @@ CÓDIGOS DE SAÍDA:
             }
         }
 
+        if fullscreen {
+            if clipboard || file.is_some() || kind.is_some() {
+                return Err("--capture-fullscreen não combina com outra origem".to_owned());
+            }
+            // Sem pedido explícito, salvar é o comportamento do atalho de
+            // tela cheia — a linha de comando não inventa outro.
+            let save = save || !copy;
+            return Ok(Mode::QuickCapture { copy, save });
+        }
+        if (copy || save) && kind.is_none() {
+            return Err("--copy e --save exigem --capture-fullscreen".to_owned());
+        }
         if clipboard && file.is_some() {
             return Err("--clipboard não combina com um arquivo".to_owned());
         }
@@ -559,6 +621,35 @@ mod tests {
             }
             other => panic!("esperado select, veio {}", std::any::type_name_of_val(&other)),
         }
+    }
+
+    #[test]
+    fn quick_capture_defaults_to_saving() {
+        let Mode::QuickCapture { copy, save } = parse(args("--capture-fullscreen")).unwrap()
+        else {
+            panic!("esperada captura rápida")
+        };
+        assert!(!copy && save, "sem pedido explícito, salvar é o padrão do atalho");
+
+        let Mode::QuickCapture { copy, save } =
+            parse(args("--capture-fullscreen --copy")).unwrap()
+        else {
+            panic!("esperada captura rápida")
+        };
+        assert!(copy && !save, "--copy sozinho não salva também");
+
+        let Mode::QuickCapture { copy, save } =
+            parse(args("--capture-fullscreen --copy --save")).unwrap()
+        else {
+            panic!("esperada captura rápida")
+        };
+        assert!(copy && save, "os dois juntos fazem os dois");
+    }
+
+    #[test]
+    fn quick_output_needs_something_to_capture() {
+        assert!(parse(args("--copy")).is_err());
+        assert!(parse(args("--capture-fullscreen --clipboard")).is_err());
     }
 
     #[test]

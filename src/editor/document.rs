@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use crate::imgbuf::RgbaImage;
 
+use super::cut::{self, Band};
 use super::redact;
 use super::spotlight::{self, Spotlight};
 use super::shapes::{Handle, Layer, Point, RedactionStyle, Shape, Style};
@@ -35,6 +36,8 @@ pub enum Op {
     Delete(Vec<u64>),
     /// Recorta a imagem e desloca as anotações junto.
     Crop { x: u32, y: u32, w: u32, h: u32 },
+    /// Remove uma faixa e junta o que sobrou, arrastando as anotações.
+    Cut(Band),
 }
 
 /// Uma redação aplicada, na forma que o replay compara para decidir se os
@@ -84,10 +87,17 @@ fn spotlights(layers: &[Layer]) -> Vec<Spotlight> {
 struct Baseline {
     image: Arc<RgbaImage>,
     layers: Vec<Layer>,
-    /// Recortes que já foram assados na imagem acima. Continuam contando na
-    /// assinatura: consolidar um recorte não muda o que se vê, então não
-    /// pode parecer uma mudança de enquadramento.
-    crops: Vec<(u32, u32, u32, u32)>,
+    /// Recortes e cortes já assados na imagem acima. Continuam contando na
+    /// assinatura: consolidar um deles não muda o que se vê, então não pode
+    /// parecer uma mudança de enquadramento.
+    crops: Vec<Reframe>,
+}
+
+/// Uma operação que muda o tamanho da imagem.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Reframe {
+    Crop(u32, u32, u32, u32),
+    Cut(Band),
 }
 
 pub struct Document {
@@ -115,7 +125,7 @@ pub struct Document {
     /// eles mudam. O replay reconstrói a imagem toda vez, então o `Arc` é
     /// sempre novo — comparar ponteiros faria o editor achar que a imagem
     /// mudou a cada anotação criada e jogar fora o zoom do usuário.
-    crops: Vec<(u32, u32, u32, u32)>,
+    crops: Vec<Reframe>,
     image_version: u64,
 
     /// Estado anterior a um arrasto em andamento. Fica fora do log: só vira
@@ -144,6 +154,12 @@ fn apply(op: &Op, image: &mut Arc<RgbaImage>, layers: &mut Vec<Layer>) {
             *image = Arc::new(image.crop(*x, *y, *w, *h));
             for layer in layers.iter_mut() {
                 layer.shape.translate(-(*x as f32), -(*y as f32));
+            }
+        }
+        Op::Cut(band) => {
+            *image = Arc::new(cut::remove_band(image, *band));
+            for layer in layers.iter_mut() {
+                layer.shape.shift_for_cut(*band);
             }
         }
     }
@@ -200,8 +216,12 @@ impl Document {
         let mut layers = self.baseline.layers.clone();
         let mut crops = self.baseline.crops.clone();
         for op in &self.ops[..self.index] {
-            if let Op::Crop { x, y, w, h } = op {
-                crops.push((*x, *y, *w, *h));
+            // Recortes e cortes mudam o tamanho da imagem: os dois entram na
+            // assinatura que decide se o enquadramento mudou.
+            match op {
+                Op::Crop { x, y, w, h } => crops.push(Reframe::Crop(*x, *y, *w, *h)),
+                Op::Cut(band) => crops.push(Reframe::Cut(*band)),
+                _ => {}
             }
             apply(op, &mut image, &mut layers);
         }
@@ -248,8 +268,10 @@ impl Document {
         self.index = self.ops.len();
         while self.ops.len() > MAX_OPS {
             let oldest = self.ops.remove(0);
-            if let Op::Crop { x, y, w, h } = oldest {
-                self.baseline.crops.push((x, y, w, h));
+            match oldest {
+                Op::Crop { x, y, w, h } => self.baseline.crops.push(Reframe::Crop(x, y, w, h)),
+                Op::Cut(band) => self.baseline.crops.push(Reframe::Cut(band)),
+                _ => {}
             }
             apply(&oldest, &mut self.baseline.image, &mut self.baseline.layers);
             self.index -= 1;
@@ -303,6 +325,11 @@ impl Document {
             *seed = redact::fresh_seed();
         }
         Some(self.push(shape, style))
+    }
+
+    /// Remove uma faixa da imagem e junta o que sobrou.
+    pub fn cut(&mut self, band: Band) {
+        self.commit(Op::Cut(band));
     }
 
     /// Recorta a imagem para `(x, y, w, h)` em px da imagem e desloca as
@@ -706,6 +733,34 @@ mod tests {
         assert!(doc.can_undo());
         doc.undo();
         assert!(doc.layers().is_empty() && !doc.can_undo());
+    }
+
+    #[test]
+    fn a_cut_shortens_the_image_and_drags_the_annotations_along() {
+        use crate::editor::cut::{Axis, Band};
+        let mut doc = doc(); // 64×48
+        doc.push(rect(0.0, 2.0), style()); // acima da faixa
+        doc.push(rect(0.0, 30.0), style()); // abaixo da faixa
+        doc.cut(Band { axis: Axis::Horizontal, start: 10, end: 20 });
+
+        assert_eq!(doc.visible_image().height(), 38, "10 linhas a menos");
+        let ys: Vec<f32> = doc
+            .layers()
+            .iter()
+            .map(|l| l.bbox().unwrap().0.y)
+            .collect();
+        assert_eq!(ys[0], 2.0, "o que estava antes não se move");
+        assert_eq!(ys[1], 20.0, "o que estava depois sobe pela faixa removida");
+    }
+
+    #[test]
+    fn a_cut_is_undoable_like_any_other_edit() {
+        use crate::editor::cut::{Axis, Band};
+        let mut doc = doc();
+        doc.cut(Band { axis: Axis::Vertical, start: 5, end: 25 });
+        assert_eq!(doc.visible_image().width(), 44);
+        doc.undo();
+        assert_eq!(doc.visible_image().width(), 64);
     }
 
     #[test]

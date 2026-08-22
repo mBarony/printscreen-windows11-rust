@@ -42,6 +42,8 @@ pub enum Tool {
     Text,
     /// Recorta a imagem para a região arrastada (issue #5).
     Crop,
+    /// Remove uma faixa da imagem e junta o que sobrou.
+    Cut,
 }
 
 impl Tool {
@@ -60,6 +62,7 @@ impl Tool {
             Self::Spotlight => "Holofote",
             Self::Text => "Texto",
             Self::Crop => "Recortar",
+            Self::Cut => "Cortar faixa",
         }
     }
 
@@ -193,6 +196,8 @@ pub struct Layer {
 }
 
 impl Layer {
+    /// Reservado: ver `Shape::shift_for_cut`.
+    ///
     /// `p` está a até `tol` px (espaço da imagem) do traço da anotação?
     ///
     /// `text_size` é o tamanho `(largura, altura)` do texto renderizado —
@@ -546,6 +551,25 @@ impl Handle {
 }
 
 impl Shape {
+    /// Reposiciona a forma depois de um corte, ponto a ponto.
+    pub fn shift_for_cut(&mut self, band: crate::editor::cut::Band) {
+        let mv = |p: &mut Point| crate::editor::cut::shift_point(p, band);
+        match self {
+            Self::Line { a, b } | Self::Arrow { a, b } => {
+                mv(a);
+                mv(b);
+            }
+            Self::Rect { min, max } | Self::Redaction { min, max, .. } => {
+                mv(min);
+                mv(max);
+            }
+            Self::Ellipse { center, .. } | Self::Spotlight { center, .. } => mv(center),
+            Self::Freehand { points, .. } => points.iter_mut().for_each(mv),
+            Self::Marker { center, .. } => mv(center),
+            Self::Text { anchor, .. } => mv(anchor),
+        }
+    }
+
     /// Desloca a forma inteira por `(dx, dy)`, em px da imagem (issue #2).
     pub fn translate(&mut self, dx: f32, dy: f32) {
         let mv = |p: &mut Point| {
@@ -682,7 +706,9 @@ pub fn shape_from_drag(
             // A semente é preenchida por quem cria, com uma fresca.
             Some(Shape::Redaction { min, max, seed: 0 })
         }
-        Tool::Marker | Tool::Eyedropper | Tool::Text | Tool::Select | Tool::Crop => None,
+        Tool::Marker | Tool::Eyedropper | Tool::Text | Tool::Select | Tool::Crop | Tool::Cut => {
+            None
+        }
     }
 }
 

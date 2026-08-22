@@ -4,10 +4,31 @@ Histórico de versões do RustShot. Datas em 2026.
 
 ## Não lançado
 
-Primeira leva do port das funcionalidades do
+Port das funcionalidades do
 [omasnap](https://github.com/tobi/omasnap), a ferramenta equivalente para
-Arch Linux. Esta etapa cobre a fundação e a manipulação de anotações; as
-ferramentas de desenho novas vêm a seguir.
+Arch Linux. Esta leva cobre a fundação, a manipulação de anotações e as
+ferramentas de desenho vetoriais.
+
+**Ferramentas novas**
+
+- **Mão livre** (`F`) e **marca-texto** (`H`). O traço é suavizado por
+  Béziers com pontos médios e amostrado com filtro de 1,5 px, para o gesto
+  não tremer. O marca-texto é o mesmo traço 3× mais grosso e translúcido:
+  ele marca sem esconder o que está embaixo.
+- **Marcador numerado** (`N`): um clique carimba um contador. A numeração
+  acompanha o que está na tela — apagar o de maior número devolve aquele
+  número ao próximo, em vez de deixar buraco na sequência.
+- **Conta-gotas** (`I`): toma a cor de um pixel da imagem e volta sozinho
+  para a ferramenta anterior, preservando a seleção — amostrar uma cor é
+  para aplicá-la em algo.
+- **Retângulo e elipse preenchidos**, e cantos arredondados no retângulo.
+  A forma cheia passa a ser agarrável pelo miolo; a vazada continua pegando
+  só pelo contorno, porque o interior dela ainda é a imagem.
+- **Texto multilinha** (`Ctrl+Enter` confirma, `Enter` insere linha) com uma
+  **pílula clara** opcional atrás, para o texto continuar legível sobre
+  qualquer fundo.
+
+**Edição e fundação**
 
 - **Anotações continuam editáveis depois de criadas.** A anotação
   selecionada ganha alças de redimensionamento — as oito da caixa nas formas
@@ -33,7 +54,9 @@ ferramentas de desenho novas vêm a seguir.
 
 Mudanças internas que podem interessar a quem lê o código: as anotações
 passaram de `Shape` para `Layer { id, shape, style }`, com identidade
-estável; `editor/raster.rs` virou o módulo `editor/raster/`.
+estável; `editor/raster.rs` virou o módulo `editor/raster/`; e
+`editor/ui.rs`, que tinha chegado a 1.620 linhas, virou o diretório
+`editor/ui/` com uma responsabilidade por arquivo.
 
 ## v1.6.0 — 17/08
 

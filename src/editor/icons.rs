@@ -22,6 +22,7 @@ pub enum Icon {
     Freehand,
     Highlighter,
     Marker,
+    Eyedropper,
     Fill,
     Text,
     Crop,
@@ -44,13 +45,14 @@ impl Icon {
             Tool::Freehand => Self::Freehand,
             Tool::Highlighter => Self::Highlighter,
             Tool::Marker => Self::Marker,
+            Tool::Eyedropper => Self::Eyedropper,
             Tool::Text => Self::Text,
             Tool::Crop => Self::Crop,
         }
     }
 
     #[cfg(test)]
-    pub const ALL: [Icon; 17] = [
+    pub const ALL: [Icon; 18] = [
         Icon::Move,
         Icon::Line,
         Icon::Arrow,
@@ -59,6 +61,7 @@ impl Icon {
         Icon::Freehand,
         Icon::Highlighter,
         Icon::Marker,
+        Icon::Eyedropper,
         Icon::Fill,
         Icon::Text,
         Icon::Crop,
@@ -81,6 +84,7 @@ impl Icon {
             Icon::Freehand => "freehand",
             Icon::Highlighter => "highlighter",
             Icon::Marker => "marker",
+            Icon::Eyedropper => "eyedropper",
             Icon::Fill => "fill",
             Icon::Text => "text",
             Icon::Crop => "crop",
@@ -168,6 +172,12 @@ pub fn geometry(icon: Icon) -> Vec<Primitive> {
         Icon::Marker => vec![
             Stroke(ellipse(0.5, 0.5, 0.38, 0.38)),
             Stroke(vec![(0.42, 0.38), (0.52, 0.30), (0.52, 0.70)]),
+        ],
+        // Pipeta na diagonal: bulbo, corpo e a ponta que toca a imagem.
+        Icon::Eyedropper => vec![
+            Fill(vec![(0.62, 0.10), (0.90, 0.38), (0.74, 0.54), (0.46, 0.26)]),
+            Stroke(vec![(0.52, 0.32), (0.20, 0.64)]),
+            Fill(vec![(0.08, 0.92), (0.14, 0.62), (0.38, 0.86)]),
         ],
         // Quadrado cheio dentro de um vazado — o par contorno/preenchimento.
         Icon::Fill => vec![

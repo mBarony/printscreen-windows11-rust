@@ -33,6 +33,8 @@ pub enum Tool {
     Highlighter,
     /// Contador numerado, colocado com um clique.
     Marker,
+    /// Amostra uma cor da imagem e volta para a ferramenta anterior.
+    Eyedropper,
     Text,
     /// Recorta a imagem para a região arrastada (issue #5).
     Crop,
@@ -49,6 +51,7 @@ impl Tool {
             Self::Freehand => "Mão livre",
             Self::Highlighter => "Marca-texto",
             Self::Marker => "Marcador",
+            Self::Eyedropper => "Conta-gotas",
             Self::Text => "Texto",
             Self::Crop => "Recortar",
         }
@@ -591,7 +594,7 @@ pub fn shape_from_drag(
         Tool::Freehand | Tool::Highlighter => None,
         // O contador é colocado num clique; texto, mover e recortar têm
         // fluxos próprios.
-        Tool::Marker | Tool::Text | Tool::Select | Tool::Crop => None,
+        Tool::Marker | Tool::Eyedropper | Tool::Text | Tool::Select | Tool::Crop => None,
     }
 }
 

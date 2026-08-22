@@ -187,8 +187,16 @@ fn select_tool(session: &mut EditorSession, tool: Tool) {
     // teclado) cancela o arrasto — um `drag` órfão viraria forma espúria.
     session.drag = None;
     cancel_move(session);
+    // O conta-gotas é uma escapada, não uma troca: guarda de onde veio e
+    // preserva a seleção, já que a cor amostrada é justamente para aplicar
+    // nela. Qualquer outra ferramenta desfaz a seleção como sempre.
+    if tool == Tool::Eyedropper {
+        session.tool_before_eyedropper = Some(session.tool);
+    } else {
+        session.tool_before_eyedropper = None;
+        session.selected = None;
+    }
     session.tool = tool;
-    session.selected = None;
     // Sair da ferramenta Recortar descarta a região ainda não confirmada.
     session.crop_pending = None;
     // Trocar de ferramenta confirma o texto pendente (ou apenas fecha a
@@ -652,6 +660,21 @@ fn canvas(ctx: &egui::Context, session: &mut EditorSession) {
 
             if session.text_input.is_none() && !session.confirm_discard {
                 match session.tool {
+                    // Amostra a cor sob o cursor e devolve a ferramenta.
+                    Tool::Eyedropper => {
+                        if response.hovered() {
+                            ctx.output_mut(|o| o.cursor_icon = CursorIcon::Crosshair);
+                        }
+                        if response.clicked_by(PointerButton::Primary) {
+                            if let Some(p) = response
+                                .interact_pointer_pos()
+                                .or_else(|| response.hover_pos())
+                                .map(|p| clamp_img(to_screen.inverse(p)))
+                            {
+                                pick_color(ctx, session, p);
+                            }
+                        }
+                    }
                     // O contador é carimbado num clique, sem arrasto.
                     Tool::Marker => {
                         if response.hovered() {
@@ -1164,6 +1187,28 @@ fn settle_edit_run(ctx: &egui::Context, session: &mut EditorSession) {
 fn close_edit_run(session: &mut EditorSession) {
     if session.edit_run_until.take().is_some() {
         session.doc.end_move();
+    }
+}
+
+/// Toma a cor do pixel da imagem em `p` e volta à ferramenta anterior.
+///
+/// A cor amostrada é sempre opaca: o que interessa é o tom que está na tela,
+/// não a transparência do buffer.
+fn pick_color(ctx: &egui::Context, session: &mut EditorSession, p: Point) {
+    let image = session.doc.image();
+    let (w, h) = (image.width(), image.height());
+    if w == 0 || h == 0 {
+        return;
+    }
+    let x = (p.x.max(0.0) as u32).min(w - 1);
+    let y = (p.y.max(0.0) as u32).min(h - 1);
+    let sample = image.pixel(x, y);
+
+    session.color = [sample[0], sample[1], sample[2], 255];
+    restyle_selection(ctx, session);
+    // A seleção é preservada de propósito: tirar uma cor é para aplicá-la.
+    if let Some(previous) = session.tool_before_eyedropper.take() {
+        session.tool = previous;
     }
 }
 

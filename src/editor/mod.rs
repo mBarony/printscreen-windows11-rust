@@ -31,7 +31,7 @@ pub const WINDOW_TITLE: &str = "RustShot — Editor";
 pub const FOCUS_CLAIM_FRAMES: u8 = 12;
 
 /// Quantidade de ferramentas do editor — o tamanho da tabela de atalhos.
-pub const TOOL_COUNT: usize = 10;
+pub const TOOL_COUNT: usize = 11;
 
 /// Tolerância do hit-test ao clicar numa anotação com a ferramenta Mover,
 /// em pontos do egui (convertida para px da imagem pelo zoom).
@@ -143,6 +143,9 @@ pub struct EditorSession {
     pub ctrl_wheel_zoom: bool,
     pub drag: Option<DragPreview>,
     pub text_input: Option<TextInput>,
+    /// Ferramenta a retomar quando o conta-gotas terminar. Tirar uma cor não
+    /// pode custar o lugar no trabalho.
+    pub tool_before_eyedropper: Option<Tool>,
     /// Índice da anotação selecionada (ferramenta Mover).
     pub selected: Option<usize>,
     /// Arrasto de reposicionamento em andamento (ferramenta Mover).
@@ -187,6 +190,7 @@ impl EditorSession {
             ctrl_wheel_zoom: defaults.ctrl_wheel == config::CtrlWheel::Zoom,
             drag: None,
             text_input: None,
+            tool_before_eyedropper: None,
             selected: None,
             move_drag: None,
             resize_drag: None,
@@ -233,6 +237,7 @@ pub fn resolve_tool_keys(config: &config::ToolKeysConfig) -> [(Tool, Option<egui
         (Tool::Freehand, &config.freehand, &defaults.freehand),
         (Tool::Highlighter, &config.highlighter, &defaults.highlighter),
         (Tool::Marker, &config.marker, &defaults.marker),
+        (Tool::Eyedropper, &config.eyedropper, &defaults.eyedropper),
         (Tool::Text, &config.text, &defaults.text),
         (Tool::Crop, &config.crop, &defaults.crop),
     ];
@@ -271,8 +276,9 @@ mod tests {
         assert_eq!(keys[5], (Tool::Freehand, Some(egui::Key::F)));
         assert_eq!(keys[6], (Tool::Highlighter, Some(egui::Key::H)));
         assert_eq!(keys[7], (Tool::Marker, Some(egui::Key::N)));
-        assert_eq!(keys[8], (Tool::Text, Some(egui::Key::T)));
-        assert_eq!(keys[9], (Tool::Crop, Some(egui::Key::C)));
+        assert_eq!(keys[8], (Tool::Eyedropper, Some(egui::Key::I)));
+        assert_eq!(keys[9], (Tool::Text, Some(egui::Key::T)));
+        assert_eq!(keys[10], (Tool::Crop, Some(egui::Key::C)));
     }
 
     #[test]

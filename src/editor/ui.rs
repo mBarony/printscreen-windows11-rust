@@ -710,13 +710,16 @@ fn canvas(ctx: &egui::Context, session: &mut EditorSession) {
                         if response.hovered() {
                             ctx.output_mut(|o| o.cursor_icon = CursorIcon::Crosshair);
                         }
-                        let shift = ui.input(|i| i.modifiers.shift);
+                        // Relidos a cada quadro: dá para ligar e desligar a
+                        // restrição no meio do arrasto, sem recomeçar.
+                        let (shift, alt) = ui.input(|i| (i.modifiers.shift, i.modifiers.alt));
                         if session.drag.is_none() && primary_pressed && response.hovered() {
                             if let Some(origin) =
                                 press_origin.or_else(|| response.interact_pointer_pos())
                             {
                                 let p = clamp_img(to_screen.inverse(origin));
-                                session.drag = Some(DragPreview { start: p, current: p, shift });
+                                session.drag =
+                                    Some(DragPreview { start: p, current: p, shift, alt });
                                 // Começar uma área nova descarta a anterior.
                                 session.crop_pending = None;
                             }
@@ -726,6 +729,7 @@ fn canvas(ctx: &egui::Context, session: &mut EditorSession) {
                                 drag.current = clamp_img(to_screen.inverse(pos));
                             }
                             drag.shift = shift;
+                            drag.alt = alt;
                         }
                         if primary_released {
                             if let Some(drag) = session.drag.take() {
@@ -745,6 +749,7 @@ fn canvas(ctx: &egui::Context, session: &mut EditorSession) {
                                         drag.start,
                                         drag.current,
                                         drag.shift,
+                                        drag.alt,
                                     ) {
                                         session.doc.push(shape, session.style());
                                     }
@@ -778,7 +783,7 @@ fn canvas(ctx: &egui::Context, session: &mut EditorSession) {
             }
             if let Some(drag) = &session.drag {
                 if let Some(shape) =
-                    shape_from_drag(session.tool, drag.start, drag.current, drag.shift)
+                    shape_from_drag(session.tool, drag.start, drag.current, drag.shift, drag.alt)
                 {
                     // A pré-visualização ainda não é uma anotação do
                     // documento: recebe um id provisório só para reusar o

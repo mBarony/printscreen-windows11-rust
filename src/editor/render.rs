@@ -164,7 +164,7 @@ mod tests {
 
     fn dragged(tool: Tool, a: (f32, f32), b: (f32, f32)) -> Layer {
         let shape =
-            shape_from_drag(tool, Point::new(a.0, a.1), Point::new(b.0, b.1), false).unwrap();
+            shape_from_drag(tool, Point::new(a.0, a.1), Point::new(b.0, b.1), false, false).unwrap();
         layer(shape)
     }
 

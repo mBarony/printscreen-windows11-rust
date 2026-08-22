@@ -79,7 +79,10 @@ pub const PALETTE: [[u8; 4]; 8] = [
 pub struct DragPreview {
     pub start: Point,
     pub current: Point,
+    /// Restringe a forma (45°, quadrado, círculo).
     pub shift: bool,
+    /// Faz o ponto de partida virar o centro da forma.
+    pub alt: bool,
 }
 
 /// Caixa de texto inline da ferramenta Texto.

@@ -379,10 +379,19 @@ fn point_in_triangle(p: Point, t: [Point; 3]) -> bool {
 // ---------------------------------------------------------------------------
 
 /// Constrói a forma resultante de um arrasto `a → b` com a ferramenta dada.
+///
 /// `shift` restringe: linha/seta em ângulos de 45°, retângulo em quadrado,
-/// elipse em círculo. Retorna `None` para as ferramentas Texto, Mover e
-/// Recortar (fluxos próprios).
-pub fn shape_from_drag(tool: Tool, a: Point, mut b: Point, shift: bool) -> Option<Shape> {
+/// elipse em círculo. `alt` faz o ponto de partida virar o **centro** da
+/// forma em vez de um canto — só vale para retângulo e elipse, já que uma
+/// linha centrada não quer dizer nada. Retorna `None` para as ferramentas
+/// Texto, Mover e Recortar (fluxos próprios).
+pub fn shape_from_drag(
+    tool: Tool,
+    a: Point,
+    mut b: Point,
+    shift: bool,
+    alt: bool,
+) -> Option<Shape> {
     match tool {
         Tool::Line | Tool::Arrow => {
             if shift {
@@ -398,14 +407,14 @@ pub fn shape_from_drag(tool: Tool, a: Point, mut b: Point, shift: bool) -> Optio
             if shift {
                 b = snap_square(a, b);
             }
-            let (min, max) = normalize(a, b);
+            let (min, max) = normalize(centered_start(a, b, alt), b);
             Some(Shape::Rect { min, max })
         }
         Tool::Ellipse => {
             if shift {
                 b = snap_square(a, b);
             }
-            let (min, max) = normalize(a, b);
+            let (min, max) = normalize(centered_start(a, b, alt), b);
             let rx = (max.x - min.x) / 2.0;
             let ry = (max.y - min.y) / 2.0;
             Some(Shape::Ellipse {
@@ -415,6 +424,16 @@ pub fn shape_from_drag(tool: Tool, a: Point, mut b: Point, shift: bool) -> Optio
             })
         }
         Tool::Text | Tool::Select | Tool::Crop => None,
+    }
+}
+
+/// Espelha o ponto de partida em torno de si mesmo, transformando-o no centro
+/// da forma: o canto de origem passa a ser o oposto de onde o ponteiro está.
+fn centered_start(a: Point, b: Point, alt: bool) -> Point {
+    if alt {
+        Point::new(2.0 * a.x - b.x, 2.0 * a.y - b.y)
+    } else {
+        a
     }
 }
 
@@ -503,7 +522,7 @@ mod tests {
 
     #[test]
     fn shift_makes_square() {
-        let s = shape_from_drag(Tool::Rect, Point::new(10.0, 10.0), Point::new(50.0, 20.0), true)
+        let s = shape_from_drag(Tool::Rect, Point::new(10.0, 10.0), Point::new(50.0, 20.0), true, false)
             .unwrap();
         match s {
             Shape::Rect { min, max } => assert_eq!(max.x - min.x, max.y - min.y),
@@ -513,7 +532,7 @@ mod tests {
 
     #[test]
     fn shift_snaps_line_to_45() {
-        let s = shape_from_drag(Tool::Line, Point::new(0.0, 0.0), Point::new(100.0, 8.0), true)
+        let s = shape_from_drag(Tool::Line, Point::new(0.0, 0.0), Point::new(100.0, 8.0), true, false)
             .unwrap();
         match s {
             Shape::Line { b, .. } => {
@@ -611,12 +630,37 @@ mod tests {
     fn crop_and_select_have_no_drag_shape() {
         for tool in [Tool::Crop, Tool::Select, Tool::Text] {
             assert!(
-                shape_from_drag(tool, Point::new(0.0, 0.0), Point::new(10.0, 10.0), false)
+                shape_from_drag(tool, Point::new(0.0, 0.0), Point::new(10.0, 10.0), false, false)
                     .is_none(),
                 "{} tem fluxo próprio",
                 tool.label()
             );
         }
+    }
+
+    #[test]
+    fn alt_draws_from_the_center() {
+        // Sem Alt o ponto de partida é um canto; com Alt, o centro.
+        let (a, b) = (Point::new(50.0, 50.0), Point::new(70.0, 60.0));
+        let corner = shape_from_drag(Tool::Rect, a, b, false, false).unwrap();
+        let centered = shape_from_drag(Tool::Rect, a, b, false, true).unwrap();
+        match (corner, centered) {
+            (Shape::Rect { min: c0, max: c1 }, Shape::Rect { min: m0, max: m1 }) => {
+                assert_eq!(((c0.x, c0.y), (c1.x, c1.y)), ((50.0, 50.0), (70.0, 60.0)));
+                assert_eq!(((m0.x, m0.y), (m1.x, m1.y)), ((30.0, 40.0), (70.0, 60.0)));
+                let center = ((m0.x + m1.x) / 2.0, (m0.y + m1.y) / 2.0);
+                assert_eq!(center, (50.0, 50.0), "o press vira o centro");
+            }
+            _ => panic!("esperava Rect"),
+        }
+    }
+
+    #[test]
+    fn alt_does_not_affect_lines() {
+        let (a, b) = (Point::new(0.0, 0.0), Point::new(10.0, 10.0));
+        let plain = shape_from_drag(Tool::Line, a, b, false, false).unwrap();
+        let with_alt = shape_from_drag(Tool::Line, a, b, false, true).unwrap();
+        assert_eq!(plain, with_alt, "uma linha centrada não quer dizer nada");
     }
 
     #[test]

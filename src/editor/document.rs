@@ -291,7 +291,7 @@ mod tests {
     }
 
     fn line() -> Shape {
-        shape_from_drag(Tool::Line, Point::new(0.0, 0.0), Point::new(1.0, 1.0), false).unwrap()
+        shape_from_drag(Tool::Line, Point::new(0.0, 0.0), Point::new(1.0, 1.0), false, false).unwrap()
     }
 
     fn rect(x: f32, y: f32) -> Shape {

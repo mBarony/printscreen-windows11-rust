@@ -19,7 +19,7 @@ use crate::editor::{
 };
 use super::{cancel_move, reset_view, ToScreen};
 use super::interact::{
-    begin_select_drag, handle_at, handle_cursor, pick_color,
+    begin_select_drag, finish_marquee, handle_at, handle_cursor, pick_color,
     restyle_selection, selected_is_text,
 };
 use super::paint::{
@@ -256,6 +256,14 @@ pub(super) fn draw(ctx: &egui::Context, session: &mut EditorSession) {
                                 begin_select_drag(ctx, session, to_screen, origin);
                             }
                         }
+                        if session.marquee.is_some() {
+                            if let Some(pos) = latest_pos {
+                                let p = to_screen.inverse(pos);
+                                if let Some((_, to)) = &mut session.marquee {
+                                    *to = p;
+                                }
+                            }
+                        }
                         if let Some(rz) = &session.resize_drag {
                             if let Some(pos) = latest_pos {
                                 let constrain = ui.input(|i| i.modifiers.shift);
@@ -263,18 +271,21 @@ pub(super) fn draw(ctx: &egui::Context, session: &mut EditorSession) {
                                 session.doc.resize(rz.index, rz.handle, p, constrain);
                             }
                         }
-                        if let Some(mv) = &mut session.move_drag {
-                            if let Some(pos) = latest_pos {
-                                let p = to_screen.inverse(pos);
-                                let (dx, dy) = (p.x - mv.last.x, p.y - mv.last.y);
-                                if dx != 0.0 || dy != 0.0 {
-                                    session.doc.translate(mv.index, dx, dy);
+                        // Move o conjunto inteiro, não só a anotação clicada.
+                        if let (Some(mv), Some(pos)) = (&session.move_drag, latest_pos) {
+                            let p = to_screen.inverse(pos);
+                            let (dx, dy) = (p.x - mv.last.x, p.y - mv.last.y);
+                            if dx != 0.0 || dy != 0.0 {
+                                let picked = session.selection.clone();
+                                session.doc.translate_all(&picked, dx, dy);
+                                if let Some(mv) = &mut session.move_drag {
                                     mv.travel += (dx * dx + dy * dy).sqrt();
                                     mv.last = p;
                                 }
                             }
                         }
                         if primary_released {
+                            finish_marquee(session);
                             // Um arrasto de alça que não mudou nada não vira
                             // histórico: `end_move` só registra o que mudou.
                             if session.resize_drag.take().is_some() {
@@ -459,10 +470,34 @@ pub(super) fn draw(ctx: &egui::Context, session: &mut EditorSession) {
             // no painter sem clip, para continuar visível se a anotação foi
             // arrastada para fora da imagem.
             if session.tool == Tool::Select {
-                if let Some(layer) = session.selected.and_then(|i| session.doc.layers().get(i)) {
-                    let color = ui.visuals().selection.stroke.color;
-                    draw_selection_outline(ctx, &painter, layer, to_screen, color);
-                    draw_handles(&painter, layer, to_screen, ui.visuals().selection.bg_fill);
+                let color = ui.visuals().selection.stroke.color;
+                for index in &session.selection {
+                    if let Some(layer) = session.doc.layers().get(*index) {
+                        draw_selection_outline(ctx, &painter, layer, to_screen, color);
+                    }
+                }
+                // Alças só com uma anotação: com várias, não haveria o que
+                // redimensionar sem inventar uma regra.
+                if session.selection.len() == 1 {
+                    if let Some(layer) =
+                        session.selected.and_then(|i| session.doc.layers().get(i))
+                    {
+                        draw_handles(&painter, layer, to_screen, ui.visuals().selection.bg_fill);
+                    }
+                }
+                if let Some((from, to)) = session.marquee {
+                    let area = Rect::from_two_pos(to_screen.pos(from), to_screen.pos(to));
+                    painter.rect_filled(
+                        area,
+                        CornerRadius::ZERO,
+                        ui.visuals().selection.bg_fill.gamma_multiply(0.25),
+                    );
+                    painter.rect_stroke(
+                        area,
+                        CornerRadius::ZERO,
+                        Stroke::new(1.0_f32, color),
+                        StrokeKind::Inside,
+                    );
                 }
             }
 

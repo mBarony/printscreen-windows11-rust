@@ -63,15 +63,18 @@ pub(super) fn handle_layer_keys(ctx: &egui::Context, session: &mut EditorSession
 
     if delete {
         close_edit_run(session);
+        let picked = std::mem::take(&mut session.selection);
         session.selected = None;
-        session.doc.delete(index);
+        session.doc.delete_all(&picked);
         return;
     }
     if duplicate {
         close_edit_run(session);
         let (dx, dy) = duplicate_offset(session, index);
         if session.doc.duplicate(index, dx, dy).is_some() {
-            session.selected = Some(session.doc.layers().len() - 1);
+            let copy = session.doc.layers().len() - 1;
+            session.selected = Some(copy);
+            session.selection = vec![copy];
         }
         return;
     }
@@ -80,7 +83,8 @@ pub(super) fn handle_layer_keys(ctx: &egui::Context, session: &mut EditorSession
         if session.edit_run_until.is_none() {
             session.doc.begin_move();
         }
-        session.doc.translate(index, dx, dy);
+        let picked = session.selection.clone();
+        session.doc.translate_all(&picked, dx, dy);
         session.edit_run_until = Some(now + NUDGE_COALESCE_SECS);
     }
 }
@@ -232,16 +236,43 @@ pub(super) fn begin_select_drag(
         .rev() // a mais recente (pintada por cima) vence
         .find(|(_, layer)| hit_test(ctx, layer, p, tol, ts))
         .map(|(index, _)| index);
-    session.selected = hit;
-    if let Some(index) = hit {
-        session.doc.begin_move();
-        session.move_drag = Some(MoveDrag { index, last: p, travel: 0.0 });
+    match hit {
+        Some(index) => {
+            // Clicar numa anotação já selecionada preserva o conjunto: é
+            // assim que se arrasta o bloco inteiro depois de laçá-lo.
+            if !session.selection.contains(&index) {
+                session.selection = vec![index];
+            }
+            session.selected = Some(index);
+            session.doc.begin_move();
+            session.move_drag = Some(MoveDrag { last: p, travel: 0.0 });
+        }
+        None => {
+            // Vazio: começa um laço. A seleção antiga só cai quando o laço
+            // termina, para um clique errado não custar o trabalho de seleção.
+            session.selected = None;
+            session.marquee = Some((p, p));
+        }
     }
+}
+
+/// Fecha o laço: seleciona tudo o que couber inteiramente dentro dele.
+pub(super) fn finish_marquee(session: &mut EditorSession) {
+    let Some((from, to)) = session.marquee.take() else {
+        return;
+    };
+    let (min, max) = crate::editor::shapes::normalize(from, to);
+    session.selection = session.doc.layers_within(min, max);
+    session.selected = session.selection.last().copied();
 }
 
 /// Alça da anotação selecionada sob o ponteiro, se houver — a mais próxima,
 /// para alças vizinhas não disputarem o mesmo clique.
 pub(super) fn handle_at(session: &EditorSession, ts: ToScreen, pos: Pos2) -> Option<(usize, Handle)> {
+    // Só há alças com uma anotação selecionada.
+    if session.selection.len() != 1 {
+        return None;
+    }
     let index = session.selected?;
     let layer = session.doc.layers().get(index)?;
     let p = ts.inverse(pos);

@@ -104,8 +104,6 @@ pub struct TextInput {
 /// Arrasto de reposicionamento de uma anotação existente (ferramenta Mover,
 /// issue #2).
 pub struct MoveDrag {
-    /// Índice da forma em `stack.shapes()`.
-    pub index: usize,
     /// Última posição do ponteiro, em px da imagem.
     pub last: Point,
     /// Distância acumulada do arrasto, em px da imagem — distingue clique
@@ -159,8 +157,13 @@ pub struct EditorSession {
     /// Ferramenta a retomar quando o conta-gotas terminar. Tirar uma cor não
     /// pode custar o lugar no trabalho.
     pub tool_before_eyedropper: Option<Tool>,
-    /// Índice da anotação selecionada (ferramenta Mover).
+    /// Anotação principal da seleção — é quem mostra as alças.
     pub selected: Option<usize>,
+    /// Seleção inteira. Com mais de uma anotação só o movimento em bloco e a
+    /// exclusão fazem sentido; alças exigiriam decidir o que redimensionar.
+    pub selection: Vec<usize>,
+    /// Laço de seleção em andamento, em px da imagem.
+    pub marquee: Option<(Point, Point)>,
     /// Arrasto de reposicionamento em andamento (ferramenta Mover).
     pub move_drag: Option<MoveDrag>,
     /// Arrasto de uma alça de redimensionamento em andamento.
@@ -210,6 +213,8 @@ impl EditorSession {
             text_input: None,
             tool_before_eyedropper: None,
             selected: None,
+            selection: Vec::new(),
+            marquee: None,
             move_drag: None,
             resize_drag: None,
             edit_run_until: None,

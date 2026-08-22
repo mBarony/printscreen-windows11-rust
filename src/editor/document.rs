@@ -368,12 +368,16 @@ impl Document {
             .map_or(1, |highest| highest + 1)
     }
 
-    /// Remove a anotação de índice `index`.
-    pub fn delete(&mut self, index: usize) {
-        let Some(layer) = self.layers.get(index) else {
-            return;
-        };
-        self.commit(Op::Delete(vec![layer.id]));
+    /// Remove as anotações dos índices dados — uma única operação, para o
+    /// desfazer trazer todas de volta de uma vez.
+    pub fn delete_all(&mut self, indices: &[usize]) {
+        let ids: Vec<u64> = indices
+            .iter()
+            .filter_map(|i| self.layers.get(*i).map(|l| l.id))
+            .collect();
+        if !ids.is_empty() {
+            self.commit(Op::Delete(ids));
+        }
     }
 
     /// Duplica a anotação de índice `index`, deslocada por `(dx, dy)`.
@@ -409,10 +413,12 @@ impl Document {
         self.pending = Some(self.layers.clone());
     }
 
-    /// Deslocamento incremental da anotação `index` durante o arrasto.
-    pub fn translate(&mut self, index: usize, dx: f32, dy: f32) {
-        if let Some(layer) = self.layers.get_mut(index) {
-            layer.shape.translate(dx, dy);
+    /// Deslocamento incremental das anotações durante o arrasto.
+    pub fn translate_all(&mut self, indices: &[usize], dx: f32, dy: f32) {
+        for index in indices {
+            if let Some(layer) = self.layers.get_mut(*index) {
+                layer.shape.translate(dx, dy);
+            }
         }
     }
 
@@ -422,6 +428,23 @@ impl Document {
         if let Some(layer) = self.layers.get_mut(index) {
             layer.resize(handle, to, constrain);
         }
+    }
+
+    /// Anotações inteiramente dentro do retângulo — o critério do marquee.
+    ///
+    /// Contenção e não interseção: passar o laço por cima de meia dúzia de
+    /// anotações para pegar uma só seria o oposto do esperado.
+    pub fn layers_within(&self, min: Point, max: Point) -> Vec<usize> {
+        self.layers
+            .iter()
+            .enumerate()
+            .filter(|(_, layer)| {
+                layer.bbox().is_some_and(|(lo, hi)| {
+                    lo.x >= min.x && lo.y >= min.y && hi.x <= max.x && hi.y <= max.y
+                })
+            })
+            .map(|(i, _)| i)
+            .collect()
     }
 
     /// Troca o estilo da anotação `index`. Também só entra no histórico ao
@@ -550,8 +573,8 @@ mod tests {
 
         // Movimento real: um único ponto de undo para o arrasto inteiro.
         doc.begin_move();
-        doc.translate(0, 3.0, 0.0);
-        doc.translate(0, 2.0, 4.0);
+        doc.translate_all(&[0], 3.0, 0.0);
+        doc.translate_all(&[0], 2.0, 4.0);
         doc.end_move();
         assert_eq!(shapes(&doc), vec![rect(5.0, 4.0)]);
 
@@ -562,7 +585,7 @@ mod tests {
 
         // Movimento abortado no meio: posição restaurada, histórico intacto.
         doc.begin_move();
-        doc.translate(0, 100.0, 100.0);
+        doc.translate_all(&[0], 100.0, 100.0);
         doc.abort_move();
         assert_eq!(shapes(&doc), vec![rect(5.0, 4.0)]);
 
@@ -642,12 +665,12 @@ mod tests {
 
         // Apagar o maior devolve o número: a sequência acompanha a tela, não
         // o histórico.
-        doc.delete(2);
+        doc.delete_all(&[2]);
         assert_eq!(doc.next_marker(), 3);
 
         // Apagar um do meio não renumera os outros nem reusa o buraco.
         doc.push(marker(3), style());
-        doc.delete(1);
+        doc.delete_all(&[1]);
         assert_eq!(doc.next_marker(), 4);
     }
 
@@ -729,11 +752,47 @@ mod tests {
     }
 
     #[test]
+    fn the_marquee_takes_what_is_wholly_inside_it() {
+        // Contenção e não interseção: encostar o laço numa anotação não a
+        // seleciona.
+        let mut doc = doc();
+        doc.push(rect(5.0, 5.0), style());   // 5..15 — dentro
+        doc.push(rect(30.0, 5.0), style());  // 30..40 — só encosta
+        let inside = doc.layers_within(Point::new(0.0, 0.0), Point::new(20.0, 20.0));
+        assert_eq!(inside, vec![0]);
+    }
+
+    #[test]
+    fn deleting_a_selection_is_a_single_undo_step() {
+        let mut doc = doc();
+        doc.push(rect(0.0, 0.0), style());
+        doc.push(rect(20.0, 0.0), style());
+        doc.push(rect(40.0, 0.0), style());
+        doc.delete_all(&[0, 2]);
+        assert_eq!(doc.layers().len(), 1);
+        doc.undo();
+        assert_eq!(doc.layers().len(), 3, "as duas voltam juntas");
+    }
+
+    #[test]
+    fn moving_a_selection_moves_every_member() {
+        let mut doc = doc();
+        doc.push(rect(0.0, 0.0), style());
+        doc.push(rect(20.0, 0.0), style());
+        doc.begin_move();
+        doc.translate_all(&[0, 1], 5.0, 5.0);
+        doc.end_move();
+        assert_eq!(shapes(&doc), vec![rect(5.0, 5.0), rect(25.0, 5.0)]);
+        doc.undo();
+        assert_eq!(shapes(&doc), vec![rect(0.0, 0.0), rect(20.0, 0.0)], "e voltam juntas");
+    }
+
+    #[test]
     fn delete_removes_the_layer_and_is_undoable() {
         let mut doc = doc();
         doc.push(rect(0.0, 0.0), style());
         let second = doc.push(rect(20.0, 20.0), style());
-        doc.delete(0);
+        doc.delete_all(&[0]);
         assert_eq!(doc.layers().len(), 1);
         assert_eq!(doc.layers()[0].id, second, "sobrou a anotação certa");
         doc.undo();

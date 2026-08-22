@@ -20,9 +20,10 @@ use super::shapes::{
     arrow_geometry, normalize, shape_from_drag, Handle, Layer, Point, Shape, Tool,
 };
 use super::{
-    DragPreview, EditorSession, MoveDrag, ResizeDrag, TextInput, CROP_MIN_SIDE, FONT_MAX,
-    FONT_MIN, HANDLE_EDGE_ROOM_PTS, HANDLE_HIT_PTS, HANDLE_RADIUS_PTS, HIT_TOLERANCE_PTS,
-    PALETTE, STROKE_MAX, STROKE_MIN, ZOOM_MAX, ZOOM_MIN,
+    DragPreview, EditorSession, MoveDrag, ResizeDrag, TextInput, CROP_MIN_SIDE, DUPLICATE_OFFSET,
+    FONT_MAX, FONT_MIN, HANDLE_EDGE_ROOM_PTS, HANDLE_HIT_PTS, HANDLE_RADIUS_PTS,
+    HIT_TOLERANCE_PTS, NUDGE_COALESCE_SECS, NUDGE_STEP, NUDGE_STEP_SHIFT, PALETTE, STROKE_MAX,
+    STROKE_MIN, ZOOM_MAX, ZOOM_MIN,
 };
 
 /// Lado do botão de ícone da toolbar, em pontos.
@@ -131,6 +132,9 @@ pub fn show(ctx: &egui::Context, session: &mut EditorSession, target: &SaveTarge
         }
     }
 
+    handle_layer_keys(ctx, session);
+    settle_nudge_run(ctx, session);
+
     // Botão X da janela → mesmo fluxo do Esc (com confirmação se preciso).
     if ctx.input(|i| i.viewport().close_requested()) && !session.finished {
         ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
@@ -196,6 +200,9 @@ fn select_tool(session: &mut EditorSession, tool: Tool) {
 /// Aborta um arrasto de reposicionamento em andamento, restaurando a posição
 /// original da forma (o ponto de undo registrado no início sai do histórico).
 fn cancel_move(session: &mut EditorSession) {
+    // Uma corrida de empurrões pendente precisa fechar antes: ela também
+    // segura um `begin_move` no documento.
+    close_nudge_run(session);
     let dragging = session.move_drag.take().is_some() | session.resize_drag.take().is_some();
     if dragging {
         session.doc.abort_move();
@@ -206,6 +213,7 @@ fn cancel_move(session: &mut EditorSession) {
 /// desfaz só ele; caso contrário desfaz a última edição. A seleção é limpa
 /// porque os índices das formas podem mudar.
 fn perform_undo(session: &mut EditorSession) {
+    close_nudge_run(session);
     let dragging = session.move_drag.take().is_some() | session.resize_drag.take().is_some();
     if dragging {
         session.doc.abort_move();
@@ -925,6 +933,120 @@ fn shape_screen_bbox(ctx: &egui::Context, layer: &Layer, ts: ToScreen) -> Rect {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Teclas que agem sobre a anotação selecionada
+// ---------------------------------------------------------------------------
+
+/// `Delete`/`Backspace` apaga, `Alt+D` duplica e as setas empurram.
+fn handle_layer_keys(ctx: &egui::Context, session: &mut EditorSession) {
+    if session.text_input.is_some() || session.confirm_discard || ctx.wants_keyboard_input() {
+        return;
+    }
+    let Some(index) = session.selected else {
+        return;
+    };
+
+    let (delete, duplicate, dx, dy, now) = ctx.input_mut(|i| {
+        let shift = i.modifiers.shift;
+        // Com `Shift` o passo é maior, então o atalho a consumir também
+        // carrega o `Shift` — senão a seta não seria reconhecida.
+        let (mods, step) = if shift {
+            (Modifiers::SHIFT, NUDGE_STEP_SHIFT)
+        } else {
+            (Modifiers::NONE, NUDGE_STEP)
+        };
+        let mut dx = 0.0;
+        let mut dy = 0.0;
+        if i.consume_key(mods, Key::ArrowLeft) {
+            dx -= step;
+        }
+        if i.consume_key(mods, Key::ArrowRight) {
+            dx += step;
+        }
+        if i.consume_key(mods, Key::ArrowUp) {
+            dy -= step;
+        }
+        if i.consume_key(mods, Key::ArrowDown) {
+            dy += step;
+        }
+        (
+            i.consume_key(Modifiers::NONE, Key::Delete)
+                || i.consume_key(Modifiers::NONE, Key::Backspace),
+            i.consume_key(Modifiers::ALT, Key::D),
+            dx,
+            dy,
+            i.time,
+        )
+    });
+
+    if delete {
+        close_nudge_run(session);
+        session.selected = None;
+        session.doc.delete(index);
+        return;
+    }
+    if duplicate {
+        close_nudge_run(session);
+        let (dx, dy) = duplicate_offset(session, index);
+        if session.doc.duplicate(index, dx, dy).is_some() {
+            session.selected = Some(session.doc.layers().len() - 1);
+        }
+        return;
+    }
+    if dx != 0.0 || dy != 0.0 {
+        // A primeira seta abre a corrida; as seguintes só empurram.
+        if session.nudge_until.is_none() {
+            session.doc.begin_move();
+        }
+        session.doc.translate(index, dx, dy);
+        session.nudge_until = Some(now + NUDGE_COALESCE_SECS);
+    }
+}
+
+/// Fecha a corrida de empurrões quando o silêncio passa da janela, gravando
+/// **um** passo de desfazer para o conjunto todo. Enquanto ela estiver
+/// aberta, pede repaint para que o prazo seja de fato verificado.
+fn settle_nudge_run(ctx: &egui::Context, session: &mut EditorSession) {
+    let Some(deadline) = session.nudge_until else {
+        return;
+    };
+    let now = ctx.input(|i| i.time);
+    if now >= deadline {
+        close_nudge_run(session);
+    } else {
+        ctx.request_repaint_after(std::time::Duration::from_secs_f64(deadline - now));
+    }
+}
+
+/// Encerra a corrida imediatamente (outra ação começou).
+fn close_nudge_run(session: &mut EditorSession) {
+    if session.nudge_until.take().is_some() {
+        session.doc.end_move();
+    }
+}
+
+/// Deslocamento da cópia: para baixo e para a esquerda, invertendo um eixo
+/// só quando o padrão sairia da imagem e o sentido oposto couber.
+fn duplicate_offset(session: &EditorSession, index: usize) -> (f32, f32) {
+    let (mut dx, mut dy) = (-DUPLICATE_OFFSET, DUPLICATE_OFFSET);
+    let bounds = session
+        .doc
+        .layers()
+        .get(index)
+        .and_then(|layer| layer.bbox());
+    let Some((min, max)) = bounds else {
+        return (dx, dy); // texto: sem caixa conhecida aqui, vale o padrão
+    };
+    let (w, h) = (session.doc.image().width() as f32, session.doc.image().height() as f32);
+    if min.x + dx < 0.0 && max.x - dx <= w {
+        dx = -dx;
+    }
+    if max.y + dy > h && min.y - dy >= 0.0 {
+        dy = -dy;
+    }
+    (dx, dy)
+}
+
 /// Press com a ferramenta Mover.
 ///
 /// A alça da anotação já selecionada tem prioridade sobre o corpo das
@@ -936,6 +1058,8 @@ fn begin_select_drag(
     ts: ToScreen,
     origin: Pos2,
 ) {
+    // Pegar o mouse encerra a corrida de empurrões pendente.
+    close_nudge_run(session);
     if let Some((index, handle)) = handle_at(session, ts, origin) {
         session.selected = Some(index);
         session.doc.begin_move();

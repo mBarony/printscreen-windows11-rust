@@ -38,6 +38,15 @@ pub const HIT_TOLERANCE_PTS: f32 = 6.0;
 /// engano, não intenção de recortar.
 pub const CROP_MIN_SIDE: f32 = 4.0;
 
+/// Passo do empurrão pelas setas, em px da imagem (com `Shift`, o maior).
+pub const NUDGE_STEP: f32 = 1.0;
+pub const NUDGE_STEP_SHIFT: f32 = 10.0;
+/// Silêncio, em segundos, que fecha uma corrida de empurrões. Enquanto a
+/// tecla estiver repetindo, tudo continua sendo um único passo de desfazer.
+pub const NUDGE_COALESCE_SECS: f64 = 0.1;
+/// Deslocamento da cópia feita com `Alt+D`, em px da imagem.
+pub const DUPLICATE_OFFSET: f32 = 100.0;
+
 /// Raio desenhado da alça de redimensionamento, em pontos do egui.
 pub const HANDLE_RADIUS_PTS: f32 = 5.0;
 /// Alcance do clique numa alça, em pontos do egui — maior que o raio
@@ -128,6 +137,10 @@ pub struct EditorSession {
     pub move_drag: Option<MoveDrag>,
     /// Arrasto de uma alça de redimensionamento em andamento.
     pub resize_drag: Option<ResizeDrag>,
+    /// Instante (relógio do egui) em que a corrida de empurrões pelas setas
+    /// se fecha. Enquanto houver tecla chegando dentro da janela, o conjunto
+    /// inteiro é um passo só de desfazer.
+    pub nudge_until: Option<f64>,
     /// Região de recorte já desenhada, aguardando confirmação (issue #5),
     /// em px da imagem — `(canto superior-esquerdo, inferior-direito)`.
     pub crop_pending: Option<(Point, Point)>,
@@ -162,6 +175,7 @@ impl EditorSession {
             selected: None,
             move_drag: None,
             resize_drag: None,
+            nudge_until: None,
             crop_pending: None,
             wheel_accum: 0.0,
             confirm_discard: false,

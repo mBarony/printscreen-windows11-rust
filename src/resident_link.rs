@@ -11,7 +11,7 @@
 
 use std::sync::OnceLock;
 
-use crate::platform::shell::{self, IPC_BALLOON, IPC_CONFIG_CHANGED};
+use crate::platform::shell::{self, IPC_BALLOON, IPC_CONFIG_CHANGED, IPC_EDITOR_OPEN};
 
 static RESIDENT_HWND: OnceLock<isize> = OnceLock::new();
 
@@ -38,5 +38,16 @@ pub fn config_changed() {
     };
     if !shell::send_to_resident(hwnd, IPC_CONFIG_CHANGED, "") {
         log::warn!("residente não respondeu ao aviso de config alterado");
+    }
+}
+
+/// Avisa o residente de que o editor abriu.
+///
+/// Enquanto o processo de GUI está só mostrando o overlay, acionar o atalho
+/// de novo o encerra — é o "aperta e fecha". Depois que o editor abre há
+/// anotações lá dentro, e fechá-lo por um atalho seria destruir trabalho.
+pub fn editor_opened() {
+    if let Some(hwnd) = resident() {
+        shell::send_to_resident(hwnd, IPC_EDITOR_OPEN, "");
     }
 }

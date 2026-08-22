@@ -131,6 +131,10 @@ impl GuiApp {
                             storage::save_in_background(target, cropped);
                         }
                         SelectedAction::OpenEditor => {
+                            // A partir daqui há trabalho do usuário nesta
+                            // janela: o residente precisa saber, para o
+                            // atalho não a encerrar como faz com o overlay.
+                            crate::resident_link::editor_opened();
                             let mut shared = self.shared.lock().unwrap();
                             let defaults = shared.config.editor.clone();
                             shared.flow = Flow::Editing(Box::new(EditorSession::new(

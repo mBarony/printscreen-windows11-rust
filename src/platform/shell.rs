@@ -30,6 +30,9 @@ pub const IPC_BALLOON: u32 = 1;
 /// O `config.json` foi regravado pela janela de configurações; o residente
 /// precisa recarregá-lo e re-registrar os atalhos.
 pub const IPC_CONFIG_CHANGED: u32 = 2;
+/// O processo de GUI saiu da seleção e abriu o editor. A partir daí ele tem
+/// trabalho do usuário dentro, e o atalho não pode mais encerrá-lo.
+pub const IPC_EDITOR_OPEN: u32 = 3;
 
 pub enum MenuEntry {
     Item { id: u16, label: &'static str },

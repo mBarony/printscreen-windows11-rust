@@ -29,6 +29,8 @@ pub enum Op {
     /// Substitui anotações existentes (mover, redimensionar, trocar estilo),
     /// casadas por `id`.
     Patch(Vec<Layer>),
+    /// Remove anotações por `id`.
+    Delete(Vec<u64>),
     /// Recorta a imagem e desloca as anotações junto.
     Crop { x: u32, y: u32, w: u32, h: u32 },
 }
@@ -82,6 +84,7 @@ fn apply(op: &Op, image: &mut Arc<RgbaImage>, layers: &mut Vec<Layer>) {
                 }
             }
         }
+        Op::Delete(ids) => layers.retain(|l| !ids.contains(&l.id)),
         Op::Crop { x, y, w, h } => {
             *image = Arc::new(image.crop(*x, *y, *w, *h));
             for layer in layers.iter_mut() {
@@ -168,6 +171,24 @@ impl Document {
         self.next_id += 1;
         self.commit(Op::Annotate(Layer { id, shape, style }));
         id
+    }
+
+    /// Remove a anotação de índice `index`.
+    pub fn delete(&mut self, index: usize) {
+        let Some(layer) = self.layers.get(index) else {
+            return;
+        };
+        self.commit(Op::Delete(vec![layer.id]));
+    }
+
+    /// Duplica a anotação de índice `index`, deslocada por `(dx, dy)`.
+    /// A cópia nasce no topo da pilha e recebe um `id` próprio.
+    pub fn duplicate(&mut self, index: usize, dx: f32, dy: f32) -> Option<u64> {
+        let source = self.layers.get(index)?;
+        let mut shape = source.shape.clone();
+        let style = source.style;
+        shape.translate(dx, dy);
+        Some(self.push(shape, style))
     }
 
     /// Recorta a imagem para `(x, y, w, h)` em px da imagem e desloca as
@@ -349,6 +370,30 @@ mod tests {
         assert!(doc.can_redo(), "clique de seleção não pode destruir o redo");
         doc.redo();
         assert_eq!(doc.layers().len(), 2);
+    }
+
+    #[test]
+    fn delete_removes_the_layer_and_is_undoable() {
+        let mut doc = doc();
+        doc.push(rect(0.0, 0.0), style());
+        let second = doc.push(rect(20.0, 20.0), style());
+        doc.delete(0);
+        assert_eq!(doc.layers().len(), 1);
+        assert_eq!(doc.layers()[0].id, second, "sobrou a anotação certa");
+        doc.undo();
+        assert_eq!(doc.layers().len(), 2);
+    }
+
+    #[test]
+    fn duplicate_offsets_the_copy_and_gives_it_a_new_id() {
+        let mut doc = doc();
+        let original = doc.push(rect(10.0, 10.0), style());
+        let copy = doc.duplicate(0, -5.0, 5.0).unwrap();
+        assert_ne!(original, copy);
+        assert_eq!(doc.layers().len(), 2);
+        assert_eq!(shapes(&doc)[1], rect(5.0, 15.0), "cópia deslocada");
+        doc.undo();
+        assert_eq!(doc.layers().len(), 1, "duplicar é um passo do histórico");
     }
 
     #[test]

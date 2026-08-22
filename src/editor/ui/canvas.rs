@@ -395,11 +395,19 @@ pub(super) fn draw(ctx: &egui::Context, session: &mut EditorSession) {
                     shape_from_drag(session.tool, drag.start, drag.current, drag.shift, drag.alt)
                 };
                 if let Some(shape) = in_progress {
-                    if let Shape::Redaction { min, max, .. } = &shape {
-                        // A redação só existe depois de queimada na imagem;
-                        // durante o arrasto, o que se mostra é a área que
-                        // será apagada.
-                        let area = Rect::from_min_max(to_screen.pos(*min), to_screen.pos(*max));
+                    let burnt_area = match &shape {
+                        Shape::Redaction { min, max, .. } => Some((*min, *max)),
+                        Shape::Spotlight { center, rx, ry } => Some((
+                            Point::new(center.x - rx, center.y - ry),
+                            Point::new(center.x + rx, center.y + ry),
+                        )),
+                        _ => None,
+                    };
+                    if let Some((min, max)) = burnt_area {
+                        // Redação e holofote só existem depois de queimados
+                        // na imagem; durante o arrasto, o que se mostra é a
+                        // área que eles vão ocupar.
+                        let area = Rect::from_min_max(to_screen.pos(min), to_screen.pos(max));
                         shape_painter.rect_filled(
                             area,
                             CornerRadius::ZERO,

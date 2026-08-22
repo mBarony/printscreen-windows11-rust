@@ -147,6 +147,14 @@ pub(super) fn selected_is_redaction(session: &EditorSession) -> bool {
         .is_some_and(|layer| matches!(layer.shape, Shape::Redaction { .. }))
 }
 
+/// A anotação selecionada é um holofote?
+pub(super) fn selected_is_spotlight(session: &EditorSession) -> bool {
+    session
+        .selected
+        .and_then(|i| session.doc.layers().get(i))
+        .is_some_and(|layer| matches!(layer.shape, Shape::Spotlight { .. }))
+}
+
 /// A anotação selecionada é um texto?
 pub(super) fn selected_is_text(session: &EditorSession) -> bool {
     session

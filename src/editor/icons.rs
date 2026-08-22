@@ -24,6 +24,7 @@ pub enum Icon {
     Marker,
     Eyedropper,
     Redact,
+    Spotlight,
     Fill,
     TextPill,
     Text,
@@ -49,13 +50,14 @@ impl Icon {
             Tool::Marker => Self::Marker,
             Tool::Eyedropper => Self::Eyedropper,
             Tool::Redact => Self::Redact,
+            Tool::Spotlight => Self::Spotlight,
             Tool::Text => Self::Text,
             Tool::Crop => Self::Crop,
         }
     }
 
     #[cfg(test)]
-    pub const ALL: [Icon; 20] = [
+    pub const ALL: [Icon; 21] = [
         Icon::Move,
         Icon::Line,
         Icon::Arrow,
@@ -66,6 +68,7 @@ impl Icon {
         Icon::Marker,
         Icon::Eyedropper,
         Icon::Redact,
+        Icon::Spotlight,
         Icon::Fill,
         Icon::TextPill,
         Icon::Text,
@@ -91,6 +94,7 @@ impl Icon {
             Icon::Marker => "marker",
             Icon::Eyedropper => "eyedropper",
             Icon::Redact => "redact",
+            Icon::Spotlight => "spotlight",
             Icon::Fill => "fill",
             Icon::TextPill => "text_pill",
             Icon::Text => "text",
@@ -185,6 +189,13 @@ pub fn geometry(icon: Icon) -> Vec<Primitive> {
             Fill(vec![(0.62, 0.10), (0.90, 0.38), (0.74, 0.54), (0.46, 0.26)]),
             Stroke(vec![(0.52, 0.32), (0.20, 0.64)]),
             Fill(vec![(0.08, 0.92), (0.14, 0.62), (0.38, 0.86)]),
+        ],
+        // Lente com raios saindo dela — o foco de luz.
+        Icon::Spotlight => vec![
+            Stroke(ellipse(0.46, 0.46, 0.26, 0.26)),
+            Stroke(vec![(0.64, 0.64), (0.88, 0.88)]),
+            Stroke(vec![(0.46, 0.06), (0.46, 0.14)]),
+            Stroke(vec![(0.06, 0.46), (0.14, 0.46)]),
         ],
         // Retângulo com um xadrez dentro — a área coberta pelo mosaico.
         Icon::Redact => vec![

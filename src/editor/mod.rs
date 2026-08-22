@@ -14,7 +14,7 @@ pub mod ui;
 use crate::config::{self, EditorConfig};
 use crate::imgbuf::RgbaImage;
 use document::Document;
-use shapes::{Point, Style, Tool};
+use shapes::{Handle, Point, Style, Tool};
 
 /// Fonte TTF embutida (Inter, licença SIL OFL), usada tanto no egui quanto na
 /// exportação — garantindo WYSIWYG entre editor e JPG final (§8).
@@ -37,6 +37,15 @@ pub const HIT_TOLERANCE_PTS: f32 = 6.0;
 /// Lado mínimo (px da imagem) de um recorte: abaixo disso o arrasto foi
 /// engano, não intenção de recortar.
 pub const CROP_MIN_SIDE: f32 = 4.0;
+
+/// Raio desenhado da alça de redimensionamento, em pontos do egui.
+pub const HANDLE_RADIUS_PTS: f32 = 5.0;
+/// Alcance do clique numa alça, em pontos do egui — maior que o raio
+/// desenhado, porque mirar num disco de 5 pt exigiria precisão demais.
+pub const HANDLE_HIT_PTS: f32 = 9.0;
+/// Lado mínimo, em pontos do egui, para a alça de aresta caber sem encostar
+/// nas de canto.
+pub const HANDLE_EDGE_ROOM_PTS: f32 = 34.0;
 
 pub const STROKE_MIN: f32 = 1.0;
 pub const STROKE_MAX: f32 = 12.0;
@@ -83,6 +92,13 @@ pub struct MoveDrag {
     pub travel: f32,
 }
 
+/// Arrasto de uma alça de redimensionamento (ferramenta Mover).
+pub struct ResizeDrag {
+    /// Índice da anotação em `doc.layers()`.
+    pub index: usize,
+    pub handle: Handle,
+}
+
 /// Estado de uma sessão do editor (uma captura aberta para anotação).
 pub struct EditorSession {
     /// Identificador estável da sessão (diferencia viewports sucessivos).
@@ -110,6 +126,8 @@ pub struct EditorSession {
     pub selected: Option<usize>,
     /// Arrasto de reposicionamento em andamento (ferramenta Mover).
     pub move_drag: Option<MoveDrag>,
+    /// Arrasto de uma alça de redimensionamento em andamento.
+    pub resize_drag: Option<ResizeDrag>,
     /// Região de recorte já desenhada, aguardando confirmação (issue #5),
     /// em px da imagem — `(canto superior-esquerdo, inferior-direito)`.
     pub crop_pending: Option<(Point, Point)>,
@@ -143,6 +161,7 @@ impl EditorSession {
             text_input: None,
             selected: None,
             move_drag: None,
+            resize_drag: None,
             crop_pending: None,
             wheel_accum: 0.0,
             confirm_discard: false,

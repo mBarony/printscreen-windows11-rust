@@ -27,6 +27,7 @@ pub enum Icon {
     Spotlight,
     Fill,
     TextPill,
+    Backdrop,
     Text,
     Crop,
     Cut,
@@ -59,7 +60,7 @@ impl Icon {
     }
 
     #[cfg(test)]
-    pub const ALL: [Icon; 22] = [
+    pub const ALL: [Icon; 23] = [
         Icon::Move,
         Icon::Line,
         Icon::Arrow,
@@ -73,6 +74,7 @@ impl Icon {
         Icon::Spotlight,
         Icon::Fill,
         Icon::TextPill,
+        Icon::Backdrop,
         Icon::Text,
         Icon::Crop,
         Icon::Cut,
@@ -100,6 +102,7 @@ impl Icon {
             Icon::Spotlight => "spotlight",
             Icon::Fill => "fill",
             Icon::TextPill => "text_pill",
+            Icon::Backdrop => "backdrop",
             Icon::Text => "text",
             Icon::Crop => "crop",
             Icon::Cut => "cut",
@@ -220,6 +223,11 @@ pub fn geometry(icon: Icon) -> Vec<Primitive> {
         Icon::Fill => vec![
             Stroke(rectangle(0.10, 0.10, 0.90, 0.90)),
             Fill(rectangle(0.30, 0.30, 0.70, 0.70)),
+        ],
+        // Retângulo pequeno dentro de um grande — a captura sobre o fundo.
+        Icon::Backdrop => vec![
+            Stroke(rectangle(0.06, 0.06, 0.94, 0.94)),
+            Fill(rectangle(0.26, 0.26, 0.74, 0.74)),
         ],
         // "A" sobre a pílula que fica atrás do texto.
         Icon::TextPill => vec![

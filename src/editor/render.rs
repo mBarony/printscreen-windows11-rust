@@ -13,6 +13,7 @@ use ab_glyph::{Font as _, FontRef, ScaleFont as _};
 use crate::error::{Context as _, Result};
 use crate::imgbuf::RgbaImage;
 
+use super::backdrop::{self, BackdropStyle};
 use super::raster;
 use super::shapes::{
     arrow_geometry, marker_geometry, stroke_appearance, text_pill_metrics, Layer, Point, Shape,
@@ -20,11 +21,16 @@ use super::shapes::{
 };
 use super::FONT_BYTES;
 
-/// Rasteriza `captura + anotações` e retorna a imagem final RGBA.
-pub fn render(base: &RgbaImage, layers: &[Layer]) -> Result<RgbaImage> {
+/// Rasteriza `captura + anotações`, monta a moldura em volta e devolve a
+/// imagem final RGBA.
+pub fn render(
+    base: &RgbaImage,
+    layers: &[Layer],
+    backdrop: BackdropStyle,
+) -> Result<RgbaImage> {
     let mut buffer = base.clone();
     if layers.is_empty() {
-        return Ok(buffer);
+        return Ok(backdrop::compose(&buffer, backdrop));
     }
 
     let font = FontRef::try_from_slice(FONT_BYTES).context("fonte embutida inválida")?;
@@ -142,7 +148,8 @@ pub fn render(base: &RgbaImage, layers: &[Layer]) -> Result<RgbaImage> {
             }
         }
     }
-    Ok(buffer)
+    // A moldura é a última camada: ela emoldura o resultado de tudo.
+    Ok(backdrop::compose(&buffer, backdrop))
 }
 
 /// Largura e altura de uma linha de texto, na mesma métrica que `draw_text`
@@ -286,14 +293,14 @@ mod tests {
     #[test]
     fn render_without_shapes_is_identity() {
         let img = base();
-        let out = render(&img, &[]).unwrap();
+        let out = render(&img, &[], BackdropStyle::None).unwrap();
         assert_eq!(img.as_raw(), out.as_raw());
     }
 
     #[test]
     fn render_line_touches_pixels() {
         let img = base();
-        let out = render(&img, &[dragged(Tool::Line, (4.0, 4.0), (60.0, 60.0))]).unwrap();
+        let out = render(&img, &[dragged(Tool::Line, (4.0, 4.0), (60.0, 60.0))], BackdropStyle::None).unwrap();
         assert_ne!(img.as_raw(), out.as_raw());
         // O pixel do meio da diagonal deve ter ficado avermelhado.
         let p = out.pixel(32, 32);
@@ -304,21 +311,21 @@ mod tests {
     fn render_text_touches_pixels() {
         let img = base();
         let text = layer(Shape::Text { anchor: Point::new(2.0, 2.0), content: "Ok".into() });
-        let out = render(&img, &[text]).unwrap();
+        let out = render(&img, &[text], BackdropStyle::None).unwrap();
         assert_ne!(img.as_raw(), out.as_raw());
     }
 
     #[test]
     fn dimensions_preserved() {
         let img = base();
-        let out = render(&img, &[dragged(Tool::Rect, (1.0, 1.0), (50.0, 40.0))]).unwrap();
+        let out = render(&img, &[dragged(Tool::Rect, (1.0, 1.0), (50.0, 40.0))], BackdropStyle::None).unwrap();
         assert_eq!((out.width(), out.height()), (64, 64));
     }
 
     #[test]
     fn arrow_head_is_filled() {
         let img = base();
-        let out = render(&img, &[dragged(Tool::Arrow, (8.0, 32.0), (56.0, 32.0))]).unwrap();
+        let out = render(&img, &[dragged(Tool::Arrow, (8.0, 32.0), (56.0, 32.0))], BackdropStyle::None).unwrap();
         // Perto da ponta (x=54, y=32) deve haver vermelho.
         assert!(out.pixel(53, 32)[0] > 150);
     }
@@ -327,7 +334,7 @@ mod tests {
     fn freehand_stroke_is_exported() {
         let img = base();
         let points: Vec<Point> = (0..6).map(|i| Point::new(8.0 + i as f32 * 9.0, 32.0)).collect();
-        let out = render(&img, &[layer(Shape::Freehand { points, highlight: false })]).unwrap();
+        let out = render(&img, &[layer(Shape::Freehand { points, highlight: false })], BackdropStyle::None).unwrap();
         assert!(out.pixel(30, 32)[0] > 150, "traço no meio do caminho");
         assert_eq!(out.pixel(30, 8), [10, 20, 30, 255], "fora do traço");
     }
@@ -341,8 +348,8 @@ mod tests {
         let plain = layer(Shape::Freehand { points: points.clone(), highlight: false });
         let mark = layer(Shape::Freehand { points, highlight: true });
 
-        let opaque = render(&img, &[plain]).unwrap().pixel(32, 32);
-        let translucent = render(&img, &[mark]).unwrap().pixel(32, 32);
+        let opaque = render(&img, &[plain], BackdropStyle::None).unwrap().pixel(32, 32);
+        let translucent = render(&img, &[mark], BackdropStyle::None).unwrap().pixel(32, 32);
         assert_eq!(opaque[0], 255, "mão livre cobre");
         assert!(translucent[0] < opaque[0], "marca-texto não cobre");
         assert!(translucent[2] > opaque[2], "o azul do fundo sobrevive");
@@ -356,11 +363,10 @@ mod tests {
     fn a_filled_rect_paints_its_interior() {
         let img = base();
         let shape = Shape::Rect { min: Point::new(16.0, 16.0), max: Point::new(48.0, 48.0) };
-        let hollow = render(&img, &[layer(shape.clone())]).unwrap();
+        let hollow = render(&img, &[layer(shape.clone())], BackdropStyle::None).unwrap();
         let solid = render(
             &img,
-            &[styled(shape, Style { filled: true, ..style() })],
-        )
+            &[styled(shape, Style { filled: true, ..style() })], BackdropStyle::None)
         .unwrap();
         assert_eq!(hollow.pixel(32, 32), [10, 20, 30, 255], "vazado deixa o miolo");
         assert_eq!(solid.pixel(32, 32)[0], 255, "cheio pinta o miolo");
@@ -372,8 +378,7 @@ mod tests {
         let shape = Shape::Rect { min: Point::new(16.0, 16.0), max: Point::new(48.0, 48.0) };
         let out = render(
             &img,
-            &[styled(shape, Style { filled: true, corner_radius: 12.0, ..style() })],
-        )
+            &[styled(shape, Style { filled: true, corner_radius: 12.0, ..style() })], BackdropStyle::None)
         .unwrap();
         assert_eq!(out.pixel(32, 32)[0], 255, "miolo cheio");
         assert_eq!(out.pixel(17, 17), [10, 20, 30, 255], "canto recuado pelo raio");
@@ -384,7 +389,7 @@ mod tests {
     fn a_filled_ellipse_paints_its_interior() {
         let img = base();
         let shape = Shape::Ellipse { center: Point::new(32.0, 32.0), rx: 16.0, ry: 10.0 };
-        let out = render(&img, &[styled(shape, Style { filled: true, ..style() })]).unwrap();
+        let out = render(&img, &[styled(shape, Style { filled: true, ..style() })], BackdropStyle::None).unwrap();
         assert_eq!(out.pixel(32, 32)[0], 255, "centro cheio");
         assert_eq!(out.pixel(32, 4), [10, 20, 30, 255], "fora da elipse");
     }
@@ -393,7 +398,7 @@ mod tests {
     fn a_marker_draws_a_disc_with_a_light_ring() {
         let img = base();
         let shape = Shape::Marker { center: Point::new(32.0, 32.0), number: 7 };
-        let out = render(&img, &[layer(shape)]).unwrap();
+        let out = render(&img, &[layer(shape)], BackdropStyle::None).unwrap();
         // Traço 3 → diâmetro mínimo 24, raio 12.
         assert_eq!(out.pixel(32, 44 - 1)[0], 255, "borda do disco na cor ativa");
         assert_eq!(out.pixel(32, 8), [10, 20, 30, 255], "fora do disco");
@@ -408,8 +413,8 @@ mod tests {
         // só — é o que a medida do texto na exportação garante.
         let img = base();
         let at = Point::new(32.0, 32.0);
-        let one = render(&img, &[layer(Shape::Marker { center: at, number: 1 })]).unwrap();
-        let twelve = render(&img, &[layer(Shape::Marker { center: at, number: 12 })]).unwrap();
+        let one = render(&img, &[layer(Shape::Marker { center: at, number: 1 })], BackdropStyle::None).unwrap();
+        let twelve = render(&img, &[layer(Shape::Marker { center: at, number: 12 })], BackdropStyle::None).unwrap();
 
         let ink_bounds = |img: &RgbaImage| {
             let (mut lo, mut hi) = (u32::MAX, 0);
@@ -430,11 +435,10 @@ mod tests {
     fn the_reading_pill_sits_behind_the_text() {
         let img = base();
         let shape = Shape::Text { anchor: Point::new(20.0, 20.0), content: "Ok".into() };
-        let plain = render(&img, &[layer(shape.clone())]).unwrap();
+        let plain = render(&img, &[layer(shape.clone())], BackdropStyle::None).unwrap();
         let on_pill = render(
             &img,
-            &[styled(shape, Style { text_pill: true, ..style() })],
-        )
+            &[styled(shape, Style { text_pill: true, ..style() })], BackdropStyle::None)
         .unwrap();
         // Logo acima e à esquerda da âncora cai o recuo da pílula.
         assert_eq!(plain.pixel(18, 18), [10, 20, 30, 255], "sem pílula, o fundo aparece");
@@ -451,8 +455,8 @@ mod tests {
         let lowest_ink = |img: &RgbaImage| {
             (0..120).rev().find(|&y| (0..120).any(|x| img.pixel(x, y)[0] > 100))
         };
-        let a = lowest_ink(&render(&img, &[layer(one)]).unwrap()).unwrap();
-        let b = lowest_ink(&render(&img, &[layer(two)]).unwrap()).unwrap();
+        let a = lowest_ink(&render(&img, &[layer(one)], BackdropStyle::None).unwrap()).unwrap();
+        let b = lowest_ink(&render(&img, &[layer(two)], BackdropStyle::None).unwrap()).unwrap();
         assert!(b > a, "a segunda linha desce ({a} → {b})");
     }
 
@@ -468,8 +472,8 @@ mod tests {
             shape,
             style: Style { color: [0, 255, 0, 255], ..style() },
         };
-        let a = render(&img, &[red]).unwrap();
-        let b = render(&img, &[green]).unwrap();
+        let a = render(&img, &[red], BackdropStyle::None).unwrap();
+        let b = render(&img, &[green], BackdropStyle::None).unwrap();
         assert!(a.pixel(8, 32)[0] > 150, "primeira camada vermelha");
         assert!(b.pixel(8, 32)[1] > 150, "segunda camada verde");
     }

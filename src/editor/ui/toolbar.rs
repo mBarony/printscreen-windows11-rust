@@ -9,6 +9,7 @@ use egui::{
 use crate::storage::SaveTarget;
 
 use crate::editor::icons::{self, Icon};
+use crate::editor::backdrop::BackdropStyle;
 use crate::editor::shapes::{
     RedactionStyle, Tool, CORNER_RADIUS_MAX, MAGNIFICATION_MAX, MAGNIFICATION_MIN,
 };
@@ -269,6 +270,15 @@ pub(super) fn draw(ctx: &egui::Context, session: &mut EditorSession, target: &Sa
                         restyle_selection(ctx, session);
                     }
                 });
+
+                // --- Moldura decorativa ---
+                let backdrop = session.doc.backdrop();
+                if icon_button(ui, Icon::Backdrop, backdrop != BackdropStyle::None, true)
+                    .on_hover_text(format!("Fundo: {} (clique para trocar)", backdrop.label()))
+                    .clicked()
+                {
+                    session.doc.set_backdrop(backdrop.next());
+                }
 
                 separator(ui);
 

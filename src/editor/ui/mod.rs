@@ -294,9 +294,10 @@ pub(super) fn commit_text_input(session: &mut EditorSession) {
 /// confirma (ou reporta a falha) na sequência.
 pub(super) fn copy_and_close(session: &mut EditorSession) {
     commit_text_input(session);
-    let base = session.doc.visible_image().clone();
+    let base = session.doc.content_image().clone();
     let layers = session.doc.layers().to_vec();
-    crate::jobs::spawn(move || match super::render::render(&base, &layers) {
+    let backdrop = session.doc.backdrop();
+    crate::jobs::spawn(move || match super::render::render(&base, &layers, backdrop) {
         Ok(final_image) => match clipboard::copy_image(&final_image) {
             Ok(()) => notify::toast(
                 "Copiado para a área de transferência",
@@ -312,10 +313,11 @@ pub(super) fn copy_and_close(session: &mut EditorSession) {
 /// Ctrl+S: renderiza, salva na pasta configurada e fecha o editor (RF-04).
 pub(super) fn save_and_close(session: &mut EditorSession, target: &SaveTarget) {
     commit_text_input(session);
-    let base = session.doc.visible_image().clone();
+    let base = session.doc.content_image().clone();
     let layers = session.doc.layers().to_vec();
+    let backdrop = session.doc.backdrop();
     let target = target.clone();
-    crate::jobs::spawn(move || match super::render::render(&base, &layers) {
+    crate::jobs::spawn(move || match super::render::render(&base, &layers, backdrop) {
         Ok(final_image) => match storage::write_image(&target, &final_image) {
             Ok(path) => {
                 let name = path

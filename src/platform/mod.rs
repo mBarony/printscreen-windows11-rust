@@ -33,6 +33,7 @@ pub mod msgbox;
 pub mod shell;
 pub mod time;
 pub mod version;
+pub mod window_list;
 
 /// UTF-16 terminado em NUL para APIs W do Win32.
 #[cfg(windows)]

@@ -23,7 +23,12 @@ use crate::{capture, jobs, notify, tray};
 /// O que este processo foi lançado para fazer.
 pub enum Task {
     /// Overlay de seleção sobre as capturas recebidas do residente.
-    Select { shots: Vec<MonitorShot>, purpose: Purpose },
+    Select {
+        shots: Vec<MonitorShot>,
+        /// Janelas visíveis no instante da captura, para o modo janela.
+        windows: Vec<crate::platform::window_list::WindowTarget>,
+        purpose: Purpose,
+    },
     /// Janela de configurações.
     Settings,
 }
@@ -68,9 +73,9 @@ impl GuiApp {
         remove_root_from_alt_tab();
 
         let (flow, settings) = match task {
-            Task::Select { shots, purpose } => {
+            Task::Select { shots, windows, purpose } => {
                 let session =
-                    SelectSession::new(&cc.egui_ctx, next_serial(), shots, purpose);
+                    SelectSession::new(&cc.egui_ctx, next_serial(), shots, windows, purpose);
                 (Flow::Selecting(session), None)
             }
             Task::Settings => (Flow::Idle, Some(SettingsState::new(config.clone()))),

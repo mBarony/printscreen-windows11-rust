@@ -133,7 +133,7 @@ pub fn show(ctx: &egui::Context, session: &mut EditorSession, target: &SaveTarge
     }
 
     handle_layer_keys(ctx, session);
-    settle_nudge_run(ctx, session);
+    settle_edit_run(ctx, session);
 
     // Botão X da janela → mesmo fluxo do Esc (com confirmação se preciso).
     if ctx.input(|i| i.viewport().close_requested()) && !session.finished {
@@ -202,7 +202,7 @@ fn select_tool(session: &mut EditorSession, tool: Tool) {
 fn cancel_move(session: &mut EditorSession) {
     // Uma corrida de empurrões pendente precisa fechar antes: ela também
     // segura um `begin_move` no documento.
-    close_nudge_run(session);
+    close_edit_run(session);
     let dragging = session.move_drag.take().is_some() | session.resize_drag.take().is_some();
     if dragging {
         session.doc.abort_move();
@@ -213,7 +213,7 @@ fn cancel_move(session: &mut EditorSession) {
 /// desfaz só ele; caso contrário desfaz a última edição. A seleção é limpa
 /// porque os índices das formas podem mudar.
 fn perform_undo(session: &mut EditorSession) {
-    close_nudge_run(session);
+    close_edit_run(session);
     let dragging = session.move_drag.take().is_some() | session.resize_drag.take().is_some();
     if dragging {
         session.doc.abort_move();
@@ -361,10 +361,11 @@ fn toolbar(ctx: &egui::Context, session: &mut EditorSession, target: &SaveTarget
 
                 separator(ui);
 
-                // --- Cor ---
+                // --- Cor (também repinta a anotação selecionada) ---
                 for color in PALETTE {
                     if color_swatch(ui, color, session.color == color).clicked() {
                         session.color = color;
+                        restyle_selection(ctx, session);
                     }
                 }
                 let mut rgb = [session.color[0], session.color[1], session.color[2]];
@@ -374,6 +375,7 @@ fn toolbar(ctx: &egui::Context, session: &mut EditorSession, target: &SaveTarget
                     .changed()
                 {
                     session.color = [rgb[0], rgb[1], rgb[2], 255];
+                    restyle_selection(ctx, session);
                 }
 
                 separator(ui);
@@ -392,10 +394,12 @@ fn toolbar(ctx: &egui::Context, session: &mut EditorSession, target: &SaveTarget
                     .changed()
                 {
                     session.stroke_width = stroke.round().clamp(STROKE_MIN, STROKE_MAX);
+                    restyle_selection(ctx, session);
                 }
 
-                // --- Tamanho da fonte (só com a ferramenta Texto) ---
-                let text_tool = session.tool == Tool::Text;
+                // --- Tamanho da fonte: com a ferramenta Texto ou com um
+                // texto selecionado, que é como se redimensiona um texto ---
+                let text_tool = session.tool == Tool::Text || selected_is_text(session);
                 ui.add_enabled_ui(text_tool, |ui| {
                     ui.label(egui::RichText::new("A").size(15.0).strong());
                     let mut font = session.font_size;
@@ -410,6 +414,7 @@ fn toolbar(ctx: &egui::Context, session: &mut EditorSession, target: &SaveTarget
                         .changed()
                     {
                         session.font_size = font.round().clamp(FONT_MIN, FONT_MAX);
+                        restyle_selection(ctx, session);
                     }
                 });
 
@@ -547,7 +552,11 @@ fn canvas(ctx: &egui::Context, session: &mut EditorSession) {
                     let steps = (session.wheel_accum / WHEEL_STEP_PTS).trunc();
                     if steps != 0.0 {
                         session.wheel_accum -= steps * WHEEL_STEP_PTS;
-                        if session.tool == Tool::Text {
+                        // Com uma anotação de texto selecionada, a roda mexe
+                        // no tamanho dela — é o único jeito de redimensionar
+                        // um texto, que não tem alça.
+                        let sizing_text = session.tool == Tool::Text || selected_is_text(session);
+                        if sizing_text {
                             session.font_size =
                                 (session.font_size + steps).round().clamp(FONT_MIN, FONT_MAX);
                         } else {
@@ -555,6 +564,7 @@ fn canvas(ctx: &egui::Context, session: &mut EditorSession) {
                                 .round()
                                 .clamp(STROKE_MIN, STROKE_MAX);
                         }
+                        restyle_selection(ctx, session);
                     }
                 } else if let Some(pointer) = response.hover_pos() {
                     let new_zoom = (zoom * (scroll_y * 0.002).exp()).clamp(ZOOM_MIN, ZOOM_MAX);
@@ -980,13 +990,13 @@ fn handle_layer_keys(ctx: &egui::Context, session: &mut EditorSession) {
     });
 
     if delete {
-        close_nudge_run(session);
+        close_edit_run(session);
         session.selected = None;
         session.doc.delete(index);
         return;
     }
     if duplicate {
-        close_nudge_run(session);
+        close_edit_run(session);
         let (dx, dy) = duplicate_offset(session, index);
         if session.doc.duplicate(index, dx, dy).is_some() {
             session.selected = Some(session.doc.layers().len() - 1);
@@ -995,34 +1005,59 @@ fn handle_layer_keys(ctx: &egui::Context, session: &mut EditorSession) {
     }
     if dx != 0.0 || dy != 0.0 {
         // A primeira seta abre a corrida; as seguintes só empurram.
-        if session.nudge_until.is_none() {
+        if session.edit_run_until.is_none() {
             session.doc.begin_move();
         }
         session.doc.translate(index, dx, dy);
-        session.nudge_until = Some(now + NUDGE_COALESCE_SECS);
+        session.edit_run_until = Some(now + NUDGE_COALESCE_SECS);
     }
 }
 
 /// Fecha a corrida de empurrões quando o silêncio passa da janela, gravando
 /// **um** passo de desfazer para o conjunto todo. Enquanto ela estiver
 /// aberta, pede repaint para que o prazo seja de fato verificado.
-fn settle_nudge_run(ctx: &egui::Context, session: &mut EditorSession) {
-    let Some(deadline) = session.nudge_until else {
+fn settle_edit_run(ctx: &egui::Context, session: &mut EditorSession) {
+    let Some(deadline) = session.edit_run_until else {
         return;
     };
     let now = ctx.input(|i| i.time);
     if now >= deadline {
-        close_nudge_run(session);
+        close_edit_run(session);
     } else {
         ctx.request_repaint_after(std::time::Duration::from_secs_f64(deadline - now));
     }
 }
 
 /// Encerra a corrida imediatamente (outra ação começou).
-fn close_nudge_run(session: &mut EditorSession) {
-    if session.nudge_until.take().is_some() {
+fn close_edit_run(session: &mut EditorSession) {
+    if session.edit_run_until.take().is_some() {
         session.doc.end_move();
     }
+}
+
+/// A anotação selecionada é um texto?
+fn selected_is_text(session: &EditorSession) -> bool {
+    session
+        .selected
+        .and_then(|i| session.doc.layers().get(i))
+        .is_some_and(|layer| matches!(layer.shape, Shape::Text { .. }))
+}
+
+/// Aplica o estilo ativo da toolbar à anotação selecionada.
+///
+/// Entra na mesma corrida coalescida do empurrão: arrastar o controle de
+/// espessura mexe na anotação a cada quadro, mas o histórico recebe um único
+/// passo quando o arrasto para.
+fn restyle_selection(ctx: &egui::Context, session: &mut EditorSession) {
+    let Some(index) = session.selected else {
+        return;
+    };
+    if session.edit_run_until.is_none() {
+        session.doc.begin_move();
+    }
+    let style = session.style();
+    session.doc.set_style(index, style);
+    session.edit_run_until = Some(ctx.input(|i| i.time) + NUDGE_COALESCE_SECS);
 }
 
 /// Deslocamento da cópia: para baixo e para a esquerda, invertendo um eixo
@@ -1059,7 +1094,7 @@ fn begin_select_drag(
     origin: Pos2,
 ) {
     // Pegar o mouse encerra a corrida de empurrões pendente.
-    close_nudge_run(session);
+    close_edit_run(session);
     if let Some((index, handle)) = handle_at(session, ts, origin) {
         session.selected = Some(index);
         session.doc.begin_move();

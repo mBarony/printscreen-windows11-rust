@@ -8,19 +8,13 @@
 //! em [`stroke`] (contornos) e [`fill`] (preenchimentos), reexportadas aqui
 //! para que os chamadores continuem escrevendo `raster::stroke_line(…)`.
 
-// As primitivas de preenchimento, canto arredondado e polilinha são a base
-// das ferramentas novas (formas preenchidas, pílula do texto, marcador,
-// redação, spotlight, sombra do backdrop) e nascem antes de quem as chama.
-// Este `allow` sai quando a última delas for ligada ao editor.
-#![allow(dead_code)]
-
 pub mod fill;
 pub mod stroke;
 
-// Reexporta o que já tem chamador; as primitivas novas entram aqui conforme
-// as ferramentas que as usam forem ligadas.
-pub use fill::fill_triangle;
-pub use stroke::{stroke_ellipse, stroke_line, stroke_polyline, stroke_rect};
+pub use fill::{fill_ellipse, fill_rect, fill_triangle};
+pub use stroke::{
+    stroke_ellipse, stroke_line, stroke_polyline, stroke_rect, stroke_round_rect,
+};
 
 use crate::imgbuf::RgbaImage;
 

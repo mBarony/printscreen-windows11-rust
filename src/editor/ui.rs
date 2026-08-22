@@ -18,7 +18,7 @@ use crate::storage::{self, SaveTarget};
 use super::icons::{self, Icon};
 use super::shapes::{
     arrow_geometry, normalize, push_sample, shape_from_drag, stroke_appearance,
-    stroke_from_samples, Handle, Layer, Point, Shape, Tool,
+    stroke_from_samples, Handle, Layer, Point, Shape, Tool, CORNER_RADIUS_MAX,
 };
 use super::{
     DragPreview, EditorSession, MoveDrag, ResizeDrag, TextInput, CROP_MIN_SIDE, DUPLICATE_OFFSET,
@@ -397,6 +397,35 @@ fn toolbar(ctx: &egui::Context, session: &mut EditorSession, target: &SaveTarget
                     session.stroke_width = stroke.round().clamp(STROKE_MIN, STROKE_MAX);
                     restyle_selection(ctx, session);
                 }
+
+                // --- Preenchimento e cantos: só valem para retângulo e
+                // elipse, seja a ferramenta ativa ou a anotação selecionada ---
+                let shape_tool = matches!(session.tool, Tool::Rect | Tool::Ellipse)
+                    || selected_shape_takes_fill(session);
+                ui.add_enabled_ui(shape_tool, |ui| {
+                    if icon_button(ui, Icon::Fill, session.filled, shape_tool)
+                        .on_hover_text("Preencher a forma")
+                        .clicked()
+                    {
+                        session.filled = !session.filled;
+                        restyle_selection(ctx, session);
+                    }
+                    let mut radius = session.corner_radius;
+                    if ui
+                        .add(
+                            egui::DragValue::new(&mut radius)
+                                .range(0.0..=CORNER_RADIUS_MAX)
+                                .speed(0.2)
+                                .fixed_decimals(0)
+                                .prefix("⌜"),
+                        )
+                        .on_hover_text("Raio dos cantos do retângulo")
+                        .changed()
+                    {
+                        session.corner_radius = radius.round().clamp(0.0, CORNER_RADIUS_MAX);
+                        restyle_selection(ctx, session);
+                    }
+                });
 
                 // --- Tamanho da fonte: com a ferramenta Texto ou com um
                 // texto selecionado, que é como se redimensiona um texto ---
@@ -882,19 +911,37 @@ fn paint_shape(painter: &egui::Painter, layer: &Layer, ts: ToScreen) {
             ));
         }
         Shape::Rect { min, max } => {
-            painter.rect_stroke(
-                Rect::from_min_max(ts.pos(*min), ts.pos(*max)),
-                CornerRadius::ZERO,
-                stroke,
-                StrokeKind::Middle,
-            );
+            let rect = Rect::from_min_max(ts.pos(*min), ts.pos(*max));
+            // O raio é limitado a metade do menor lado, como no rasterizador
+            // da exportação — senão o preview arredondaria mais que o JPG.
+            let radius = ts
+                .len(style.corner_radius)
+                .min(rect.width() / 2.0)
+                .min(rect.height() / 2.0)
+                .max(0.0)
+                .round() as u8;
+            if style.filled {
+                painter.rect_filled(rect, CornerRadius::same(radius), color32(style.color));
+            } else {
+                painter.rect_stroke(
+                    rect,
+                    CornerRadius::same(radius),
+                    stroke,
+                    StrokeKind::Middle,
+                );
+            }
         }
         Shape::Ellipse { center, rx, ry } => {
-            painter.add(egui::Shape::ellipse_stroke(
-                ts.pos(*center),
-                Vec2::new(ts.len(*rx), ts.len(*ry)),
-                stroke,
-            ));
+            let radii = Vec2::new(ts.len(*rx), ts.len(*ry));
+            if style.filled {
+                painter.add(egui::Shape::ellipse_filled(
+                    ts.pos(*center),
+                    radii,
+                    color32(style.color),
+                ));
+            } else {
+                painter.add(egui::Shape::ellipse_stroke(ts.pos(*center), radii, stroke));
+            }
         }
         Shape::Freehand { points, highlight } => {
             let (width, color) = stroke_appearance(style, *highlight);
@@ -1075,6 +1122,16 @@ fn close_edit_run(session: &mut EditorSession) {
     if session.edit_run_until.take().is_some() {
         session.doc.end_move();
     }
+}
+
+/// A anotação selecionada aceita preenchimento e cantos arredondados?
+fn selected_shape_takes_fill(session: &EditorSession) -> bool {
+    session
+        .selected
+        .and_then(|i| session.doc.layers().get(i))
+        .is_some_and(|layer| {
+            matches!(layer.shape, Shape::Rect { .. } | Shape::Ellipse { .. })
+        })
 }
 
 /// A anotação selecionada é um texto?

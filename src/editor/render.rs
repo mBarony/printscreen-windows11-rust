@@ -56,23 +56,41 @@ pub fn render(base: &RgbaImage, layers: &[Layer]) -> Result<RgbaImage> {
                 );
             }
             Shape::Rect { min, max } => {
-                raster::stroke_rect(
-                    &mut buffer,
-                    (min.x, min.y),
-                    (max.x.max(min.x + 0.1), max.y.max(min.y + 0.1)),
-                    style.stroke_width,
-                    style.color,
-                );
+                let lo = (min.x, min.y);
+                let hi = (max.x.max(min.x + 0.1), max.y.max(min.y + 0.1));
+                match (style.filled, style.corner_radius > 0.0) {
+                    // Cheio não leva contorno: a silhueta é a própria cor.
+                    (true, _) => {
+                        raster::fill_rect(&mut buffer, lo, hi, style.corner_radius, style.color)
+                    }
+                    (false, true) => raster::stroke_round_rect(
+                        &mut buffer,
+                        lo,
+                        hi,
+                        style.corner_radius,
+                        style.stroke_width,
+                        style.color,
+                    ),
+                    (false, false) => {
+                        raster::stroke_rect(&mut buffer, lo, hi, style.stroke_width, style.color)
+                    }
+                }
             }
             Shape::Ellipse { center, rx, ry } => {
-                raster::stroke_ellipse(
-                    &mut buffer,
-                    (center.x, center.y),
-                    rx.max(0.1),
-                    ry.max(0.1),
-                    style.stroke_width,
-                    style.color,
-                );
+                let (cx, cy) = (center.x, center.y);
+                let (rx, ry) = (rx.max(0.1), ry.max(0.1));
+                if style.filled {
+                    raster::fill_ellipse(&mut buffer, (cx, cy), rx, ry, style.color);
+                } else {
+                    raster::stroke_ellipse(
+                        &mut buffer,
+                        (cx, cy),
+                        rx,
+                        ry,
+                        style.stroke_width,
+                        style.color,
+                    );
+                }
             }
             Shape::Freehand { points, highlight } => {
                 let (width, color) = stroke_appearance(style, *highlight);
@@ -160,7 +178,13 @@ mod tests {
     }
 
     fn style() -> Style {
-        Style { color: [255, 0, 0, 255], stroke_width: 3.0, font_size: 16.0 }
+        Style {
+            color: [255, 0, 0, 255],
+            stroke_width: 3.0,
+            font_size: 16.0,
+            filled: false,
+            corner_radius: 0.0,
+        }
     }
 
     fn layer(shape: Shape) -> Layer {
@@ -236,6 +260,47 @@ mod tests {
         assert_eq!(opaque[0], 255, "mão livre cobre");
         assert!(translucent[0] < opaque[0], "marca-texto não cobre");
         assert!(translucent[2] > opaque[2], "o azul do fundo sobrevive");
+    }
+
+    fn styled(shape: Shape, style: Style) -> Layer {
+        Layer { id: 1, shape, style }
+    }
+
+    #[test]
+    fn a_filled_rect_paints_its_interior() {
+        let img = base();
+        let shape = Shape::Rect { min: Point::new(16.0, 16.0), max: Point::new(48.0, 48.0) };
+        let hollow = render(&img, &[layer(shape.clone())]).unwrap();
+        let solid = render(
+            &img,
+            &[styled(shape, Style { filled: true, ..style() })],
+        )
+        .unwrap();
+        assert_eq!(hollow.pixel(32, 32), [10, 20, 30, 255], "vazado deixa o miolo");
+        assert_eq!(solid.pixel(32, 32)[0], 255, "cheio pinta o miolo");
+    }
+
+    #[test]
+    fn the_corner_radius_rounds_a_filled_rect() {
+        let img = base();
+        let shape = Shape::Rect { min: Point::new(16.0, 16.0), max: Point::new(48.0, 48.0) };
+        let out = render(
+            &img,
+            &[styled(shape, Style { filled: true, corner_radius: 12.0, ..style() })],
+        )
+        .unwrap();
+        assert_eq!(out.pixel(32, 32)[0], 255, "miolo cheio");
+        assert_eq!(out.pixel(17, 17), [10, 20, 30, 255], "canto recuado pelo raio");
+        assert_eq!(out.pixel(32, 17)[0], 255, "meio da aresta continua cheio");
+    }
+
+    #[test]
+    fn a_filled_ellipse_paints_its_interior() {
+        let img = base();
+        let shape = Shape::Ellipse { center: Point::new(32.0, 32.0), rx: 16.0, ry: 10.0 };
+        let out = render(&img, &[styled(shape, Style { filled: true, ..style() })]).unwrap();
+        assert_eq!(out.pixel(32, 32)[0], 255, "centro cheio");
+        assert_eq!(out.pixel(32, 4), [10, 20, 30, 255], "fora da elipse");
     }
 
     #[test]

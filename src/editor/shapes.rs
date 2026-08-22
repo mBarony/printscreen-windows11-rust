@@ -27,6 +27,10 @@ pub enum Tool {
     Arrow,
     Rect,
     Ellipse,
+    /// Traço à mão livre, suavizado.
+    Freehand,
+    /// Mão livre grosso e translúcido, para marcar sem esconder.
+    Highlighter,
     Text,
     /// Recorta a imagem para a região arrastada (issue #5).
     Crop,
@@ -40,9 +44,17 @@ impl Tool {
             Self::Arrow => "Seta",
             Self::Rect => "Retângulo",
             Self::Ellipse => "Elipse",
+            Self::Freehand => "Mão livre",
+            Self::Highlighter => "Marca-texto",
             Self::Text => "Texto",
             Self::Crop => "Recortar",
         }
+    }
+
+    /// Ferramentas cujo arrasto acumula uma sequência de pontos, em vez de
+    /// um par início–fim.
+    pub fn is_stroke(self) -> bool {
+        matches!(self, Self::Freehand | Self::Highlighter)
     }
 }
 
@@ -62,7 +74,35 @@ pub enum Shape {
     Arrow { a: Point, b: Point },
     Rect { min: Point, max: Point },
     Ellipse { center: Point, rx: f32, ry: f32 },
+    /// Traço à mão livre já suavizado. `highlight` o transforma em
+    /// marca-texto — mesma geometria, outra espessura e opacidade.
+    Freehand { points: Vec<Point>, highlight: bool },
     Text { anchor: Point, content: String },
+}
+
+/// Opacidade do marca-texto sobre uma cor opaca da paleta.
+pub const HIGHLIGHTER_ALPHA: u8 = 120;
+/// Multiplicador e piso da espessura do marca-texto.
+const HIGHLIGHTER_WIDTH_SCALE: f32 = 3.0;
+const HIGHLIGHTER_MIN_WIDTH: f32 = 6.0;
+
+/// Espessura e cor com que um traço à mão livre é de fato desenhado.
+///
+/// O marca-texto é deliberadamente grosso e translúcido: ele marca sem
+/// esconder o que está embaixo. Uma cor que já venha translúcida do seletor
+/// é respeitada como está.
+pub fn stroke_appearance(style: &Style, highlight: bool) -> (f32, [u8; 4]) {
+    if !highlight {
+        return (style.stroke_width, style.color);
+    }
+    let mut color = style.color;
+    if color[3] == u8::MAX {
+        color[3] = HIGHLIGHTER_ALPHA;
+    }
+    (
+        (style.stroke_width * HIGHLIGHTER_WIDTH_SCALE).max(HIGHLIGHTER_MIN_WIDTH),
+        color,
+    )
 }
 
 /// Uma anotação no documento: geometria, aparência e uma identidade estável.
@@ -110,6 +150,17 @@ impl Layer {
                 };
                 (0..N).any(|i| dist_to_segment(p, pt(i), pt(i + 1)) <= reach)
             }
+            Shape::Freehand { points, highlight } => {
+                // O alcance sai da espessura efetiva: um marca-texto é bem
+                // mais largo que a mão livre de mesmo traço.
+                let (width, _) = stroke_appearance(&self.style, *highlight);
+                let reach = tol + width / 2.0;
+                match points.as_slice() {
+                    [] => false,
+                    [only] => dist(p, *only) <= reach,
+                    _ => points.windows(2).any(|s| dist_to_segment(p, s[0], s[1]) <= reach),
+                }
+            }
             Shape::Text { anchor, .. } => {
                 let (w, h) = text_size;
                 p.x >= anchor.x - tol
@@ -131,6 +182,7 @@ impl Layer {
                 Point::new(center.x - rx, center.y - ry),
                 Point::new(center.x + rx, center.y + ry),
             )),
+            Shape::Freehand { points, .. } => points_bounds(points),
             Shape::Text { .. } => None,
         }
     }
@@ -219,9 +271,47 @@ impl Layer {
                 *ry = (max.y - min.y) / 2.0;
                 *center = Point::new(min.x + *rx, min.y + *ry);
             }
+            Shape::Freehand { points, .. } => rescale_points(points, min, max),
             // Linha e seta são redimensionadas pelas pontas; texto, pela roda.
             Shape::Line { .. } | Shape::Arrow { .. } | Shape::Text { .. } => {}
         }
+    }
+}
+
+/// Caixa que contém todos os pontos.
+fn points_bounds(points: &[Point]) -> Option<(Point, Point)> {
+    let first = points.first()?;
+    let mut bounds = (*first, *first);
+    for p in points {
+        bounds.0.x = bounds.0.x.min(p.x);
+        bounds.0.y = bounds.0.y.min(p.y);
+        bounds.1.x = bounds.1.x.max(p.x);
+        bounds.1.y = bounds.1.y.max(p.y);
+    }
+    Some(bounds)
+}
+
+/// Reprojeta um rabisco para caber na caixa `min..max`, mantendo a forma.
+///
+/// Um traço reto tem extensão zero num dos eixos; nesse eixo os pontos vão
+/// todos para o meio da caixa, em vez de virarem `NaN` numa divisão por zero.
+fn rescale_points(points: &mut [Point], min: Point, max: Point) {
+    let Some((from_min, from_max)) = points_bounds(points) else {
+        return;
+    };
+    let (src_w, src_h) = (from_max.x - from_min.x, from_max.y - from_min.y);
+    let (dst_w, dst_h) = (max.x - min.x, max.y - min.y);
+    for p in points {
+        p.x = if src_w.abs() <= f32::EPSILON {
+            min.x + dst_w / 2.0
+        } else {
+            min.x + (p.x - from_min.x) / src_w * dst_w
+        };
+        p.y = if src_h.abs() <= f32::EPSILON {
+            min.y + dst_h / 2.0
+        } else {
+            min.y + (p.y - from_min.y) / src_h * dst_h
+        };
     }
 }
 
@@ -339,6 +429,7 @@ impl Shape {
                 mv(max);
             }
             Self::Ellipse { center, .. } => mv(center),
+            Self::Freehand { points, .. } => points.iter_mut().for_each(mv),
             Self::Text { anchor, .. } => mv(anchor),
         }
     }
@@ -423,7 +514,76 @@ pub fn shape_from_drag(
                 ry,
             })
         }
+        // Rabiscos vêm de uma sequência de pontos, não de um par início–fim.
+        Tool::Freehand | Tool::Highlighter => None,
         Tool::Text | Tool::Select | Tool::Crop => None,
+    }
+}
+
+/// Distância mínima entre pontos amostrados de um rabisco, em px da imagem.
+pub const STROKE_SAMPLE_MIN_DIST: f32 = 1.5;
+
+/// Acrescenta `p` à sequência amostrada, se estiver longe o bastante do
+/// último. Sem esse filtro um arrasto lento acumula centenas de pontos
+/// colados, que só fazem a suavização tremer.
+pub fn push_sample(points: &mut Vec<Point>, p: Point) {
+    let far_enough = points
+        .last()
+        .is_none_or(|last| dist(*last, p) >= STROKE_SAMPLE_MIN_DIST);
+    if far_enough {
+        points.push(p);
+    }
+}
+
+/// Constrói o rabisco a partir dos pontos amostrados.
+pub fn stroke_from_samples(tool: Tool, samples: &[Point]) -> Option<Shape> {
+    if !tool.is_stroke() || samples.len() < 2 {
+        return None;
+    }
+    Some(Shape::Freehand {
+        points: smooth_stroke(samples),
+        highlight: tool == Tool::Highlighter,
+    })
+}
+
+/// Suaviza a sequência amostrada numa polilinha densa.
+///
+/// Cada ponto amostrado vira o *controle* de uma Bézier quadrática que vai do
+/// ponto médio anterior ao próximo — o esquema clássico de traço à mão livre.
+/// A curva é achatada em segmentos aqui, e não na hora de desenhar, para o
+/// preview do editor e o JPG exportado percorrerem exatamente os mesmos
+/// pontos.
+pub fn smooth_stroke(points: &[Point]) -> Vec<Point> {
+    if points.len() < 3 {
+        return points.to_vec();
+    }
+    let mut out = vec![points[0]];
+    for window in points.windows(2).skip(1) {
+        let ctrl = window[0];
+        let end = midpoint(ctrl, window[1]);
+        let start = *out.last().expect("a saída começa com um ponto");
+        flatten_quadratic(start, ctrl, end, &mut out);
+    }
+    out.push(points[points.len() - 1]);
+    out
+}
+
+fn midpoint(a: Point, b: Point) -> Point {
+    Point::new((a.x + b.x) / 2.0, (a.y + b.y) / 2.0)
+}
+
+/// Achata uma Bézier quadrática em segmentos, com densidade proporcional ao
+/// tamanho da curva (o `p0` já está na saída; só os seguintes entram).
+fn flatten_quadratic(p0: Point, ctrl: Point, p1: Point, out: &mut Vec<Point>) {
+    let rough_len = dist(p0, ctrl) + dist(ctrl, p1);
+    let steps = ((rough_len / 3.0).ceil() as usize).clamp(2, 16);
+    for step in 1..=steps {
+        let t = step as f32 / steps as f32;
+        let inv = 1.0 - t;
+        out.push(Point::new(
+            inv * inv * p0.x + 2.0 * inv * t * ctrl.x + t * t * p1.x,
+            inv * inv * p0.y + 2.0 * inv * t * ctrl.y + t * t * p1.y,
+        ));
     }
 }
 
@@ -765,6 +925,118 @@ mod tests {
                 // Caixa 40..80 × 40..70 → centro (60, 55), raios (20, 15).
                 assert_eq!((center.x, center.y), (60.0, 55.0));
                 assert_eq!((rx, ry), (20.0, 15.0));
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Mão livre e marca-texto
+    // -----------------------------------------------------------------------
+
+    fn pts(raw: &[(f32, f32)]) -> Vec<Point> {
+        raw.iter().map(|(x, y)| Point::new(*x, *y)).collect()
+    }
+
+    #[test]
+    fn samples_closer_than_the_threshold_are_dropped() {
+        let mut samples = Vec::new();
+        push_sample(&mut samples, Point::new(0.0, 0.0));
+        push_sample(&mut samples, Point::new(0.5, 0.0)); // colado demais
+        push_sample(&mut samples, Point::new(2.0, 0.0)); // longe o bastante
+        assert_eq!(samples.len(), 2);
+        assert_eq!((samples[1].x, samples[1].y), (2.0, 0.0));
+    }
+
+    #[test]
+    fn smoothing_keeps_the_ends_and_densifies_the_middle() {
+        let raw = pts(&[(0.0, 0.0), (10.0, 20.0), (20.0, 0.0), (30.0, 20.0)]);
+        let smooth = smooth_stroke(&raw);
+        assert_eq!(smooth.first(), raw.first(), "a primeira ponta é preservada");
+        assert_eq!(smooth.last(), raw.last(), "a última ponta é preservada");
+        assert!(smooth.len() > raw.len(), "a curva é achatada em mais pontos");
+    }
+
+    #[test]
+    fn a_stroke_too_short_to_smooth_passes_through() {
+        let raw = pts(&[(0.0, 0.0), (5.0, 5.0)]);
+        assert_eq!(smooth_stroke(&raw), raw);
+    }
+
+    #[test]
+    fn the_highlighter_is_wider_and_translucent() {
+        let style = Style { stroke_width: 3.0, ..style() };
+        let (plain_w, plain_c) = stroke_appearance(&style, false);
+        let (mark_w, mark_c) = stroke_appearance(&style, true);
+        assert_eq!((plain_w, plain_c[3]), (3.0, 255));
+        assert_eq!(mark_w, 9.0, "3× a espessura");
+        assert_eq!(mark_c[3], HIGHLIGHTER_ALPHA);
+        assert_eq!(&mark_c[..3], &plain_c[..3], "só a opacidade muda");
+
+        // Uma cor já translúcida do seletor é respeitada como está.
+        let custom = Style { color: [1, 2, 3, 40], ..style };
+        assert_eq!(stroke_appearance(&custom, true).1[3], 40);
+    }
+
+    #[test]
+    fn the_highlighter_has_a_wider_grab_area() {
+        // Mesma geometria e mesmo traço: o marca-texto pega de mais longe.
+        let shape = |highlight| Shape::Freehand {
+            points: pts(&[(0.0, 0.0), (100.0, 0.0)]),
+            highlight,
+        };
+        let thin = layer(shape(false));
+        let mark = layer(shape(true));
+        let p = Point::new(50.0, 5.0);
+        assert!(!thin.hit_test(p, 1.0, (0.0, 0.0)));
+        assert!(mark.hit_test(p, 1.0, (0.0, 0.0)));
+    }
+
+    #[test]
+    fn a_stroke_needs_at_least_two_samples() {
+        assert!(stroke_from_samples(Tool::Freehand, &pts(&[(1.0, 1.0)])).is_none());
+        assert!(stroke_from_samples(Tool::Freehand, &[]).is_none());
+        // E a ferramenta precisa ser de rabisco.
+        assert!(stroke_from_samples(Tool::Rect, &pts(&[(0.0, 0.0), (9.0, 9.0)])).is_none());
+    }
+
+    #[test]
+    fn the_highlighter_tool_marks_the_shape() {
+        let s = stroke_from_samples(Tool::Highlighter, &pts(&[(0.0, 0.0), (9.0, 9.0)])).unwrap();
+        assert!(matches!(s, Shape::Freehand { highlight: true, .. }));
+        let s = stroke_from_samples(Tool::Freehand, &pts(&[(0.0, 0.0), (9.0, 9.0)])).unwrap();
+        assert!(matches!(s, Shape::Freehand { highlight: false, .. }));
+    }
+
+    #[test]
+    fn resizing_a_stroke_rescales_every_point() {
+        let mut l = layer(Shape::Freehand {
+            points: pts(&[(0.0, 0.0), (10.0, 5.0), (20.0, 10.0)]),
+            highlight: false,
+        });
+        l.resize(Handle::BottomRight, Point::new(40.0, 20.0), false);
+        match &l.shape {
+            Shape::Freehand { points, .. } => {
+                assert_eq!((points[0].x, points[0].y), (0.0, 0.0), "âncora fixa");
+                assert_eq!((points[2].x, points[2].y), (40.0, 20.0), "ponta segue o arrasto");
+                assert_eq!((points[1].x, points[1].y), (20.0, 10.0), "o meio acompanha");
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn resizing_a_flat_stroke_does_not_produce_nan() {
+        // Traço perfeitamente horizontal: altura zero não pode virar divisão
+        // por zero ao reescalar.
+        let mut l = layer(Shape::Freehand {
+            points: pts(&[(0.0, 5.0), (10.0, 5.0)]),
+            highlight: false,
+        });
+        l.resize(Handle::BottomRight, Point::new(20.0, 25.0), false);
+        match &l.shape {
+            Shape::Freehand { points, .. } => {
+                assert!(points.iter().all(|p| p.x.is_finite() && p.y.is_finite()));
             }
             _ => unreachable!(),
         }

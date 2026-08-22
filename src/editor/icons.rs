@@ -19,6 +19,8 @@ pub enum Icon {
     Arrow,
     Rect,
     Ellipse,
+    Freehand,
+    Highlighter,
     Text,
     Crop,
     Undo,
@@ -37,18 +39,22 @@ impl Icon {
             Tool::Arrow => Self::Arrow,
             Tool::Rect => Self::Rect,
             Tool::Ellipse => Self::Ellipse,
+            Tool::Freehand => Self::Freehand,
+            Tool::Highlighter => Self::Highlighter,
             Tool::Text => Self::Text,
             Tool::Crop => Self::Crop,
         }
     }
 
     #[cfg(test)]
-    pub const ALL: [Icon; 13] = [
+    pub const ALL: [Icon; 15] = [
         Icon::Move,
         Icon::Line,
         Icon::Arrow,
         Icon::Rect,
         Icon::Ellipse,
+        Icon::Freehand,
+        Icon::Highlighter,
         Icon::Text,
         Icon::Crop,
         Icon::Undo,
@@ -67,6 +73,8 @@ impl Icon {
             Icon::Arrow => "arrow",
             Icon::Rect => "rect",
             Icon::Ellipse => "ellipse",
+            Icon::Freehand => "freehand",
+            Icon::Highlighter => "highlighter",
             Icon::Text => "text",
             Icon::Crop => "crop",
             Icon::Undo => "undo",
@@ -140,6 +148,20 @@ pub fn geometry(icon: Icon) -> Vec<Primitive> {
         ],
         Icon::Rect => vec![Stroke(rectangle(0.12, 0.22, 0.88, 0.78))],
         Icon::Ellipse => vec![Stroke(ellipse(0.5, 0.5, 0.4, 0.32))],
+        // Rabisco em "S" deitado — o gesto da mão livre.
+        Icon::Freehand => vec![Stroke(vec![
+            (0.10, 0.68),
+            (0.24, 0.40),
+            (0.40, 0.66),
+            (0.56, 0.34),
+            (0.72, 0.60),
+            (0.90, 0.30),
+        ])],
+        // Ponta chanfrada do marcador, sobre o rastro que ele deixa.
+        Icon::Highlighter => vec![
+            Fill(vec![(0.20, 0.62), (0.62, 0.18), (0.82, 0.34), (0.40, 0.76)]),
+            Stroke(vec![(0.12, 0.88), (0.88, 0.88)]),
+        ],
         Icon::Text => vec![
             Stroke(vec![(0.16, 0.18), (0.84, 0.18)]), // barra do T
             Stroke(vec![(0.5, 0.18), (0.5, 0.86)]),   // haste

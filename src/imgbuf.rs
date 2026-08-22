@@ -45,8 +45,7 @@ impl RgbaImage {
         &self.pixels
     }
 
-    /// Leitura de pixel — usada pelas verificações dos testes.
-    #[cfg(test)]
+    /// Cor de um pixel. Fora dos testes, é o que o conta-gotas do editor lê.
     pub fn pixel(&self, x: u32, y: u32) -> [u8; 4] {
         let i = self.index(x, y);
         self.pixels[i..i + 4].try_into().expect("4 bytes")

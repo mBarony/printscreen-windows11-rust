@@ -188,6 +188,7 @@ pub struct ToolKeysConfig {
     pub freehand: String,
     pub highlighter: String,
     pub marker: String,
+    pub eyedropper: String,
     pub text: String,
     pub crop: String,
 }
@@ -203,6 +204,7 @@ impl Default for ToolKeysConfig {
             freehand: "F".into(),
             highlighter: "H".into(),
             marker: "N".into(),
+            eyedropper: "I".into(),
             text: "T".into(),
             crop: "C".into(),
         }
@@ -317,6 +319,7 @@ impl Config {
                 freehand: tool_key("freehand", &defaults.editor.tool_keys.freehand),
                 highlighter: tool_key("highlighter", &defaults.editor.tool_keys.highlighter),
                 marker: tool_key("marker", &defaults.editor.tool_keys.marker),
+                eyedropper: tool_key("eyedropper", &defaults.editor.tool_keys.eyedropper),
                 text: tool_key("text", &defaults.editor.tool_keys.text),
                 crop: tool_key("crop", &defaults.editor.tool_keys.crop),
             },
@@ -383,6 +386,7 @@ impl Config {
                             ("freehand", json::s(&self.editor.tool_keys.freehand)),
                             ("highlighter", json::s(&self.editor.tool_keys.highlighter)),
                             ("marker", json::s(&self.editor.tool_keys.marker)),
+                            ("eyedropper", json::s(&self.editor.tool_keys.eyedropper)),
                             ("text", json::s(&self.editor.tool_keys.text)),
                             ("crop", json::s(&self.editor.tool_keys.crop)),
                         ]),

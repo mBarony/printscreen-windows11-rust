@@ -17,6 +17,7 @@ use std::sync::Arc;
 use crate::imgbuf::RgbaImage;
 
 use super::redact;
+use super::spotlight::{self, Spotlight};
 use super::shapes::{Handle, Layer, Point, RedactionStyle, Shape, Style};
 
 /// Teto do histórico, em operações.
@@ -61,6 +62,24 @@ fn redaction_marks(layers: &[Layer]) -> Vec<RedactionMark> {
         .collect()
 }
 
+fn spotlights(layers: &[Layer]) -> Vec<Spotlight> {
+    layers
+        .iter()
+        .filter_map(|layer| match &layer.shape {
+            Shape::Spotlight { center, rx, ry } => Some(Spotlight {
+                center: *center,
+                rx: *rx,
+                ry: *ry,
+                form: layer.style.spotlight,
+                magnification: layer.style.magnification,
+                border: layer.style.stroke_width,
+                border_color: layer.style.color,
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
 /// Ponto de partida do replay: imagem e anotações já consolidadas.
 struct Baseline {
     image: Arc<RgbaImage>,
@@ -88,8 +107,9 @@ pub struct Document {
     /// Avança quando os pixels visíveis mudam (recorte ou redação) — é o que
     /// diz ao editor para refazer a textura.
     pixels_version: u64,
-    /// Redações aplicadas no último replay.
+    /// Redações e holofotes aplicados no último replay.
     redactions: Vec<RedactionMark>,
+    spotlights: Vec<Spotlight>,
 
     /// Recortes aplicados no último replay, e um selo que só avança quando
     /// eles mudam. O replay reconstrói a imagem toda vez, então o `Arc` é
@@ -146,6 +166,7 @@ impl Document {
             layers: Vec::new(),
             pixels_version: 0,
             redactions: Vec::new(),
+            spotlights: Vec::new(),
             crops: Vec::new(),
             image_version: 0,
             pending: None,
@@ -195,17 +216,22 @@ impl Document {
         // por cima: uma seta sobre a área redigida continua visível, e o que
         // estava embaixo não volta nem na tela nem no arquivo.
         let marks = redaction_marks(&layers);
-        let redacted = if marks.is_empty() {
+        // Os holofotes vêm depois das redações, de propósito: a lupa nunca
+        // pode ampliar o que foi censurado.
+        let lights = spotlights(&layers);
+        let redacted = if marks.is_empty() && lights.is_empty() {
             image.clone()
         } else {
             let mut burnt = (*image).clone();
             for mark in &marks {
                 redact::apply(&mut burnt, mark.min, mark.max, mark.style, mark.seed);
             }
+            spotlight::apply(&mut burnt, &lights);
             Arc::new(burnt)
         };
-        if reframed || marks != self.redactions {
+        if reframed || marks != self.redactions || lights != self.spotlights {
             self.redactions = marks;
+            self.spotlights = lights;
             self.pixels_version += 1;
         }
 
@@ -368,7 +394,9 @@ impl Document {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::editor::shapes::{shape_from_drag, Point, Tool};
+    use crate::editor::shapes::{
+        shape_from_drag, Point, SpotlightForm, Tool, MAGNIFICATION_DEFAULT,
+    };
 
     fn doc() -> Document {
         Document::new(RgbaImage::filled(64, 48, [10, 20, 30, 255]))
@@ -383,6 +411,8 @@ mod tests {
             corner_radius: 0.0,
             text_pill: false,
             redaction: RedactionStyle::default(),
+            spotlight: SpotlightForm::default(),
+            magnification: MAGNIFICATION_DEFAULT,
         }
     }
 

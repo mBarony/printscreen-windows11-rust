@@ -9,7 +9,9 @@ use egui::{
 use crate::storage::SaveTarget;
 
 use crate::editor::icons::{self, Icon};
-use crate::editor::shapes::{RedactionStyle, Tool, CORNER_RADIUS_MAX};
+use crate::editor::shapes::{
+    RedactionStyle, Tool, CORNER_RADIUS_MAX, MAGNIFICATION_MAX, MAGNIFICATION_MIN,
+};
 use crate::editor::{
     EditorSession,
     FONT_MAX, FONT_MIN, PALETTE, STROKE_MAX,
@@ -20,7 +22,8 @@ use super::{
     select_tool,
 };
 use super::interact::{
-    restyle_selection, selected_is_redaction, selected_is_text, selected_shape_takes_fill,
+    restyle_selection, selected_is_redaction, selected_is_spotlight, selected_is_text,
+    selected_shape_takes_fill,
 };
 
 /// Lado do botão de ícone da toolbar, em pontos.
@@ -205,6 +208,36 @@ pub(super) fn draw(ctx: &egui::Context, session: &mut EditorSession, target: &Sa
                         } else {
                             RedactionStyle::Solid
                         };
+                        restyle_selection(ctx, session);
+                    }
+                });
+
+                // --- Holofote: recorte e ampliação ---
+                let lighting = session.tool == Tool::Spotlight || selected_is_spotlight(session);
+                ui.add_enabled_ui(lighting, |ui| {
+                    if icon_button(ui, Icon::Spotlight, false, lighting)
+                        .on_hover_text(format!(
+                            "Holofote: {} (clique para alternar)",
+                            session.spotlight.label()
+                        ))
+                        .clicked()
+                    {
+                        session.spotlight = session.spotlight.next();
+                        restyle_selection(ctx, session);
+                    }
+                    let mut zoom = session.magnification;
+                    if ui
+                        .add(
+                            egui::DragValue::new(&mut zoom)
+                                .range(MAGNIFICATION_MIN..=MAGNIFICATION_MAX)
+                                .speed(0.05)
+                                .fixed_decimals(1)
+                                .suffix("×"),
+                        )
+                        .on_hover_text("Quanto o holofote amplia")
+                        .changed()
+                    {
+                        session.magnification = zoom.clamp(MAGNIFICATION_MIN, MAGNIFICATION_MAX);
                         restyle_selection(ctx, session);
                     }
                 });

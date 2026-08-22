@@ -190,6 +190,7 @@ pub struct ToolKeysConfig {
     pub marker: String,
     pub eyedropper: String,
     pub redact: String,
+    pub spotlight: String,
     pub text: String,
     pub crop: String,
 }
@@ -207,6 +208,7 @@ impl Default for ToolKeysConfig {
             marker: "N".into(),
             eyedropper: "I".into(),
             redact: "D".into(),
+            spotlight: "O".into(),
             text: "T".into(),
             crop: "C".into(),
         }
@@ -323,6 +325,7 @@ impl Config {
                 marker: tool_key("marker", &defaults.editor.tool_keys.marker),
                 eyedropper: tool_key("eyedropper", &defaults.editor.tool_keys.eyedropper),
                 redact: tool_key("redact", &defaults.editor.tool_keys.redact),
+                spotlight: tool_key("spotlight", &defaults.editor.tool_keys.spotlight),
                 text: tool_key("text", &defaults.editor.tool_keys.text),
                 crop: tool_key("crop", &defaults.editor.tool_keys.crop),
             },
@@ -391,6 +394,7 @@ impl Config {
                             ("marker", json::s(&self.editor.tool_keys.marker)),
                             ("eyedropper", json::s(&self.editor.tool_keys.eyedropper)),
                             ("redact", json::s(&self.editor.tool_keys.redact)),
+                            ("spotlight", json::s(&self.editor.tool_keys.spotlight)),
                             ("text", json::s(&self.editor.tool_keys.text)),
                             ("crop", json::s(&self.editor.tool_keys.crop)),
                         ]),

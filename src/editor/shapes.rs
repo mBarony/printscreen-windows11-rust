@@ -37,6 +37,8 @@ pub enum Tool {
     Eyedropper,
     /// Apaga uma região da imagem, sem volta.
     Redact,
+    /// Escurece o resto e amplia o que ficou dentro.
+    Spotlight,
     Text,
     /// Recorta a imagem para a região arrastada (issue #5).
     Crop,
@@ -55,6 +57,7 @@ impl Tool {
             Self::Marker => "Marcador",
             Self::Eyedropper => "Conta-gotas",
             Self::Redact => "Redação",
+            Self::Spotlight => "Holofote",
             Self::Text => "Texto",
             Self::Crop => "Recortar",
         }
@@ -84,6 +87,10 @@ pub struct Style {
     pub text_pill: bool,
     /// Como a redação apaga: mosaico sintético ou cor chapada.
     pub redaction: RedactionStyle,
+    /// Recorte do holofote.
+    pub spotlight: SpotlightForm,
+    /// Quantas vezes o holofote amplia o próprio miolo.
+    pub magnification: f32,
 }
 
 /// Cor da pílula de leitura atrás do texto.
@@ -104,6 +111,7 @@ pub const REDACTION_MIN_SIDE: f32 = 5.0;
 pub const CORNER_RADIUS_MAX: f32 = 24.0;
 
 pub use super::redact::RedactionStyle;
+pub use super::spotlight::{SpotlightForm, MAGNIFICATION_DEFAULT, MAGNIFICATION_MAX, MAGNIFICATION_MIN};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Shape {
@@ -119,6 +127,8 @@ pub enum Shape {
     /// Região apagada da imagem. `seed` mantém o mosaico estável entre
     /// quadros e muda ao duplicar.
     Redaction { min: Point, max: Point, seed: u32 },
+    /// Lente que escurece o resto da imagem e amplia o próprio miolo.
+    Spotlight { center: Point, rx: f32, ry: f32 },
     Text { anchor: Point, content: String },
 }
 
@@ -245,6 +255,15 @@ impl Layer {
                 // Região opaca: pega pelo corpo inteiro.
                 p.x >= min.x - tol && p.x <= max.x + tol && p.y >= min.y - tol && p.y <= max.y + tol
             }
+            Shape::Spotlight { center, rx, ry } => {
+                // A lente inteira é agarrável, como a redação.
+                inside_ellipse(p, *center, rx + tol, ry + tol)
+                    || (p.x >= center.x - rx - tol
+                        && p.x <= center.x + rx + tol
+                        && p.y >= center.y - ry - tol
+                        && p.y <= center.y + ry + tol
+                        && self.style.spotlight != SpotlightForm::Ellipse)
+            }
             Shape::Text { anchor, .. } => {
                 let (w, h) = text_size;
                 p.x >= anchor.x - tol
@@ -268,6 +287,10 @@ impl Layer {
             )),
             Shape::Freehand { points, .. } => points_bounds(points),
             Shape::Redaction { min, max, .. } => Some((*min, *max)),
+            Shape::Spotlight { center, rx, ry } => Some((
+                Point::new(center.x - rx, center.y - ry),
+                Point::new(center.x + rx, center.y + ry),
+            )),
             Shape::Marker { center, .. } => {
                 let r = marker_geometry(self.style.stroke_width).radius;
                 Some((
@@ -364,6 +387,11 @@ impl Layer {
                 *center = Point::new(min.x + *rx, min.y + *ry);
             }
             Shape::Freehand { points, .. } => rescale_points(points, min, max),
+            Shape::Spotlight { center, rx, ry } => {
+                *rx = (max.x - min.x) / 2.0;
+                *ry = (max.y - min.y) / 2.0;
+                *center = Point::new(min.x + *rx, min.y + *ry);
+            }
             Shape::Redaction { min: lo, max: hi, .. } => {
                 // Piso: uma redação de área nula não esconderia nada.
                 *lo = min;
@@ -540,6 +568,7 @@ impl Shape {
                 mv(min);
                 mv(max);
             }
+            Self::Spotlight { center, .. } => mv(center),
             Self::Text { anchor, .. } => mv(anchor),
         }
     }
@@ -638,6 +667,16 @@ pub fn shape_from_drag(
         Tool::Freehand | Tool::Highlighter => None,
         // O contador é colocado num clique; texto, mover e recortar têm
         // fluxos próprios.
+        Tool::Spotlight => {
+            let (min, max) = normalize(centered_start(a, b, alt), b);
+            let rx = (max.x - min.x) / 2.0;
+            let ry = (max.y - min.y) / 2.0;
+            Some(Shape::Spotlight {
+                center: Point::new(min.x + rx, min.y + ry),
+                rx,
+                ry,
+            })
+        }
         Tool::Redact => {
             let (min, max) = normalize(centered_start(a, b, alt), b);
             // A semente é preenchida por quem cria, com uma fresca.
@@ -808,6 +847,8 @@ mod tests {
             corner_radius: 0.0,
             text_pill: false,
             redaction: RedactionStyle::default(),
+            spotlight: SpotlightForm::default(),
+            magnification: MAGNIFICATION_DEFAULT,
         }
     }
 

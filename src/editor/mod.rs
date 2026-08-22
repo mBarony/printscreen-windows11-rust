@@ -137,10 +137,11 @@ pub struct EditorSession {
     pub move_drag: Option<MoveDrag>,
     /// Arrasto de uma alça de redimensionamento em andamento.
     pub resize_drag: Option<ResizeDrag>,
-    /// Instante (relógio do egui) em que a corrida de empurrões pelas setas
-    /// se fecha. Enquanto houver tecla chegando dentro da janela, o conjunto
-    /// inteiro é um passo só de desfazer.
-    pub nudge_until: Option<f64>,
+    /// Instante (relógio do egui) em que a corrida de edição contínua se
+    /// fecha — empurrões pelas setas e arrasto dos controles de estilo.
+    /// Enquanto houver evento chegando dentro da janela, o conjunto inteiro
+    /// é um passo só de desfazer.
+    pub edit_run_until: Option<f64>,
     /// Região de recorte já desenhada, aguardando confirmação (issue #5),
     /// em px da imagem — `(canto superior-esquerdo, inferior-direito)`.
     pub crop_pending: Option<(Point, Point)>,
@@ -175,7 +176,7 @@ impl EditorSession {
             selected: None,
             move_drag: None,
             resize_drag: None,
-            nudge_until: None,
+            edit_run_until: None,
             crop_pending: None,
             wheel_accum: 0.0,
             confirm_discard: false,

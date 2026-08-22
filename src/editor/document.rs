@@ -219,6 +219,15 @@ impl Document {
         }
     }
 
+    /// Troca o estilo da anotação `index`. Também só entra no histórico ao
+    /// fim da corrida — arrastar um controle de espessura geraria um passo
+    /// de desfazer por quadro.
+    pub fn set_style(&mut self, index: usize, style: Style) {
+        if let Some(layer) = self.layers.get_mut(index) {
+            layer.style = style;
+        }
+    }
+
     /// Confirma o arrasto: o que mudou vira **uma** operação de patch.
     /// Um arrasto que não moveu nada não entra no histórico.
     pub fn end_move(&mut self) {
@@ -370,6 +379,35 @@ mod tests {
         assert!(doc.can_redo(), "clique de seleção não pode destruir o redo");
         doc.redo();
         assert_eq!(doc.layers().len(), 2);
+    }
+
+    #[test]
+    fn a_run_of_style_changes_is_a_single_undo_step() {
+        // Arrastar o controle de espessura mexe na anotação a cada quadro;
+        // o histórico só pode receber um passo pela corrida inteira.
+        let mut doc = doc();
+        doc.push(rect(0.0, 0.0), style());
+        doc.begin_move();
+        for width in [4.0, 5.0, 6.0, 7.0] {
+            doc.set_style(0, Style { stroke_width: width, ..style() });
+        }
+        doc.end_move();
+        assert_eq!(doc.layers()[0].style.stroke_width, 7.0);
+
+        doc.undo();
+        assert_eq!(doc.layers()[0].style.stroke_width, 3.0, "volta de uma vez só");
+        assert!(doc.can_undo(), "resta a criação da anotação");
+    }
+
+    #[test]
+    fn restyling_keeps_the_layer_identity() {
+        let mut doc = doc();
+        let id = doc.push(rect(0.0, 0.0), style());
+        doc.begin_move();
+        doc.set_style(0, Style { color: [0, 0, 255, 255], ..style() });
+        doc.end_move();
+        assert_eq!(doc.layers()[0].id, id, "trocar o estilo não cria outra anotação");
+        assert_eq!(doc.layers().len(), 1);
     }
 
     #[test]

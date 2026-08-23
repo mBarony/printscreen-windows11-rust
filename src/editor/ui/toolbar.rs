@@ -96,228 +96,337 @@ pub(super) fn color_swatch(ui: &mut egui::Ui, rgba: [u8; 4], selected: bool) -> 
     painter.rect_stroke(target, CornerRadius::same(4), outline, StrokeKind::Inside);
     response
 }
+/// Ferramentas na ordem em que aparecem, agrupadas pelo que fazem com a
+/// imagem: apontar, desenhar por cima, esconder, mudar a moldura — e o
+/// conta-gotas por último, encostado na cor, porque é de lá que ela sai e é
+/// para lá que ele a leva.
+const TOOL_GROUPS: [&[Tool]; 5] = [
+    &[Tool::Select],
+    &[
+        Tool::Line,
+        Tool::Arrow,
+        Tool::Rect,
+        Tool::Ellipse,
+        Tool::Freehand,
+        Tool::Highlighter,
+        Tool::Marker,
+        Tool::Text,
+    ],
+    &[Tool::Redact, Tool::Spotlight],
+    &[Tool::Crop, Tool::Cut],
+    &[Tool::Eyedropper],
+];
 
 pub(super) fn draw(ctx: &egui::Context, session: &mut EditorSession, target: &SaveTarget) {
     egui::TopBottomPanel::top("editor_toolbar")
         .frame(egui::Frame::default().inner_margin(egui::Margin::symmetric(8, 5)))
         .show(ctx, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(3.0, 3.0);
+            // Histórico e saída são as ações que sempre têm de estar à mão, e
+            // enquanto vinham no fim da mesma fila eram justamente elas que
+            // sobravam quando a barra não cabia: cortadas na borda ou jogadas
+            // para uma segunda linha. `shrink_left` acrescenta a direita antes
+            // de tudo e limita a esquerda ao que sobrar — quem cede espaço é o
+            // resto, nunca elas.
+            // As duas metades não podem tocar `session` ao mesmo tempo, então
+            // a direita só relata o que foi clicado e a ação é aplicada aqui
+            // fora, com o empréstimo já livre.
+            let can_undo = session.doc.can_undo();
+            let can_redo = session.doc.can_redo();
+            let mut pedido = None;
 
-                // --- Ferramentas ---
-                for (tool, key) in session.tool_keys {
-                    let selected = session.tool == tool;
-                    if icon_button(ui, Icon::of(tool), selected, true)
-                        .on_hover_text(format!("{} — {}", tool.label(), tool_hint(tool, key)))
-                        .clicked()
-                    {
-                        select_tool(session, tool);
-                    }
-                }
+            egui::Sides::new()
+                .height(ICON_BUTTON)
+                .shrink_left()
+                .show(
+                ui,
+                |ui| {
+                    ui.spacing_mut().item_spacing = Vec2::new(3.0, 3.0);
+                    ui.horizontal_wrapped(|ui| {
+                        ui.spacing_mut().item_spacing = Vec2::new(3.0, 3.0);
+                        left_side(ctx, ui, session);
+                    });
+                },
+                |ui| {
+                    ui.spacing_mut().item_spacing = Vec2::new(3.0, 3.0);
+                    pedido = right_side(ui, can_undo, can_redo);
+                },
+            );
 
-                // Confirmação do recorte, junto das ferramentas.
-                if session.tool == Tool::Crop {
-                    let ready = session.crop_pending.is_some();
-                    if icon_button(ui, Icon::Check, false, ready)
-                        .on_hover_text("Aplicar recorte (Enter)")
-                        .clicked()
-                    {
-                        apply_crop(session);
-                    }
-                }
+            match pedido {
+                Some(RightAction::Undo) => perform_undo(session),
+                Some(RightAction::Redo) => perform_redo(session),
+                Some(RightAction::Copy) => copy_and_close(session),
+                Some(RightAction::Save) => save_and_close(session, target),
+                Some(RightAction::Close) => request_close(session),
+                None => {}
+            }
+        });
+}
 
-                separator(ui);
+/// O que a ponta direita pediu neste quadro.
+enum RightAction {
+    Undo,
+    Redo,
+    Copy,
+    Save,
+    Close,
+}
 
-                // --- Cor (também repinta a anotação selecionada) ---
+/// Histórico e saída, encostados na ponta direita.
+///
+/// São acrescentados da direita para a esquerda: o primeiro daqui é o que
+/// fica mais na ponta. Lidos na tela, saem como `| desfazer refazer | copiar
+/// salvar fechar`.
+fn right_side(ui: &mut egui::Ui, can_undo: bool, can_redo: bool) -> Option<RightAction> {
+    let mut pedido = None;
+
+    if icon_button(ui, Icon::Close, false, true)
+        .on_hover_text("Cancelar (Esc)")
+        .clicked()
+    {
+        pedido = Some(RightAction::Close);
+    }
+    if icon_button(ui, Icon::Save, false, true)
+        .on_hover_text("Salvar e fechar (Ctrl+S)")
+        .clicked()
+    {
+        pedido = Some(RightAction::Save);
+    }
+    if icon_button(ui, Icon::Copy, false, true)
+        .on_hover_text("Copiar e fechar (Ctrl+C)")
+        .clicked()
+    {
+        pedido = Some(RightAction::Copy);
+    }
+
+    separator(ui);
+
+    if icon_button(ui, Icon::Redo, false, can_redo)
+        .on_hover_text("Refazer (Ctrl+Y)")
+        .clicked()
+    {
+        pedido = Some(RightAction::Redo);
+    }
+    if icon_button(ui, Icon::Undo, false, can_undo)
+        .on_hover_text("Desfazer (Ctrl+Z)")
+        .clicked()
+    {
+        pedido = Some(RightAction::Undo);
+    }
+
+    separator(ui);
+
+    pedido
+}
+
+/// Ferramentas, cor, traço e os controles da ferramenta ativa.
+fn left_side(ctx: &egui::Context, ui: &mut egui::Ui, session: &mut EditorSession) {
+    // --- Ferramentas ---
+    for (index, group) in TOOL_GROUPS.iter().enumerate() {
+        if index > 0 {
+            separator(ui);
+        }
+        for &tool in *group {
+            let key = session
+                .tool_keys
+                .iter()
+                .find(|(candidate, _)| *candidate == tool)
+                .and_then(|(_, key)| *key);
+            let selected = session.tool == tool;
+            if icon_button(ui, Icon::of(tool), selected, true)
+                .on_hover_text(format!("{} — {}", tool.label(), tool_hint(tool, key)))
+                .clicked()
+            {
+                select_tool(session, tool);
+            }
+        }
+        // Confirmação do recorte, junto da ferramenta que a pede.
+        if group.contains(&Tool::Crop) && session.tool == Tool::Crop {
+            let ready = session.crop_pending.is_some();
+            if icon_button(ui, Icon::Check, false, ready)
+                .on_hover_text("Aplicar recorte (Enter)")
+                .clicked()
+            {
+                apply_crop(session);
+            }
+        }
+    }
+
+    separator(ui);
+
+    // --- Cor: na barra fica só a atual; a paleta sai num popup ---
+    //
+    // As oito amostras lado a lado custavam uns 180 pontos numa barra que já
+    // não cabia a 150% de escala. Trocar de cor passa a custar um clique a
+    // mais, e é o que menos dói: numa anotação escolhe-se a cor uma vez e
+    // desenha-se várias.
+    color_popup(ctx, ui, session);
+
+    separator(ui);
+
+    // --- Espessura do traço: amostra + valor arrastável ---
+    stroke_preview(ui, session.stroke_width);
+    let mut stroke = session.stroke_width;
+    if ui
+        .add(
+            egui::DragValue::new(&mut stroke)
+                .range(STROKE_MIN..=STROKE_MAX)
+                .speed(0.1)
+                .fixed_decimals(0),
+        )
+        .on_hover_text("Espessura do traço (Ctrl+roda no canvas)")
+        .changed()
+    {
+        session.stroke_width = stroke.round().clamp(STROKE_MIN, STROKE_MAX);
+        restyle_selection(ctx, session);
+    }
+
+    // Daqui até a moldura, cada bloco só existe quando serve para a ferramenta
+    // ativa (ou para a anotação selecionada). Antes ficavam todos sempre na
+    // barra, cinzentos: uns 450 pontos de controles mortos.
+
+    // --- Preenchimento e cantos: retângulo e elipse ---
+    if matches!(session.tool, Tool::Rect | Tool::Ellipse) || selected_shape_takes_fill(session) {
+        separator(ui);
+        if icon_button(ui, Icon::Fill, session.filled, true)
+            .on_hover_text("Preencher a forma")
+            .clicked()
+        {
+            session.filled = !session.filled;
+            restyle_selection(ctx, session);
+        }
+        let mut radius = session.corner_radius;
+        if ui
+            .add(
+                egui::DragValue::new(&mut radius)
+                    .range(0.0..=CORNER_RADIUS_MAX)
+                    .speed(0.2)
+                    .fixed_decimals(0),
+            )
+            .on_hover_text("Raio dos cantos do retângulo")
+            .changed()
+        {
+            session.corner_radius = radius.round().clamp(0.0, CORNER_RADIUS_MAX);
+            restyle_selection(ctx, session);
+        }
+    }
+
+    // --- Modo da redação: mosaico ou cor chapada ---
+    if session.tool == Tool::Redact || selected_is_redaction(session) {
+        separator(ui);
+        let solid = session.redaction == RedactionStyle::Solid;
+        if icon_button(ui, Icon::Redact, solid, true)
+            .on_hover_text(format!(
+                "Redação: {} (clique para alternar)",
+                session.redaction.label()
+            ))
+            .clicked()
+        {
+            session.redaction = if solid {
+                RedactionStyle::Pixelate
+            } else {
+                RedactionStyle::Solid
+            };
+            restyle_selection(ctx, session);
+        }
+    }
+
+    // --- Holofote: recorte e ampliação ---
+    if session.tool == Tool::Spotlight || selected_is_spotlight(session) {
+        separator(ui);
+        if icon_button(ui, Icon::Spotlight, false, true)
+            .on_hover_text(format!(
+                "Holofote: {} (clique para alternar)",
+                session.spotlight.label()
+            ))
+            .clicked()
+        {
+            session.spotlight = session.spotlight.next();
+            restyle_selection(ctx, session);
+        }
+        let mut zoom = session.magnification;
+        if ui
+            .add(
+                egui::DragValue::new(&mut zoom)
+                    .range(MAGNIFICATION_MIN..=MAGNIFICATION_MAX)
+                    .speed(0.05)
+                    .fixed_decimals(1)
+                    .suffix("×"),
+            )
+            .on_hover_text("Quanto o holofote amplia")
+            .changed()
+        {
+            session.magnification = zoom.clamp(MAGNIFICATION_MIN, MAGNIFICATION_MAX);
+            restyle_selection(ctx, session);
+        }
+    }
+
+    // --- Tamanho da fonte: com a ferramenta Texto ou com um texto
+    // selecionado, que é como se redimensiona um texto ---
+    if session.tool == Tool::Text || selected_is_text(session) {
+        separator(ui);
+        ui.label(egui::RichText::new("A").size(15.0).strong());
+        let mut font = session.font_size;
+        if ui
+            .add(
+                egui::DragValue::new(&mut font)
+                    .range(FONT_MIN..=FONT_MAX)
+                    .speed(0.3)
+                    .fixed_decimals(0),
+            )
+            .on_hover_text("Tamanho da fonte (Ctrl+roda no canvas)")
+            .changed()
+        {
+            session.font_size = font.round().clamp(FONT_MIN, FONT_MAX);
+            restyle_selection(ctx, session);
+        }
+        if icon_button(ui, Icon::TextPill, session.text_pill, true)
+            .on_hover_text("Fundo claro atrás do texto")
+            .clicked()
+        {
+            session.text_pill = !session.text_pill;
+            restyle_selection(ctx, session);
+        }
+    }
+
+    separator(ui);
+
+    // --- Moldura decorativa: vale para a imagem inteira, então não depende
+    // de ferramenta e fica sempre à mão ---
+    let backdrop = session.doc.backdrop();
+    if icon_button(ui, Icon::Backdrop, backdrop != BackdropStyle::None, true)
+        .on_hover_text(format!("Fundo: {} (clique para trocar)", backdrop.label()))
+        .clicked()
+    {
+        session.doc.set_backdrop(backdrop.next());
+    }
+}
+
+/// Amostra da cor atual que abre a paleta ao ser clicada.
+fn color_popup(ctx: &egui::Context, ui: &mut egui::Ui, session: &mut EditorSession) {
+    let button = color_swatch(ui, session.color, true).on_hover_text("Cor — clique para escolher");
+
+    egui::Popup::menu(&button)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClick)
+        .show(|ui| {
+            ui.spacing_mut().item_spacing = Vec2::new(4.0, 4.0);
+            ui.horizontal(|ui| {
                 for color in PALETTE {
                     if color_swatch(ui, color, session.color == color).clicked() {
                         session.color = color;
                         restyle_selection(ctx, session);
                     }
                 }
-                let mut rgb = [session.color[0], session.color[1], session.color[2]];
-                if ui
-                    .color_edit_button_srgb(&mut rgb)
-                    .on_hover_text("Cor personalizada")
-                    .changed()
-                {
-                    session.color = [rgb[0], rgb[1], rgb[2], 255];
-                    restyle_selection(ctx, session);
-                }
-
-                separator(ui);
-
-                // --- Espessura do traço: amostra + valor arrastável ---
-                stroke_preview(ui, session.stroke_width);
-                let mut stroke = session.stroke_width;
-                if ui
-                    .add(
-                        egui::DragValue::new(&mut stroke)
-                            .range(STROKE_MIN..=STROKE_MAX)
-                            .speed(0.1)
-                            .fixed_decimals(0),
-                    )
-                    .on_hover_text("Espessura do traço (Ctrl+roda no canvas)")
-                    .changed()
-                {
-                    session.stroke_width = stroke.round().clamp(STROKE_MIN, STROKE_MAX);
-                    restyle_selection(ctx, session);
-                }
-
-                // --- Preenchimento e cantos: só valem para retângulo e
-                // elipse, seja a ferramenta ativa ou a anotação selecionada ---
-                let shape_tool = matches!(session.tool, Tool::Rect | Tool::Ellipse)
-                    || selected_shape_takes_fill(session);
-                ui.add_enabled_ui(shape_tool, |ui| {
-                    if icon_button(ui, Icon::Fill, session.filled, shape_tool)
-                        .on_hover_text("Preencher a forma")
-                        .clicked()
-                    {
-                        session.filled = !session.filled;
-                        restyle_selection(ctx, session);
-                    }
-                    let mut radius = session.corner_radius;
-                    if ui
-                        .add(
-                            egui::DragValue::new(&mut radius)
-                                .range(0.0..=CORNER_RADIUS_MAX)
-                                .speed(0.2)
-                                .fixed_decimals(0)
-                                .prefix("⌜"),
-                        )
-                        .on_hover_text("Raio dos cantos do retângulo")
-                        .changed()
-                    {
-                        session.corner_radius = radius.round().clamp(0.0, CORNER_RADIUS_MAX);
-                        restyle_selection(ctx, session);
-                    }
-                });
-
-                // --- Modo da redação: mosaico ou cor chapada ---
-                let redacting = session.tool == Tool::Redact || selected_is_redaction(session);
-                ui.add_enabled_ui(redacting, |ui| {
-                    let solid = session.redaction == RedactionStyle::Solid;
-                    if icon_button(ui, Icon::Redact, solid, redacting)
-                        .on_hover_text(format!(
-                            "Redação: {} (clique para alternar)",
-                            session.redaction.label()
-                        ))
-                        .clicked()
-                    {
-                        session.redaction = if solid {
-                            RedactionStyle::Pixelate
-                        } else {
-                            RedactionStyle::Solid
-                        };
-                        restyle_selection(ctx, session);
-                    }
-                });
-
-                // --- Holofote: recorte e ampliação ---
-                let lighting = session.tool == Tool::Spotlight || selected_is_spotlight(session);
-                ui.add_enabled_ui(lighting, |ui| {
-                    if icon_button(ui, Icon::Spotlight, false, lighting)
-                        .on_hover_text(format!(
-                            "Holofote: {} (clique para alternar)",
-                            session.spotlight.label()
-                        ))
-                        .clicked()
-                    {
-                        session.spotlight = session.spotlight.next();
-                        restyle_selection(ctx, session);
-                    }
-                    let mut zoom = session.magnification;
-                    if ui
-                        .add(
-                            egui::DragValue::new(&mut zoom)
-                                .range(MAGNIFICATION_MIN..=MAGNIFICATION_MAX)
-                                .speed(0.05)
-                                .fixed_decimals(1)
-                                .suffix("×"),
-                        )
-                        .on_hover_text("Quanto o holofote amplia")
-                        .changed()
-                    {
-                        session.magnification = zoom.clamp(MAGNIFICATION_MIN, MAGNIFICATION_MAX);
-                        restyle_selection(ctx, session);
-                    }
-                });
-
-                // --- Tamanho da fonte: com a ferramenta Texto ou com um
-                // texto selecionado, que é como se redimensiona um texto ---
-                let text_tool = session.tool == Tool::Text || selected_is_text(session);
-                ui.add_enabled_ui(text_tool, |ui| {
-                    ui.label(egui::RichText::new("A").size(15.0).strong());
-                    let mut font = session.font_size;
-                    if ui
-                        .add(
-                            egui::DragValue::new(&mut font)
-                                .range(FONT_MIN..=FONT_MAX)
-                                .speed(0.3)
-                                .fixed_decimals(0),
-                        )
-                        .on_hover_text("Tamanho da fonte (Ctrl+roda no canvas)")
-                        .changed()
-                    {
-                        session.font_size = font.round().clamp(FONT_MIN, FONT_MAX);
-                        restyle_selection(ctx, session);
-                    }
-                    if icon_button(ui, Icon::TextPill, session.text_pill, text_tool)
-                        .on_hover_text("Fundo claro atrás do texto")
-                        .clicked()
-                    {
-                        session.text_pill = !session.text_pill;
-                        restyle_selection(ctx, session);
-                    }
-                });
-
-                // --- Moldura decorativa ---
-                let backdrop = session.doc.backdrop();
-                if icon_button(ui, Icon::Backdrop, backdrop != BackdropStyle::None, true)
-                    .on_hover_text(format!("Fundo: {} (clique para trocar)", backdrop.label()))
-                    .clicked()
-                {
-                    session.doc.set_backdrop(backdrop.next());
-                }
-
-                separator(ui);
-
-                // --- Histórico ---
-                if icon_button(ui, Icon::Undo, false, session.doc.can_undo())
-                    .on_hover_text("Desfazer (Ctrl+Z)")
-                    .clicked()
-                {
-                    perform_undo(session);
-                }
-                if icon_button(ui, Icon::Redo, false, session.doc.can_redo())
-                    .on_hover_text("Refazer (Ctrl+Y)")
-                    .clicked()
-                {
-                    perform_redo(session);
-                }
-
-                separator(ui);
-
-                // --- Saída ---
-                if icon_button(ui, Icon::Copy, false, true)
-                    .on_hover_text("Copiar e fechar (Ctrl+C)")
-                    .clicked()
-                {
-                    copy_and_close(session);
-                }
-                if icon_button(ui, Icon::Save, false, true)
-                    .on_hover_text("Salvar e fechar (Ctrl+S)")
-                    .clicked()
-                {
-                    save_and_close(session, target);
-                }
-                if icon_button(ui, Icon::Close, false, true)
-                    .on_hover_text("Cancelar (Esc)")
-                    .clicked()
-                {
-                    request_close(session);
-                }
             });
+            let mut rgb = [session.color[0], session.color[1], session.color[2]];
+            if ui
+                .color_edit_button_srgb(&mut rgb)
+                .on_hover_text("Cor personalizada")
+                .changed()
+            {
+                session.color = [rgb[0], rgb[1], rgb[2], 255];
+                restyle_selection(ctx, session);
+            }
         });
 }
 

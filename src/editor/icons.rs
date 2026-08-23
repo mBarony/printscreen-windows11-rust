@@ -191,11 +191,18 @@ pub fn geometry(icon: Icon) -> Vec<Primitive> {
             Stroke(ellipse(0.5, 0.5, 0.38, 0.38)),
             Stroke(vec![(0.42, 0.38), (0.52, 0.30), (0.52, 0.70)]),
         ],
-        // Pipeta na diagonal: bulbo, corpo e a ponta que toca a imagem.
+        // Pipeta em pé: bulbo, ombro e o corpo afunilando até a ponta. Na
+        // diagonal, com as três partes soltas, ela lia como caneta.
         Icon::Eyedropper => vec![
-            Fill(vec![(0.62, 0.10), (0.90, 0.38), (0.74, 0.54), (0.46, 0.26)]),
-            Stroke(vec![(0.52, 0.32), (0.20, 0.64)]),
-            Fill(vec![(0.08, 0.92), (0.14, 0.62), (0.38, 0.86)]),
+            Fill(ellipse(0.50, 0.16, 0.16, 0.10)),
+            Stroke(vec![
+                (0.34, 0.34),
+                (0.66, 0.34),
+                (0.56, 0.60),
+                (0.50, 0.95),
+                (0.44, 0.60),
+                (0.34, 0.34),
+            ]),
         ],
         // Duas metades separadas por uma costura tracejada.
         Icon::Cut => vec![
@@ -205,12 +212,19 @@ pub fn geometry(icon: Icon) -> Vec<Primitive> {
             Stroke(vec![(0.42, 0.50), (0.60, 0.50)]),
             Stroke(vec![(0.72, 0.50), (0.90, 0.50)]),
         ],
-        // Lente com raios saindo dela — o foco de luz.
+        // Círculo com raios em volta — a área que fica acesa enquanto o
+        // resto escurece. A versão anterior tinha cabo e virava lupa, o que
+        // prometia um zoom que o editor não tem.
         Icon::Spotlight => vec![
-            Stroke(ellipse(0.46, 0.46, 0.26, 0.26)),
-            Stroke(vec![(0.64, 0.64), (0.88, 0.88)]),
-            Stroke(vec![(0.46, 0.06), (0.46, 0.14)]),
-            Stroke(vec![(0.06, 0.46), (0.14, 0.46)]),
+            Stroke(ellipse(0.50, 0.50, 0.22, 0.22)),
+            Stroke(vec![(0.50, 0.05), (0.50, 0.17)]),
+            Stroke(vec![(0.50, 0.83), (0.50, 0.95)]),
+            Stroke(vec![(0.05, 0.50), (0.17, 0.50)]),
+            Stroke(vec![(0.83, 0.50), (0.95, 0.50)]),
+            Stroke(vec![(0.18, 0.18), (0.27, 0.27)]),
+            Stroke(vec![(0.73, 0.73), (0.82, 0.82)]),
+            Stroke(vec![(0.82, 0.18), (0.73, 0.27)]),
+            Stroke(vec![(0.27, 0.73), (0.18, 0.82)]),
         ],
         // Retângulo com um xadrez dentro — a área coberta pelo mosaico.
         Icon::Redact => vec![
@@ -235,10 +249,11 @@ pub fn geometry(icon: Icon) -> Vec<Primitive> {
             Stroke(vec![(0.30, 0.66), (0.50, 0.38), (0.70, 0.66)]),
             Stroke(vec![(0.37, 0.56), (0.63, 0.56)]),
         ],
-        // Ponta chanfrada do marcador, sobre o rastro que ele deixa.
+        // Ponta chanfrada sobre a faixa que ela deixa. A faixa é cheia, e
+        // não um risco fino: é o que separa o marca-texto de uma borracha.
         Icon::Highlighter => vec![
-            Fill(vec![(0.20, 0.62), (0.62, 0.18), (0.82, 0.34), (0.40, 0.76)]),
-            Stroke(vec![(0.12, 0.88), (0.88, 0.88)]),
+            Fill(vec![(0.24, 0.54), (0.60, 0.14), (0.80, 0.32), (0.44, 0.72)]),
+            Fill(rectangle(0.10, 0.79, 0.90, 0.94)),
         ],
         Icon::Text => vec![
             Stroke(vec![(0.16, 0.18), (0.84, 0.18)]), // barra do T

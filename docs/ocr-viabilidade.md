@@ -11,6 +11,9 @@ O OCR havia sido posto **fora de escopo** no port do omasnap. Esta investigaçã
 reabre a questão porque a premissa que sustentava aquela decisão estava errada
 — ver a seção seguinte.
 
+**Em uma linha:** custa **14,5 KiB** no executável (0,1% do orçamento do CI),
+funciona, e a dependência que parecia proibitiva já estava no binário.
+
 ---
 
 ## 1. A correção que motivou tudo
@@ -48,7 +51,7 @@ feature a habilitar, o módulo simplesmente não existe lá. As alternativas era
 
 | Caminho | Custo |
 |---|---|
-| Features WinRT na crate `windows` (já presente) | ~2,5 MB de bitcode antes do LTO; 200 linhas de Rust seguro |
+| Features WinRT na crate `windows` (já presente) | **14,5 KiB** no exe; 200 linhas de Rust seguro |
 | Declarar as vtables COM à mão sobre `windows-sys` | ~450 linhas de `unsafe`, `IInspectable`/`IActivationFactory`/`IAsyncOperation` reimplementados, para economizar alguns KB |
 | Tesseract | +25 MB, instalação separada, mata a proposta de um exe só |
 
@@ -88,8 +91,16 @@ O motor é o mesmo da Ferramenta de Captura do Windows: funciona num Windows 11
 limpo, sem o usuário instalar nada.
 
 **O módulo ainda não está ligado à interface.** Não há botão, atalho nem
-entrada de menu — é a prova de conceito que permite medir o custo real. O
-`#![allow(dead_code)]` no topo é temporário e sai junto com o botão.
+entrada de menu. O único acionador é a flag de linha de comando:
+
+```
+rustshot --ocr <imagem>
+```
+
+que abre a imagem pelo GDI+ (`platform::imagefile`, já existente) e mostra o
+texto reconhecido. Ela não nasceu como funcionalidade e sim como necessidade de
+medição — sem nenhum caminho que chegue ao módulo a partir do `main`, o LTO o
+descarta e não há o que medir (seção 4.2).
 
 Ele fica atrás da feature de cargo **`ocr`**, fora do padrão: o build normal
 continua idêntico ao de hoje, e a comparação de tamanho vira `cargo build
@@ -99,34 +110,59 @@ continua idêntico ao de hoje, e a comparação de tamanho vira `cargo build
 
 ## 3. O que foi verificado
 
-Nesta máquina (macOS, sem linker MSVC):
+Localmente (macOS, sem linker MSVC):
 
 | Verificação | Resultado |
 |---|---|
 | `cargo clippy --all-targets -- -D warnings` (com e sem `--features ocr`) | limpo |
 | `cargo clippy --all-targets --target x86_64-pc-windows-msvc` (idem) | limpo |
-| `cargo test --features ocr` | **204 aprovados**, 1 ignorado (eram 199 antes) |
+| `cargo test --features ocr` | **206 aprovados**, 1 ignorado (eram 199 antes) |
+| `cargo test` (sem a feature) | 201 aprovados |
 | `cargo build --release --target x86_64-pc-windows-msvc` | compila; falha só no **link** (sem MSVC no macOS) |
 
-Os 5 testes novos cobrem a ampliação bilinear + conversão RGBA→BGRA, que é
-lógica pura e roda em qualquer plataforma: troca de canais, dimensões de saída,
-preservação dos cantos, existência de tons intermediários na transição (uma
-ampliação por vizinho mais próximo não os teria) e o caso degenerado de 1 px.
+No CI (`windows-latest`): build, testes, clippy, tamanho do exe nas duas
+configurações e o teste de reconhecimento — tudo verde.
 
-O que **não** dá para verificar daqui: que o reconhecimento funciona de fato.
-Isso exige um Windows com pacote de idioma instalado. O teste que exercita o
-motor existe e está pronto (`ocr_de_verdade`, marcado `#[ignore]`); só falta
-alguém rodá-lo naquela máquina — comando na seção 4.
+Os 7 testes novos: 5 cobrem a ampliação bilinear + conversão RGBA→BGRA (troca
+de canais, dimensões de saída, preservação dos cantos, existência de tons
+intermediários na transição — uma ampliação por vizinho mais próximo não os
+teria — e o caso degenerado de 1 px); 2 cobrem o parsing de `--ocr`. Mais o
+`ocr_de_verdade`, ignorado por padrão, que exercita o motor.
+
+### Nota: o CI estava vermelho, e não por causa disto
+
+Ao abrir o CI para medir, encontrei-o falhando desde 22/08 — inclusive na
+`main`. A causa não era o OCR nem o port: o clippy do **Rust 1.98** no runner
+passou a exigir `as_chunks` onde o tamanho do bloco é constante
+(`chunks_exact_to_as_chunks`), e o toolchain local aqui é 1.97, que não tem
+esse lint. O último run verde, de 18/08, tinha exatamente os mesmos laços.
+
+Corrigido nos cinco pontos de conversão de pixel (`imgbuf`, `capture`,
+`clipboard`, `shell`, `imagefile`), sem mudança de comportamento — os laços
+indexam por posição e `[u8; 4]` indexa igual a um slice. **A correção está
+neste branch; a `main` continua vermelha até um merge.**
 
 ---
 
 ## 4. Custo no binário
 
-O número que interessa é quanto o `rustshot.exe` cresce. Ele **não** foi medido
-— exige o linker MSVC. O que dá para medir aqui são os artefatos intermediários,
-e eles precisam ser lidos com cuidado.
+**Medido**, no runner `windows-latest` do próprio CI (o passo está no
+`ci.yml`; ver seção 4.2 sobre por que não foi numa máquina local):
 
-Compilando a crate `windows` em release, com e sem as features de OCR:
+| | bytes | MB |
+|---|---:|---:|
+| sem ocr | 6.005.760 | 5,728 |
+| com ocr | 6.020.608 | 5,742 |
+| **delta** | **14.848** | **0,014** |
+
+**14,5 KiB.** Um quarto de por cento do executável, e 0,1% do orçamento de
+15 MB do CI (RNF-01) — que continua com 9,26 MB de folga.
+
+### 4.1. Por que tão pouco, e por que a estimativa errou por 175×
+
+Antes de medir, o que dava para observar daqui eram os artefatos
+intermediários. Compilando a crate `windows` em release, com e sem as features
+de OCR:
 
 | | rlib | rmeta | código (rlib − rmeta) |
 |---|---:|---:|---:|
@@ -134,50 +170,79 @@ Compilando a crate `windows` em release, com e sem as features de OCR:
 | com OCR (30 features) | 32.129 KB | 28.485 KB | 3.644 KB |
 | **delta** | **7.795 KB** | 5.264 KB | **2.531 KB** |
 
-O delta de 7,8 MB no rlib assusta e é enganoso: **5,3 MB dele é `rmeta`** —
-metadata que o rustc usa para compilar quem depende da crate e que **não entra
-no executável**. O que pode chegar ao exe é o resto: **~2,5 MB**.
+Duas correções sucessivas, ambas para baixo:
 
-E mesmo esse 2,5 MB é um **limite superior**, não uma estimativa. O perfil de
-release usa `lto = "fat"` + `codegen-units = 1`: o linker vê o bitcode do
-programa inteiro e descarta tudo que não é alcançável. O `ocr.rs` toca cinco
-tipos (`OcrEngine`, `SoftwareBitmap`, `Language`, `DataWriter`, `OcrResult`) de
-um feature set que traz milhares. A fatia que sobrevive deve ser uma fração
-pequena disso, mas **fração desconhecida** — o LTO é a única autoridade sobre
-esse número, e ele só roda com o linker.
+1. O delta de 7,8 MB no rlib é enganoso: **5,3 MB dele é `rmeta`**, metadata
+   que o rustc usa para compilar quem depende da crate e que não entra no
+   executável. Sobram 2,5 MB de código — este era o limite superior.
+2. Desses 2,5 MB, **99,4% não sobrevive ao LTO**. O perfil de release usa
+   `lto = "fat"` + `codegen-units = 1`: o linker vê o bitcode do programa
+   inteiro e descarta tudo que não é alcançável. O `ocr.rs` toca cinco tipos
+   (`OcrEngine`, `SoftwareBitmap`, `Language`, `DataWriter`, `OcrResult`) de um
+   feature set que traz milhares, e é só isso que fica.
 
-Contexto: o exe hoje tem ~5,6 MB contra o alvo de 15 MB do CI (RNF-01). Mesmo
-no pior caso — os 2,5 MB inteiros sobrevivendo ao LTO — ainda haveria ~6,9 MB
-de folga. **O risco de estourar o alvo é baixo**, mas a medida real continua
-pendente.
+A lição vale para além do OCR: **medir rlib é medir a coisa errada.** A
+diferença entre o limite superior defensável e o número real foi de 175×, e
+nenhum raciocínio sobre os artefatos intermediários teria chegado perto. O LTO
+é a única autoridade sobre esse número.
 
-### Como medir (numa máquina Windows)
+### 4.2. O primeiro resultado foi zero — e era falso
+
+A primeira medição deu delta **exatamente 0**: o exe saiu byte a byte idêntico
+nas duas configurações, apesar de o build ter recompilado a crate `windows`
+inteira com as features novas (2m07s no log).
+
+A causa: nada no programa chamava `recognize`. O módulo era inalcançável a
+partir do `main`, e o LTO o descartava por completo — a medição estava medindo
+código morto. Foi o que motivou o `--ocr <imagem>` da seção 2: sem um caminho
+que chegue ao módulo, não há o que medir.
+
+Fica como armadilha registrada: num binário com LTO fat, **acrescentar uma
+dependência e medir o exe não diz nada enquanto ninguém a usar**. O zero parece
+uma ótima notícia e é só ausência de código.
+
+### 4.3. Como reproduzir
 
 O OCR está atrás da feature de cargo **`ocr`**, fora do padrão justamente para
 que a medida não dependa de editar arquivo nenhum:
 
 ```powershell
-git checkout worktree-ocr-teste
-
 cargo build --release
-"{0:N3} MB" -f ((Get-Item .\target\release\rustshot.exe).Length / 1MB)
+(Get-Item .\target\release\rustshot.exe).Length
 
 cargo build --release --features ocr
-"{0:N3} MB" -f ((Get-Item .\target\release\rustshot.exe).Length / 1MB)
+(Get-Item .\target\release\rustshot.exe).Length
 ```
 
-A diferença entre as duas linhas é a resposta. Com ela em mãos, a decisão de
-seguir ou não com o OCR deixa de ser especulativa.
+O CI faz exatamente isso a cada push e publica a tabela no resumo do run —
+não é preciso máquina local. A medida acima veio de lá.
 
-E para confirmar que o motor de fato reconhece — com alguma janela de texto
-aberta na tela, porque o teste lê o monitor primário:
+---
 
-```powershell
-cargo test --features ocr -- --ignored --nocapture ocr_de_verdade
+## 4.4. O motor reconhece
+
+Confirmado no mesmo run:
+
+```
+idiomas com pacote de OCR: ["en-US"]
+--- reconhecido ---
+RUSTSHOT
+--- fim ---
+test platform::ocr::tests::ocr_de_verdade ... ok
 ```
 
-Ele lista os pacotes de idioma instalados, captura a tela, reconhece e imprime
-o texto. Falha com mensagem explícita se não houver pacote de idioma.
+O teste rasteriza `RUSTSHOT` com a fonte da exportação e confere que o motor o
+devolve. A pipeline inteira — ampliação bilinear → BGRA → `SoftwareBitmap` →
+`OcrEngine` → `Lines` — funciona de ponta a ponta num Windows limpo, com o
+único pacote de idioma que o runner traz de fábrica.
+
+Rasterizar em vez de capturar a tela foi uma correção de rota: a primeira
+versão do teste lia o monitor primário, o que o tornava dependente do que
+estivesse aberto e **despejava o conteúdo da tela de quem o rodasse na saída
+do CI**. A versão atual é determinística e não lê nada da máquina.
+
+Continua por confirmar o reconhecimento com um pacote **pt-BR** instalado —
+nenhum runner tem, e isso exige uma máquina real.
 
 ---
 
@@ -304,27 +369,34 @@ ele aparecer. Vale saber que existe antes de alguém tentar reinventá-lo.
 
 ## 6. Onde isto deixa a decisão
 
-O que mudou desde que o OCR saiu do escopo:
+As duas premissas que tiraram o OCR do escopo caíram:
 
-1. A dependência que parecia proibitiva **já estava no binário**. O argumento
-   que fechou a questão não se sustenta.
-2. O protótipo existe, compila limpo para `x86_64-pc-windows-msvc`, e as 204
-   verificações passam.
-3. O custo no exe tem **limite superior de ~2,5 MB** contra ~9,4 MB de folga
-   até o alvo do CI — provavelmente muito menos, depois do LTO.
-4. A implementação de referência da Microsoft confirma a API e entregou um
-   truque concreto (a ampliação de 1,5×) que já está aplicado.
+1. A dependência que parecia proibitiva **já estava no binário** desde a v1.3.
+   Não havia crate nova a aceitar.
+2. O custo, que se supunha da ordem de megabytes, é de **14,5 KiB** — 0,1% do
+   orçamento de 15 MB. Sobram 9,26 MB de folga.
 
-O que falta antes de decidir:
+E o que se sabe hoje que não se sabia:
 
-- **Medir o exe** numa máquina Windows.
-- **Confirmar que reconhece**, rodando `ocr_de_verdade` lá.
+3. O motor **reconhece**, confirmado no CI, com a pipeline inteira do protótipo.
+4. A implementação de referência da Microsoft usa a mesma API e entregou um
+   truque concreto — a ampliação de 1,5× —, já aplicado.
+5. 206 verificações passam; clippy limpo no host e em
+   `x86_64-pc-windows-msvc`, com e sem a feature.
 
-Ambos são dois comandos, na seção 4.
+Nada disso obriga a adotar o OCR — é uma decisão de produto, sobre se a
+funcionalidade pertence ao RustShot. Mas **o argumento técnico contra ela não
+existe mais**: é uma funcionalidade que a Ferramenta de Captura tem, que o
+omasnap tem, e que custa 0,25% do executável.
 
-Se o delta do exe vier abaixo de ~1 MB, o argumento contra o OCR fica difícil de
-sustentar: é uma funcionalidade que a Ferramenta de Captura tem, que o omasnap
-tem, e que a essa altura custaria pouco mais que o botão para acioná-la.
+O que continua em aberto:
 
-A ligação com a interface — atalho, entrada de menu, para onde vai o texto — não
-foi desenhada e não é objeto desta investigação.
+- **A ligação com a interface** — atalho, entrada de menu, para onde vai o
+  texto. Hoje só há `--ocr <imagem>`, que existe para tornar o módulo
+  alcançável. Um botão no editor é o passo natural, e não foi desenhado.
+- **Copiar o texto reconhecido** exigiria um `set_text` no
+  `platform::clipboard`, que hoje só escreve imagem (`CF_UNICODETEXT` em vez de
+  `CF_DIB`; poucas linhas, mas não escritas).
+- **Reconhecimento em pt-BR**, que nenhum runner pode confirmar.
+- Se o OCR for adotado, sai o `#![allow(dead_code)]` do módulo e a feature
+  provavelmente deixa de fazer sentido como opcional.

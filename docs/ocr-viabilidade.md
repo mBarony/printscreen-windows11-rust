@@ -168,6 +168,27 @@ outra metade da solução, e é decisão de projeto — não foi feita aqui.
 **14,5 KiB.** Um quarto de por cento do executável, e 0,1% do orçamento de
 15 MB do CI (RNF-01) — que continua com 9,26 MB de folga.
 
+O número foi confirmado por uma segunda medição independente, numa máquina
+Windows com MSVC real (Build Tools 2022 17.14.39, SDK 10.0.26100, rustc 1.98)
+e com o OCR ligado em **outro** ponto de entrada — dentro de
+`run_quick_capture` em vez da flag `--ocr`:
+
+| medição | ponto de entrada | delta |
+|---|---|---:|
+| CI (`windows-latest`) | `--ocr <imagem>` | 14.848 |
+| Windows local, MSVC | `run_quick_capture` | 16.384 |
+
+Dois pontos de entrada diferentes, duas toolchains diferentes, mesma ordem de
+grandeza. A diferença de 1.536 bytes são 3 blocos do `FileAlignment` do PE
+(512 bytes) e explica-se pelo que cada caminho arrasta: o `--ocr` reusa o
+`imagefile`, que já estava no binário, e o outro puxa o logging.
+
+Vale a nota sobre granularidade: o tamanho de um PE no disco é múltiplo do
+`FileAlignment`, 512 bytes — não do `SectionAlignment` de 4096. Os 16.384
+serem exatamente 4×4096 é coincidência; 14.848 é 29×512 e não é múltiplo de
+4096. A quantização é fina o bastante para os dois números serem reais, e não
+tetos arredondados.
+
 ### 4.1. Por que tão pouco, e por que a estimativa errou por 175×
 
 Antes de medir, o que dava para observar daqui eram os artefatos

@@ -44,3 +44,7 @@ dist/
 *.crt
 *.b64
 pfx-password.txt
+
+# Rascunhos locais: backlog, anotações, arquivos de trabalho que não são
+# do projeto. Fica no repositório por conveniência, fora do histórico.
+tmp/

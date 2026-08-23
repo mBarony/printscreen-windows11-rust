@@ -33,15 +33,22 @@ pub(super) const ICON_BUTTON: f32 = 26.0;
 const SWATCH: f32 = 20.0;
 
 /// Dica de hover de uma ferramenta da toolbar: a tecla configurada (issue
-/// #1/#4) e, para Mover/Recortar, o que a ferramenta faz.
+/// #1/#4) e, para as ferramentas cujo nome não basta, o que ela faz.
 pub(super) fn tool_hint(tool: Tool, key: Option<Key>) -> String {
     let key_name = match key {
         Some(key) => key.name().to_string(),
         None => "sem atalho".to_string(),
     };
     match tool {
-        Tool::Select => format!("{key_name} — arraste uma anotação para reposicioná-la"),
+        Tool::Select => format!("{key_name} — selecione uma anotação para mover ou redimensionar"),
         Tool::Crop => format!("{key_name} — arraste a área a manter e confirme com Enter"),
+        // "Ocultar" soa reversível e não é: a região é queimada na imagem.
+        // Como o nome não carrega isso, a dica carrega.
+        Tool::Redact => format!("{key_name} — apaga a região de vez; não há como revelar depois"),
+        // O nome diz o quê, não como: o número sai sozinho, em sequência.
+        Tool::Marker => format!("{key_name} — cada clique carimba o próximo número"),
+        // Vizinha de Recortar e quase homônima, mas faz o oposto.
+        Tool::Cut => format!("{key_name} — joga fora a faixa arrastada e junta o que sobrou"),
         _ => key_name,
     }
 }
@@ -317,7 +324,7 @@ fn left_side(ctx: &egui::Context, ui: &mut egui::Ui, session: &mut EditorSession
         let solid = session.redaction == RedactionStyle::Solid;
         if icon_button(ui, Icon::Redact, solid, true)
             .on_hover_text(format!(
-                "Redação: {} (clique para alternar)",
+                "Ocultar: {} (clique para alternar)",
                 session.redaction.label()
             ))
             .clicked()

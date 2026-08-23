@@ -1,4 +1,4 @@
-//! Redação: apaga uma região da imagem de forma irreversível.
+//! Ocultar (`Tool::Redact`): apaga uma região da imagem de forma irreversível.
 //!
 //! O ponto central é o modo mosaico. Um pixelate comum — média dos pixels de
 //! cada bloco — **preserva informação**: a média é uma função do conteúdo, e

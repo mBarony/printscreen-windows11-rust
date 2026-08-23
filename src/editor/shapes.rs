@@ -49,20 +49,20 @@ pub enum Tool {
 impl Tool {
     pub fn label(self) -> &'static str {
         match self {
-            Self::Select => "Mover",
+            Self::Select => "Selecionar",
             Self::Line => "Linha",
             Self::Arrow => "Seta",
             Self::Rect => "Retângulo",
             Self::Ellipse => "Elipse",
             Self::Freehand => "Mão livre",
             Self::Highlighter => "Marca-texto",
-            Self::Marker => "Marcador",
+            Self::Marker => "Numerador",
             Self::Eyedropper => "Conta-gotas",
-            Self::Redact => "Redação",
+            Self::Redact => "Ocultar",
             Self::Spotlight => "Holofote",
             Self::Text => "Texto",
             Self::Crop => "Recortar",
-            Self::Cut => "Cortar faixa",
+            Self::Cut => "Remover faixa",
         }
     }
 

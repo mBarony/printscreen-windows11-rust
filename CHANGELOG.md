@@ -14,7 +14,7 @@ Arch Linux.
   Béziers com pontos médios e amostrado com filtro de 1,5 px, para o gesto
   não tremer. O marca-texto é o mesmo traço 3× mais grosso e translúcido:
   ele marca sem esconder o que está embaixo.
-- **Marcador numerado** (`N`): um clique carimba um contador. A numeração
+- **Numerador** (`N`): um clique carimba o próximo número da sequência. Ela
   acompanha o que está na tela — apagar o de maior número devolve aquele
   número ao próximo, em vez de deixar buraco na sequência.
 - **Conta-gotas** (`I`): toma a cor de um pixel da imagem e volta sozinho
@@ -29,7 +29,7 @@ Arch Linux.
 
 **Esconder, destacar, encurtar**
 
-- **Redação** (`D`): apaga uma região de vez. O modo padrão é um mosaico
+- **Ocultar** (`D`): apaga uma região de vez. O modo padrão é um mosaico
   **sintético** — as amostras servem só para descobrir os seis tons que
   dominam a região, as posições delas são descartadas, e cada bloco recebe um
   desses tons sorteado por um gerador semeado. Um pixelate por média, que é
@@ -38,8 +38,8 @@ Arch Linux.
   modo de cor chapada.
 - **Holofote** (`O`): escurece o resto da imagem e amplia o que ficou dentro,
   com recorte em elipse, retângulo ou retângulo arredondado. Ele amostra a
-  imagem **já redigida**, então ampliar uma área censurada não revela nada.
-- **Cortar faixa** (`X`): remove uma tira da imagem e junta o que sobrou,
+  imagem **já ocultada**, então ampliar uma área censurada não revela nada.
+- **Remover faixa** (`X`): joga fora uma tira da imagem e junta o que sobrou,
   para encurtar uma captura longa sem perder as pontas. As anotações
   acompanham; as que estavam dentro da faixa encostam na costura.
 - **Fundos decorativos**: a captura sobre um degradê com sombra, em quatro

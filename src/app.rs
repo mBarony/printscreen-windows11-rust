@@ -291,6 +291,14 @@ impl GuiApp {
                     }
                 }
             });
+
+            // A raiz é quem destrói o viewport, e ela só o faz num quadro
+            // seu. O `request_repaint_of` acima é o caminho rápido; este é a
+            // rede: enquanto houver janela de configurações a raiz não dorme
+            // mais que isto, então o processo nunca fica vivo com a janela já
+            // escondida. Uma janela de 1×1 a 20 Hz não custa nada, e só
+            // enquanto as configurações estão abertas.
+            ctx.request_repaint_after(std::time::Duration::from_millis(50));
         }
     }
 }

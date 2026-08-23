@@ -53,9 +53,25 @@ const KEY_CHOICES: &[&str] = &[
     "Digit9", "Space", "Enter", "Backquote", "Minus", "Equal",
 ];
 
+/// Arma o fechamento e some com a janela na hora.
+///
+/// Quem destrói o viewport é a janela-raiz, e só no próximo quadro *dela* —
+/// uma janela de 1×1 estacionada fora da tela, que repinta apenas quando
+/// alguém a acorda. Em máquina ociosa isso mede ~300 ms; sob carga passa de
+/// segundos, e nesse intervalo a janela seguia na tela sem reagir. Quem
+/// clicou no X clicava de novo, achando que o clique não tinha pegado.
+///
+/// Esconder aqui desacopla as duas coisas: o efeito é imediato e não depende
+/// de quando a raiz acorda; a destruição continua com ela, agora sem ninguém
+/// olhando para a janela.
+fn arm_close(ctx: &egui::Context, state: &mut SettingsState) {
+    state.close_requested = true;
+    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+}
+
 pub fn show(ctx: &egui::Context, state: &mut SettingsState) {
     if ctx.input(|i| i.viewport().close_requested()) {
-        state.close_requested = true;
+        arm_close(ctx, state);
         return;
     }
 
@@ -272,7 +288,7 @@ pub fn show(ctx: &egui::Context, state: &mut SettingsState) {
                     state.pending_apply = Some(state.draft.clone());
                 }
                 if ui.button("Fechar").clicked() {
-                    state.close_requested = true;
+                    arm_close(ui.ctx(), state);
                 }
                 if ui.button("Restaurar padrões").clicked() {
                     state.draft = Config::default();

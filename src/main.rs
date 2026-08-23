@@ -82,6 +82,7 @@ fn main() {
             platform::imagefile::load(&path),
             &format!("Não foi possível abrir {}", path.display()),
         ),
+        Ok(cli::Mode::OcrFile(path)) => run_ocr(&path),
         Ok(cli::Mode::QuickCapture { copy, save }) => run_quick_capture(copy, save),
         Ok(cli::Mode::EditClipboard) => run_edit_image(
             platform::clipboard::get_image(),
@@ -98,6 +99,45 @@ fn main() {
     if code != 0 {
         std::process::exit(code);
     }
+}
+
+/// Reconhece o texto de uma imagem do disco e o mostra.
+///
+/// É o único ponto de entrada do OCR por enquanto. Sem ele o módulo seria
+/// inalcançável a partir do `main`, e o LTO o descartaria por inteiro do
+/// binário — o que aliás foi medido: sem esta função, ligar a feature `ocr`
+/// produzia um exe byte a byte idêntico.
+#[cfg(feature = "ocr")]
+fn run_ocr(path: &std::path::Path) -> i32 {
+    let image = match platform::imagefile::load(path) {
+        Ok(image) => image,
+        Err(err) => {
+            platform::msgbox::info(
+                "RustShot — OCR",
+                &format!("Não foi possível abrir {}: {err}", path.display()),
+            );
+            return 1;
+        }
+    };
+    match platform::ocr::recognize(&image, None) {
+        Ok(text) => {
+            platform::msgbox::info("RustShot — texto reconhecido", &text);
+            0
+        }
+        Err(err) => {
+            platform::msgbox::info("RustShot — OCR", &format!("{err}"));
+            1
+        }
+    }
+}
+
+#[cfg(not(feature = "ocr"))]
+fn run_ocr(_path: &std::path::Path) -> i32 {
+    platform::msgbox::info(
+        "RustShot — OCR",
+        "Esta build foi compilada sem OCR (feature `ocr`).",
+    );
+    2
 }
 
 /// Captura a tela e entrega o resultado sem abrir janela nenhuma.
@@ -409,6 +449,7 @@ USO:
     rustshot --clipboard          abre a imagem da área de transferência
     rustshot --capture-fullscreen [--copy] [--save]
                                   captura a tela e sai, sem abrir janela
+    rustshot --ocr <imagem>       reconhece o texto da imagem e o mostra
     rustshot --help               mostra esta ajuda
     rustshot --version            mostra a versão
 
@@ -428,6 +469,8 @@ CÓDIGOS DE SAÍDA:
         Print(String),
         /// Abrir o editor sobre uma imagem do disco.
         EditFile(std::path::PathBuf),
+        /// Reconhecer o texto de uma imagem do disco e mostrá-lo.
+        OcrFile(std::path::PathBuf),
         /// Abrir o editor sobre a imagem que está na área de transferência.
         EditClipboard,
         /// Capturar a tela e sair, sem janela nenhuma.
@@ -458,6 +501,7 @@ CÓDIGOS DE SAÍDA:
         let mut parent: isize = 0;
 
         let mut file: Option<std::path::PathBuf> = None;
+        let mut ocr: Option<std::path::PathBuf> = None;
         let mut clipboard = false;
         let mut fullscreen = false;
         let mut copy = false;
@@ -498,6 +542,7 @@ CÓDIGOS DE SAÍDA:
                     )))
                 }
                 "--file" => file = Some(std::path::PathBuf::from(value()?)),
+                "--ocr" => ocr = Some(std::path::PathBuf::from(value()?)),
                 "--clipboard" => clipboard = true,
                 "--capture-fullscreen" => fullscreen = true,
                 "--copy" => copy = true,
@@ -511,6 +556,12 @@ CÓDIGOS DE SAÍDA:
             }
         }
 
+        if let Some(path) = ocr {
+            if clipboard || file.is_some() || kind.is_some() || fullscreen {
+                return Err("--ocr não combina com outra origem".to_owned());
+            }
+            return Ok(Mode::OcrFile(path));
+        }
         if fullscreen {
             if clipboard || file.is_some() || kind.is_some() {
                 return Err("--capture-fullscreen não combina com outra origem".to_owned());
@@ -563,6 +614,21 @@ mod tests {
     #[test]
     fn no_arguments_is_the_resident() {
         assert!(matches!(parse(args("")).unwrap(), Mode::Resident));
+    }
+
+    #[test]
+    fn ocr_takes_a_path() {
+        let Mode::OcrFile(path) = parse(args("--ocr captura.png")).unwrap() else {
+            panic!("--ocr devia pedir OCR do arquivo")
+        };
+        assert_eq!(path.to_str(), Some("captura.png"));
+    }
+
+    #[test]
+    fn ocr_rejects_a_second_source() {
+        for linha in ["--ocr a.png --clipboard", "--ocr a.png --file b.png"] {
+            assert!(parse(args(linha)).is_err(), "{linha} devia ser recusado");
+        }
     }
 
     #[test]

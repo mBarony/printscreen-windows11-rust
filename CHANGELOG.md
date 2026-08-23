@@ -73,6 +73,14 @@ Arch Linux.
 - **Seleção múltipla**: arrastar a partir de um ponto vazio laça as
   anotações que couberem inteiramente dentro; elas passam a se mover e a ser
   apagadas em bloco, cada gesto como um único passo de desfazer.
+- **Selecionar tudo** (`Ctrl+A`) marca todas as anotações de uma vez, sem
+  precisar cercá-las com o laço. Com `Delete` em seguida, limpar a captura
+  inteira são dois toques.
+- **Clicar no meio de uma forma vazada agora a seleciona**, quando não há
+  nada mais sob o cursor. O contorno continua sendo o alvo preferido e o que
+  estiver dentro da forma continua vencendo o clique — o miolo é o último
+  recurso. Antes, clicar dentro de um retângulo não selecionava nada, e quem
+  tentava apagá-lo por ali concluía que o editor não sabia apagar.
 - **Anotações continuam editáveis depois de criadas.** A anotação
   selecionada ganha alças de redimensionamento — as oito da caixa nas formas
   com área, as duas pontas em linha e seta. `Shift` preserva a proporção num

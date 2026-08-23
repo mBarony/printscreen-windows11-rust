@@ -24,6 +24,20 @@ pub(super) fn handle_layer_keys(ctx: &egui::Context, session: &mut EditorSession
     if session.text_input.is_some() || session.confirm_discard || ctx.wants_keyboard_input() {
         return;
     }
+
+    // Selecionar tudo vem antes da guarda de seleção, porque é justamente o
+    // atalho de quem ainda não tem nada selecionado — com ele, apagar todas
+    // as anotações é Ctrl+A e Delete.
+    if ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::A)) {
+        let total = session.doc.layers().len();
+        if total > 0 {
+            session.selection = (0..total).collect();
+            // A última é a de cima: é dela que a barra mostra o estilo.
+            session.selected = Some(total - 1);
+        }
+        return;
+    }
+
     let Some(index) = session.selected else {
         return;
     };
@@ -235,7 +249,19 @@ pub(super) fn begin_select_drag(
         .enumerate()
         .rev() // a mais recente (pintada por cima) vence
         .find(|(_, layer)| hit_test(ctx, layer, p, tol, ts))
-        .map(|(index, _)| index);
+        .map(|(index, _)| index)
+        // Só se nada foi atingido: o miolo de uma forma vazada. Vem depois,
+        // e não junto, para o que está dentro dela continuar vencendo.
+        .or_else(|| {
+            session
+                .doc
+                .layers()
+                .iter()
+                .enumerate()
+                .rev()
+                .find(|(_, layer)| layer.hit_test_interior(p))
+                .map(|(index, _)| index)
+        });
     match hit {
         Some(index) => {
             // Clicar numa anotação já selecionada preserva o conjunto: é

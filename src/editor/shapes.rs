@@ -279,6 +279,31 @@ impl Layer {
         }
     }
 
+    /// Miolo de uma forma vazada — só como último recurso do clique.
+    ///
+    /// `hit_test` de propósito não pega retângulo e elipse vazados pelo
+    /// interior: ali dentro ainda é a imagem, e o que estiver por cima dela
+    /// tem de continuar clicável. Mas quando o clique não acerta nada, deixar
+    /// de selecionar a forma que visivelmente o envolve não ajuda ninguém —
+    /// quem clicou no meio do retângulo queria o retângulo, e antes disto
+    /// concluía que não dava para apagá-lo.
+    ///
+    /// Quem chama tenta isto **depois** do `hit_test`, nunca no lugar dele:
+    /// assim a anotação que estiver dentro da forma continua vencendo.
+    pub fn hit_test_interior(&self, p: Point) -> bool {
+        if self.style.filled {
+            // Cheia já é agarrável pelo miolo no `hit_test`.
+            return false;
+        }
+        match &self.shape {
+            Shape::Rect { min, max } => {
+                p.x >= min.x && p.x <= max.x && p.y >= min.y && p.y <= max.y
+            }
+            Shape::Ellipse { center, rx, ry } => inside_ellipse(p, *center, *rx, *ry),
+            _ => false,
+        }
+    }
+
     /// Caixa envolvente da geometria, em px da imagem (sem a espessura do
     /// traço). `None` para texto, cuja extensão só é conhecida por quem tem
     /// a fonte em mãos.
@@ -963,6 +988,36 @@ mod tests {
         let center = Point::new(50.0, 50.0);
         assert!(!hollow.hit_test(center, 2.0, (0.0, 0.0)));
         assert!(solid.hit_test(center, 2.0, (0.0, 0.0)));
+    }
+
+    #[test]
+    fn o_miolo_vazado_so_responde_ao_ultimo_recurso() {
+        // A regra do contorno continua valendo no `hit_test`; quem oferece o
+        // miolo é o `hit_test_interior`, que só é consultado quando o clique
+        // não acertou nada. Sem ele, clicar no meio de um retângulo não
+        // selecionava nada e não havia como apagá-lo pelo Delete.
+        let shape = Shape::Rect { min: Point::new(10.0, 10.0), max: Point::new(50.0, 50.0) };
+        let hollow = Layer { id: 1, shape: shape.clone(), style: style() };
+        let middle = Point::new(30.0, 30.0);
+        assert!(!hollow.hit_test(middle, 2.0, (0.0, 0.0)), "contorno segue mandando");
+        assert!(hollow.hit_test_interior(middle), "miolo pega no último recurso");
+        assert!(!hollow.hit_test_interior(Point::new(80.0, 30.0)), "fora não pega");
+
+        // Cheia não precisa do recurso: o `hit_test` já a pega pelo miolo.
+        let solid = Layer { id: 2, shape, style: Style { filled: true, ..style() } };
+        assert!(!solid.hit_test_interior(middle));
+
+        let ellipse = Layer {
+            id: 3,
+            shape: Shape::Ellipse { center: Point::new(50.0, 50.0), rx: 20.0, ry: 10.0 },
+            style: style(),
+        };
+        assert!(ellipse.hit_test_interior(Point::new(50.0, 50.0)), "centro da elipse");
+        assert!(!ellipse.hit_test_interior(Point::new(50.0, 45.0 + 20.0)), "fora da elipse");
+
+        // Formas sem interior não ganham área nova.
+        let line = layer(Shape::Line { a: Point::new(0.0, 0.0), b: Point::new(100.0, 0.0) });
+        assert!(!line.hit_test_interior(Point::new(50.0, 0.0)));
     }
 
     #[test]

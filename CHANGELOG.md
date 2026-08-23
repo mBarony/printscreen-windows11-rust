@@ -95,6 +95,22 @@ Arch Linux.
   compor, para as junções não ficarem mais escuras que o resto — o que
   apareceria em traços translúcidos.
 
+**Reconhecimento de texto (experimental)**
+
+- `rustshot --ocr <imagem>` lê o texto de uma imagem pelo motor do próprio
+  Windows (`Windows.Media.Ocr`), o mesmo da Ferramenta de Captura — nada a
+  instalar num Windows 11 limpo. Está atrás da feature de compilação `ocr`,
+  **fora do padrão**: as builds oficiais não o incluem enquanto a
+  funcionalidade não tiver interface. Ainda não há botão nem atalho, e o
+  texto reconhecido é mostrado, não copiado.
+- A imagem é ampliada 1,5× antes de reconhecer, truque emprestado do
+  PowerOCR: o motor foi treinado para texto de documento e erra mais em
+  fonte de interface no tamanho original.
+- O custo no executável foi medido em duas máquinas independentes: **~15 KB**
+  (14.848 e 16.384 bytes), contra 9 MB de folga até o alvo de 15 MB. A crate
+  `windows` não é dependência nova — já entrava pelo backend DX12 do wgpu
+  desde a v1.3. Ver `docs/ocr-viabilidade.md`.
+
 Mudanças internas que podem interessar a quem lê o código: as anotações
 passaram de `Shape` para `Layer { id, shape, style }`, com identidade
 estável; `editor/raster.rs` virou o módulo `editor/raster/`; e
@@ -102,6 +118,12 @@ estável; `editor/raster.rs` virou o módulo `editor/raster/`; e
 `editor/ui/` com uma responsabilidade por arquivo. O bloco de memória
 compartilhada entre residente e GUI passou de `RSS1` para `RSS2`, porque
 agora leva também a lista de janelas.
+
+As conversões de pixel passaram de `chunks_exact(4)` para `as_chunks::<4>()`:
+o clippy do Rust 1.98 passou a exigir a segunda forma quando o tamanho do
+bloco é constante, e o CI quebrava por isso desde 22/08. O `ci.yml` continua
+sem pin de toolchain, então um lint novo em qualquer stable futura pode
+repetir o problema.
 
 ## v1.6.0 — 17/08
 

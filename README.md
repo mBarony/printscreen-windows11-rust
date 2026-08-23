@@ -41,6 +41,26 @@ Códigos de saída: `0` sucesso, `1` falha ao capturar ou abrir a imagem, `2`
 erro de uso. Região e janela não têm modo "sem janela": as duas exigem uma
 seleção na tela.
 
+### Reconhecimento de texto (experimental)
+
+Compilado com a feature `ocr` — que **não** entra nas builds oficiais —, o
+executável ganha mais um modo:
+
+```powershell
+rustshot --ocr captura.png        # mostra o texto reconhecido na imagem
+```
+
+Usa o motor do próprio Windows (`Windows.Media.Ocr`), o mesmo da Ferramenta
+de Captura: num Windows 11 não há nada a instalar, além do pacote do idioma
+desejado (Configurações › Hora e idioma › Idioma). Ainda não há botão nem
+atalho, e o texto é mostrado, não copiado. O estudo de viabilidade, com o
+custo medido no binário e a comparação com o PowerOCR do PowerToys, está em
+[`docs/ocr-viabilidade.md`](docs/ocr-viabilidade.md).
+
+```powershell
+cargo build --release --features ocr
+```
+
 ## Build
 
 Toolchain: `stable-x86_64-pc-windows-msvc` (Rust 1.81+).

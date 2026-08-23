@@ -31,6 +31,7 @@ pub mod ipc;
 pub mod logger;
 pub mod memory;
 pub mod msgbox;
+pub mod ocr;
 pub mod shell;
 pub mod time;
 pub mod version;

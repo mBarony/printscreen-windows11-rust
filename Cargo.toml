@@ -61,6 +61,26 @@ windows-sys = { version = "0.59", features = [
     "Win32_UI_WindowsAndMessaging",
 ] }
 
+# Reconhecimento de texto (`Windows.Media.Ocr`) é WinRT, e o `windows-sys` só
+# cobre Win32 clássico. A crate `windows` NÃO é uma dependência nova: ela já
+# entra no binário hoje por `eframe -> wgpu -> wgpu-hal -> gpu-allocator`, por
+# causa do backend DX12. Aqui só se habilitam os módulos que faltavam — o de
+# OCR inteiro tem ~260 linhas, e as features da crate são granulares (um
+# `#[cfg]` por submódulo), então nada além disso é compilado.
+#
+# Regra: `windows-sys` para Win32 clássico; `windows` só onde a API é WinRT.
+# Hoje isso quer dizer: só o OCR.
+#
+# A versão segue a que o wgpu-hal fixa. Ao subir o wgpu, confira se ela mudou:
+# duas versões da crate no mesmo binário seriam código duplicado.
+windows = { version = "0.58", default-features = false, features = [
+    "Media_Ocr",
+    "Graphics_Imaging",
+    "Globalization",
+    "Foundation_Collections",
+    "Storage_Streams",
+] }
+
 [build-dependencies]
 embed-resource = "3"       # (build) embute ícone + manifesto Per-Monitor V2
 

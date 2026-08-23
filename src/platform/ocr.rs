@@ -264,11 +264,36 @@ mod tests {
         assert!(bytes.chunks(4).all(|p| p == [3, 2, 1, 4]));
     }
 
-    /// Exercita o motor de verdade: captura o monitor primário e reconhece o
-    /// que estiver escrito nele. Precisa de Windows com pacote de idioma
-    /// instalado e de uma tela com texto visível — por isso `#[ignore]`.
+    /// Texto preto sobre fundo branco, rasterizado com a mesma fonte que a
+    /// exportação usa. Serve de entrada conhecida para o OCR.
+    #[cfg(windows)]
+    fn imagem_com_texto(conteudo: &str) -> RgbaImage {
+        use crate::editor::render::draw_text;
+        use crate::editor::shapes::Point;
+        use ab_glyph::FontRef;
+
+        let (w, h) = (640u32, 200u32);
+        let mut img = RgbaImage::from_raw(w, h, vec![255; (w * h * 4) as usize]);
+        let font = FontRef::try_from_slice(crate::editor::FONT_BYTES).expect("fonte embutida");
+        draw_text(
+            &mut img,
+            &font,
+            Point { x: 24.0, y: 40.0 },
+            conteudo,
+            [0, 0, 0, 255],
+            56.0,
+        );
+        img
+    }
+
+    /// Exercita o motor de verdade: rasteriza um texto conhecido e confere que
+    /// o OCR o devolve. Precisa de Windows com pacote de idioma instalado —
+    /// por isso `#[ignore]`.
     ///
-    /// `cargo test --target x86_64-pc-windows-msvc -- --ignored --nocapture ocr_de_verdade`
+    /// Rasterizar em vez de capturar a tela mantém o teste determinístico e
+    /// evita que conteúdo da máquina de quem roda vá parar na saída.
+    ///
+    /// `cargo test --features ocr -- --ignored --nocapture ocr_de_verdade`
     #[cfg(windows)]
     #[test]
     #[ignore]
@@ -281,16 +306,21 @@ mod tests {
              Configurações › Hora e idioma › Idioma"
         );
 
-        let monitores = crate::platform::capture::all_monitors().expect("captura falhou");
-        let tela = &monitores
-            .iter()
-            .find(|m| m.is_primary)
-            .unwrap_or(&monitores[0])
-            .image;
-        println!("tela: {}×{}", tela.width(), tela.height());
+        let esperado = "RUSTSHOT";
+        let img = imagem_com_texto(esperado);
+        let texto = recognize(&img, None).expect("reconhecimento falhou");
+        println!("--- reconhecido ---\n{texto}\n--- fim ---");
 
-        let texto = recognize(tela, None).expect("reconhecimento falhou");
-        println!("--- texto reconhecido ---\n{texto}\n--- fim ---");
-        assert!(!texto.trim().is_empty());
+        // Comparação tolerante: o motor pode confundir O/0 ou inserir espaços,
+        // e o que se quer provar aqui é que ele lê, não que é perfeito.
+        let normalizado: String = texto
+            .chars()
+            .filter(|c| c.is_alphanumeric())
+            .flat_map(|c| c.to_uppercase())
+            .collect();
+        assert!(
+            normalizado.contains("RUST"),
+            "esperava reconhecer {esperado:?}, veio {texto:?}"
+        );
     }
 }

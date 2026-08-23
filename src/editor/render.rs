@@ -195,7 +195,7 @@ struct TextBlock {
 /// Desenha texto ancorado pelo canto superior esquerdo (como o
 /// `painter.text(.., Align2::LEFT_TOP, ..)` do preview). Suporta múltiplas
 /// linhas separadas por `\n`.
-fn draw_text(
+pub(crate) fn draw_text(
     buffer: &mut RgbaImage,
     font: &FontRef<'_>,
     anchor: Point,

@@ -61,3 +61,36 @@ jobs:
         with:
           name: rustshot-windows-x64
           path: artifact/rustshot.exe
+
+      # ------------------------------------------------------------------
+      # Diagnóstico do protótipo de OCR (docs/ocr-viabilidade.md).
+      # Vem depois de publicar o artefato de propósito: o build com a feature
+      # sobrescreve target/release/rustshot.exe, e o que se publica tem de ser
+      # o binário padrão. Estes dois passos saem do CI junto com a decisão de
+      # adotar ou descartar o OCR.
+      # ------------------------------------------------------------------
+      - name: Custo da feature ocr no exe
+        shell: pwsh
+        run: |
+          $sem = (Get-Item target/release/rustshot.exe).Length
+          cargo build --release --features ocr
+          $com = (Get-Item target/release/rustshot.exe).Length
+          $delta = $com - $sem
+          $linhas = @(
+            "### Custo da feature ``ocr`` no exe",
+            "",
+            "| | bytes | MB |",
+            "|---|---:|---:|",
+            ("| sem ocr | {0:N0} | {1:N3} |" -f $sem, ($sem / 1MB)),
+            ("| com ocr | {0:N0} | {1:N3} |" -f $com, ($com / 1MB)),
+            ("| **delta** | **{0:N0}** | **{1:N3}** |" -f $delta, ($delta / 1MB))
+          )
+          $linhas | ForEach-Object { Write-Host $_ }
+          $linhas | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      # Informativo: o runner pode não ter pacote de idioma de OCR instalado,
+      # e isso não é falha do projeto. Daí o continue-on-error.
+      - name: O motor de OCR responde neste runner?
+        continue-on-error: true
+        shell: pwsh
+        run: cargo test --features ocr -- --ignored --nocapture ocr_de_verdade

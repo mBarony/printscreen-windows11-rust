@@ -280,8 +280,40 @@ versão do teste lia o monitor primário, o que o tornava dependente do que
 estivesse aberto e **despejava o conteúdo da tela de quem o rodasse na saída
 do CI**. A versão atual é determinística e não lê nada da máquina.
 
-Continua por confirmar o reconhecimento com um pacote **pt-BR** instalado —
-nenhum runner tem, e isso exige uma máquina real.
+### 4.3. Numa máquina real, e o bug que ela revelou
+
+O teste foi enfim rodado fora de runner: Windows 11 Pro 22631 **em pt-BR**,
+rustc 1.98.0, MSVC 14.44. O motor reconhece — `RUSTSHOT` voltou exato — mas o
+caminho até ele estava quebrado, e de um jeito que nenhum CI pegaria:
+
+```
+idiomas com pacote de OCR: ["en-US"]
+reconhecimento falhou: não foi possível iniciar o OCR:
+  The operation completed successfully. (0x00000000)
+```
+
+A máquina tem o Windows em pt-BR e só o pacote de OCR **en-US** instalado.
+Quando nenhum idioma do perfil tem pacote, `TryCreateFromUserProfileLanguages`
+devolve **nulo** — e não erro. A windows-rs converte esse nulo num `Error` cujo
+`HRESULT` é `S_OK`, e formatá-lo produz "The operation completed successfully".
+
+O resultado era o pior dos mundos: **o OCR falhava numa máquina com motor
+utilizável**, anunciando sucesso na mensagem de erro. A decisão de projeto
+"erros com saída acionável" (seção 2) não se sustentava neste caminho.
+
+O CI não pega isso por construção. O runner do `windows-latest` está em en-US,
+o perfil casa com o pacote instalado, a chamada funciona e ninguém nota. É
+preciso um Windows num idioma **sem** pacote de OCR — configuração comum entre
+usuários reais, e ausente de qualquer runner.
+
+A correção é a que a seção 5.3 já apontava no PowerOCR: recuar para o primeiro
+pacote instalado quando o perfil não serve, com mensagem útil quando não há
+pacote nenhum. Está em `default_engine()`, com o comentário sobre a armadilha
+do `S_OK` nulo — sem ele o próximo leitor reintroduz o bug.
+
+Continua por confirmar: reconhecimento de **texto em português**, com acentos e
+com o pacote pt-BR instalado. O que ficou provado aqui é que a pipeline
+funciona e que o recuo de idioma funciona; esta máquina não tem o pacote pt-BR.
 
 ---
 
@@ -373,11 +405,16 @@ string inputLang = InputLanguageManager.Current.CurrentInputLanguage.Name;
 
 É mais reativo que o perfil do usuário: quem tem o Windows em inglês mas digita
 em português acerta, e trocar o layout do teclado troca o idioma do OCR sem
-passar por configuração. O protótipo usa `TryCreateFromUserProfileLanguages`,
-que respeita a lista de idiomas preferidos do perfil — decente por padrão, mas
-menos esperto nesse caso. `GetKeyboardLayout(0)` (Win32, já disponível) daria o
-mesmo comportamento aqui; fica como opção quando houver interface para expor a
-escolha.
+passar por configuração. O protótipo partia de
+`TryCreateFromUserProfileLanguages` e parava aí — o que se mostrou um bug de
+verdade, não uma imperfeição: sem o recuo, um Windows em pt-BR com pacote
+en-US instalado falha tendo motor à mão (seção 4.3). Hoje há o recuo para o
+primeiro pacote instalado, que é o último degrau do PowerToys.
+
+Falta o degrau do meio: o idioma do **teclado**. `GetKeyboardLayout(0)` (Win32,
+já disponível) daria o mesmo comportamento aqui, e é o que acerta para quem tem
+o Windows em inglês mas digita em português. Fica como opção quando houver
+interface para expor a escolha.
 
 **Reconstrução de tabelas.** `Models/ResultTable.cs` (644 linhas) reconstrói
 linhas e colunas a partir dos `BoundingRect` das palavras: projeta as caixas

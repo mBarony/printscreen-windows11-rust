@@ -80,22 +80,53 @@ mod imp {
 
     /// Motor para o idioma pedido, ou o do perfil do usuário.
     fn engine(language: Option<&str>) -> Result<OcrEngine> {
-        let engine = match language {
-            Some(tag) => {
-                let lang = Language::CreateLanguage(&HSTRING::from(tag))
-                    .map_err(|e| err!("idioma inválido para OCR ({tag}): {e}"))?;
-                if !OcrEngine::IsLanguageSupported(&lang).unwrap_or(false) {
-                    return Err(err!(
-                        "não há pacote de OCR para {tag}. \
-                         Instale-o em Configurações › Hora e idioma › Idioma"
-                    ));
-                }
-                OcrEngine::TryCreateFromLanguage(&lang)
-            }
-            None => OcrEngine::TryCreateFromUserProfileLanguages(),
+        let Some(tag) = language else {
+            return default_engine();
+        };
+        let lang = Language::CreateLanguage(&HSTRING::from(tag))
+            .map_err(|e| err!("idioma inválido para OCR ({tag}): {e}"))?;
+        if !OcrEngine::IsLanguageSupported(&lang).unwrap_or(false) {
+            return Err(err!(
+                "não há pacote de OCR para {tag}. \
+                 Instale-o em Configurações › Hora e idioma › Idioma"
+            ));
         }
-        .map_err(|e| err!("não foi possível iniciar o OCR: {e}"))?;
-        Ok(engine)
+        OcrEngine::TryCreateFromLanguage(&lang)
+            .map_err(|e| err!("não foi possível iniciar o OCR para {tag}: {e}"))
+    }
+
+    /// Motor para o perfil do usuário, recuando para o primeiro pacote
+    /// instalado.
+    ///
+    /// O recuo não é luxo: `TryCreateFromUserProfileLanguages` devolve
+    /// **nulo** — e não erro — quando nenhum idioma do perfil tem pacote de
+    /// OCR. A windows-rs transforma esse nulo num `Error` cujo `HRESULT` é
+    /// `S_OK`, e a mensagem que sai dele é "The operation completed
+    /// successfully", que não ajuda ninguém. Um Windows em pt-BR com apenas
+    /// o pacote en-US instalado cai exatamente aqui: existe motor utilizável
+    /// e mesmo assim a criação falha.
+    ///
+    /// Cair no primeiro instalado é o que o PowerToys faz (`ImageMethods.cs`
+    /// tenta o idioma do teclado, depois o `AbbreviatedName`, e por fim o
+    /// primeiro da lista).
+    fn default_engine() -> Result<OcrEngine> {
+        if let Ok(engine) = OcrEngine::TryCreateFromUserProfileLanguages() {
+            return Ok(engine);
+        }
+        let langs = OcrEngine::AvailableRecognizerLanguages()
+            .map_err(|e| err!("não foi possível listar os idiomas de OCR: {e}"))?;
+        let first = langs.into_iter().next().ok_or_else(|| {
+            err!(
+                "nenhum pacote de OCR instalado. \
+                 Instale um em Configurações › Hora e idioma › Idioma"
+            )
+        })?;
+        let tag = first
+            .LanguageTag()
+            .map(|t| t.to_string_lossy())
+            .unwrap_or_else(|_| "?".to_owned());
+        OcrEngine::TryCreateFromLanguage(&first)
+            .map_err(|e| err!("não foi possível iniciar o OCR para {tag}: {e}"))
     }
 
     fn software_bitmap(image: &RgbaImage, scale: f32) -> Result<SoftwareBitmap> {

@@ -203,37 +203,55 @@ pub fn show(ctx: &egui::Context, state: &mut SettingsState) {
 
                 ui.add_space(10.0);
                 ui.label("Atalhos das ferramentas (uma letra, sem modificador):");
-                ui.add_space(2.0);
-                ui.horizontal_wrapped(|ui| {
-                    let tk = &mut state.draft.editor.tool_keys;
-                    for (tool, key) in [
-                        (Tool::Select, &mut tk.select),
-                        (Tool::Line, &mut tk.line),
-                        (Tool::Arrow, &mut tk.arrow),
-                        (Tool::Rect, &mut tk.rect),
-                        (Tool::Ellipse, &mut tk.ellipse),
-                        (Tool::Freehand, &mut tk.freehand),
-                        (Tool::Highlighter, &mut tk.highlighter),
-                        (Tool::Marker, &mut tk.marker),
-                        (Tool::Eyedropper, &mut tk.eyedropper),
-                        (Tool::Redact, &mut tk.redact),
-                        (Tool::Spotlight, &mut tk.spotlight),
-                        (Tool::Text, &mut tk.text),
-                        (Tool::Crop, &mut tk.crop),
-                        (Tool::Cut, &mut tk.cut),
-                    ] {
-                        ui.label(tool.label());
-                        egui::ComboBox::from_id_salt(("tool_key", tool.label()))
-                            .selected_text(key.clone())
-                            .width(48.0)
-                            .show_ui(ui, |ui| {
-                                for c in 'A'..='Z' {
-                                    ui.selectable_value(key, c.to_string(), c.to_string());
-                                }
-                            });
-                        ui.add_space(8.0);
-                    }
-                });
+                ui.add_space(4.0);
+                // Grade, e não uma fila que quebra sozinha: com catorze
+                // ferramentas o `horizontal_wrapped` partia nome de seletor
+                // entre linhas — "Mão livre" saía com o "livre" na linha
+                // seguinte, longe do seu combo — e nada ficava alinhado.
+                // Três pares por linha cabem na largura da janela e resolvem
+                // a lista em cinco linhas, com os seletores em colunas.
+                const PARES_POR_LINHA: usize = 3;
+                egui::Grid::new("atalhos_das_ferramentas")
+                    .num_columns(PARES_POR_LINHA * 2)
+                    .spacing(egui::Vec2::new(12.0, 6.0))
+                    .show(ui, |ui| {
+                        let tk = &mut state.draft.editor.tool_keys;
+                        let entradas = [
+                            (Tool::Select, &mut tk.select),
+                            (Tool::Line, &mut tk.line),
+                            (Tool::Arrow, &mut tk.arrow),
+                            (Tool::Rect, &mut tk.rect),
+                            (Tool::Ellipse, &mut tk.ellipse),
+                            (Tool::Freehand, &mut tk.freehand),
+                            (Tool::Highlighter, &mut tk.highlighter),
+                            (Tool::Marker, &mut tk.marker),
+                            (Tool::Eyedropper, &mut tk.eyedropper),
+                            (Tool::Redact, &mut tk.redact),
+                            (Tool::Spotlight, &mut tk.spotlight),
+                            (Tool::Text, &mut tk.text),
+                            (Tool::Crop, &mut tk.crop),
+                            (Tool::Cut, &mut tk.cut),
+                        ];
+                        let total = entradas.len();
+                        for (indice, (tool, key)) in entradas.into_iter().enumerate() {
+                            ui.label(tool.label());
+                            egui::ComboBox::from_id_salt(("tool_key", tool.label()))
+                                .selected_text(key.clone())
+                                .width(48.0)
+                                .show_ui(ui, |ui| {
+                                    for c in 'A'..='Z' {
+                                        ui.selectable_value(key, c.to_string(), c.to_string());
+                                    }
+                                });
+                            if (indice + 1).is_multiple_of(PARES_POR_LINHA) {
+                                ui.end_row();
+                            }
+                        }
+                        // A última linha só fecha aqui quando não veio cheia.
+                        if !total.is_multiple_of(PARES_POR_LINHA) {
+                            ui.end_row();
+                        }
+                    });
                 for (a, b) in &tool_conflicts {
                     ui.label(
                         RichText::new(format!(

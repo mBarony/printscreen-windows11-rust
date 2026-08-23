@@ -120,6 +120,10 @@ Localmente (macOS, sem linker MSVC):
 | `cargo test` (sem a feature) | 201 aprovados |
 | `cargo build --release --target x86_64-pc-windows-msvc` | compila; falha só no **link** (sem MSVC no macOS) |
 
+No Windows a contagem de ignorados é 2, não 1: `ocr_de_verdade` está sob
+`#[cfg(windows)]` e no macOS nem chega a existir, sobrando só o `svg_preview`
+do `editor::icons`.
+
 No CI (`windows-latest`): build, testes, clippy, tamanho do exe nas duas
 configurações e o teste de reconhecimento — tudo verde.
 
@@ -141,6 +145,12 @@ Corrigido nos cinco pontos de conversão de pixel (`imgbuf`, `capture`,
 `clipboard`, `shell`, `imagefile`), sem mudança de comportamento — os laços
 indexam por posição e `[u8; 4]` indexa igual a um slice. **A correção está
 neste branch; a `main` continua vermelha até um merge.**
+
+Fica também o problema estrutural, que a correção não resolve: o `ci.yml` faz
+`rustup toolchain install stable` sem pin, e não há `rust-toolchain.toml` nem
+`rust-version` no `Cargo.toml`. Um lint novo em qualquer stable futura volta a
+quebrar a `main` sozinha, sem ninguém ter tocado em nada. Pinar a toolchain é a
+outra metade da solução, e é decisão de projeto — não foi feita aqui.
 
 ---
 
@@ -196,6 +206,14 @@ A causa: nada no programa chamava `recognize`. O módulo era inalcançável a
 partir do `main`, e o LTO o descartava por completo — a medição estava medindo
 código morto. Foi o que motivou o `--ocr <imagem>` da seção 2: sem um caminho
 que chegue ao módulo, não há o que medir.
+
+O diagnóstico foi confirmado de forma independente numa máquina Windows com
+MSVC real, e por um caminho melhor que o meu: lá o zero se repetiu (6.003.712
+bytes nas duas configurações, com SHA256 diferentes — mesmo tamanho, conteúdo
+diferente), e a busca por `Windows.Media.Ocr`, `OcrEngine` e pela mensagem de
+erro do módulo **não os encontrou em nenhum dos dois binários**, nem em ASCII
+nem em UTF-16. Eu havia deduzido a ausência pelo tamanho idêntico; procurar os
+símbolos prova a mesma coisa diretamente.
 
 Fica como armadilha registrada: num binário com LTO fat, **acrescentar uma
 dependência e medir o exe não diz nada enquanto ninguém a usar**. O zero parece

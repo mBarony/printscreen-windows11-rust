@@ -73,13 +73,19 @@ windows-sys = { version = "0.59", features = [
 #
 # A versão segue a que o wgpu-hal fixa. Ao subir o wgpu, confira se ela mudou:
 # duas versões da crate no mesmo binário seriam código duplicado.
-windows = { version = "0.58", default-features = false, features = [
+windows = { version = "0.58", optional = true, default-features = false, features = [
     "Media_Ocr",
     "Graphics_Imaging",
     "Globalization",
     "Foundation_Collections",
     "Storage_Streams",
 ] }
+
+[features]
+# Reconhecimento de texto. Fora do padrão enquanto é protótipo — assim dá para
+# medir o custo real no exe comparando `cargo build --release` com
+# `cargo build --release --features ocr`, sem editar arquivo nenhum.
+ocr = ["dep:windows"]
 
 [build-dependencies]
 embed-resource = "3"       # (build) embute ícone + manifesto Per-Monitor V2

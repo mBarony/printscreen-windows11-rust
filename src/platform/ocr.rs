@@ -263,4 +263,34 @@ mod tests {
         assert_eq!((w, h), (2, 2));
         assert!(bytes.chunks(4).all(|p| p == [3, 2, 1, 4]));
     }
+
+    /// Exercita o motor de verdade: captura o monitor primário e reconhece o
+    /// que estiver escrito nele. Precisa de Windows com pacote de idioma
+    /// instalado e de uma tela com texto visível — por isso `#[ignore]`.
+    ///
+    /// `cargo test --target x86_64-pc-windows-msvc -- --ignored --nocapture ocr_de_verdade`
+    #[cfg(windows)]
+    #[test]
+    #[ignore]
+    fn ocr_de_verdade() {
+        let idiomas = available_languages();
+        println!("idiomas com pacote de OCR: {idiomas:?}");
+        assert!(
+            !idiomas.is_empty(),
+            "nenhum pacote de OCR instalado — instale um em \
+             Configurações › Hora e idioma › Idioma"
+        );
+
+        let monitores = crate::platform::capture::all_monitors().expect("captura falhou");
+        let tela = &monitores
+            .iter()
+            .find(|m| m.is_primary)
+            .unwrap_or(&monitores[0])
+            .image;
+        println!("tela: {}×{}", tela.width(), tela.height());
+
+        let texto = recognize(tela, None).expect("reconhecimento falhou");
+        println!("--- texto reconhecido ---\n{texto}\n--- fim ---");
+        assert!(!texto.trim().is_empty());
+    }
 }

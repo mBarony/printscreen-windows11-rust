@@ -91,6 +91,10 @@ limpo, sem o usuário instalar nada.
 entrada de menu — é a prova de conceito que permite medir o custo real. O
 `#![allow(dead_code)]` no topo é temporário e sai junto com o botão.
 
+Ele fica atrás da feature de cargo **`ocr`**, fora do padrão: o build normal
+continua idêntico ao de hoje, e a comparação de tamanho vira `cargo build
+--release` contra `cargo build --release --features ocr`, sem editar arquivo.
+
 ---
 
 ## 3. O que foi verificado
@@ -99,9 +103,9 @@ Nesta máquina (macOS, sem linker MSVC):
 
 | Verificação | Resultado |
 |---|---|
-| `cargo clippy --all-targets -- -D warnings` | limpo |
-| `cargo clippy --all-targets --target x86_64-pc-windows-msvc -- -D warnings` | limpo |
-| `cargo test` | **205 aprovados**, 1 ignorado (era 199 antes) |
+| `cargo clippy --all-targets -- -D warnings` (com e sem `--features ocr`) | limpo |
+| `cargo clippy --all-targets --target x86_64-pc-windows-msvc` (idem) | limpo |
+| `cargo test --features ocr` | **204 aprovados**, 1 ignorado (eram 199 antes) |
 | `cargo build --release --target x86_64-pc-windows-msvc` | compila; falha só no **link** (sem MSVC no macOS) |
 
 Os 5 testes novos cobrem a ampliação bilinear + conversão RGBA→BGRA, que é
@@ -110,7 +114,9 @@ preservação dos cantos, existência de tons intermediários na transição (um
 ampliação por vizinho mais próximo não os teria) e o caso degenerado de 1 px.
 
 O que **não** dá para verificar daqui: que o reconhecimento funciona de fato.
-Isso exige um Windows com pacote de idioma instalado.
+Isso exige um Windows com pacote de idioma instalado. O teste que exercita o
+motor existe e está pronto (`ocr_de_verdade`, marcado `#[ignore]`); só falta
+alguém rodá-lo naquela máquina — comando na seção 4.
 
 ---
 
@@ -147,25 +153,31 @@ pendente.
 
 ### Como medir (numa máquina Windows)
 
-Com o branch `worktree-ocr-teste` em mãos:
+O OCR está atrás da feature de cargo **`ocr`**, fora do padrão justamente para
+que a medida não dependa de editar arquivo nenhum:
 
 ```powershell
-# 1. Baseline: comente o bloco `windows = { ... }` no Cargo.toml
-#    e o `pub mod ocr;` em src/platform/mod.rs
-cargo build --release
-"{0:N2} MB" -f ((Get-Item .\target\release\rustshot.exe).Length / 1MB)
+git checkout worktree-ocr-teste
 
-# 2. Descomente os dois e repita
 cargo build --release
-"{0:N2} MB" -f ((Get-Item .\target\release\rustshot.exe).Length / 1MB)
+"{0:N3} MB" -f ((Get-Item .\target\release\rustshot.exe).Length / 1MB)
+
+cargo build --release --features ocr
+"{0:N3} MB" -f ((Get-Item .\target\release\rustshot.exe).Length / 1MB)
 ```
 
 A diferença entre as duas linhas é a resposta. Com ela em mãos, a decisão de
 seguir ou não com o OCR deixa de ser especulativa.
 
-Aproveitando a máquina, vale confirmar que o reconhecimento funciona:
-`available_languages()` deve listar ao menos um idioma, e `recognize()` sobre
-uma captura de texto deve devolvê-lo com as quebras de linha no lugar.
+E para confirmar que o motor de fato reconhece — com alguma janela de texto
+aberta na tela, porque o teste lê o monitor primário:
+
+```powershell
+cargo test --features ocr -- --ignored --nocapture ocr_de_verdade
+```
+
+Ele lista os pacotes de idioma instalados, captura a tela, reconhece e imprime
+o texto. Falha com mensagem explícita se não houver pacote de idioma.
 
 ---
 
@@ -296,7 +308,7 @@ O que mudou desde que o OCR saiu do escopo:
 
 1. A dependência que parecia proibitiva **já estava no binário**. O argumento
    que fechou a questão não se sustenta.
-2. O protótipo existe, compila limpo para `x86_64-pc-windows-msvc`, e as 205
+2. O protótipo existe, compila limpo para `x86_64-pc-windows-msvc`, e as 204
    verificações passam.
 3. O custo no exe tem **limite superior de ~2,5 MB** contra ~9,4 MB de folga
    até o alvo do CI — provavelmente muito menos, depois do LTO.
@@ -305,8 +317,10 @@ O que mudou desde que o OCR saiu do escopo:
 
 O que falta antes de decidir:
 
-- **Medir o exe** numa máquina Windows (comando na seção 4).
-- **Confirmar que reconhece** — nenhum teste aqui exercita o motor de verdade.
+- **Medir o exe** numa máquina Windows.
+- **Confirmar que reconhece**, rodando `ocr_de_verdade` lá.
+
+Ambos são dois comandos, na seção 4.
 
 Se o delta do exe vier abaixo de ~1 MB, o argumento contra o OCR fica difícil de
 sustentar: é uma funcionalidade que a Ferramenta de Captura tem, que o omasnap

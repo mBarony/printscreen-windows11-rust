@@ -70,7 +70,9 @@ pub fn set_image(image: &RgbaImage) -> Result<()> {
             for row in 0..h {
                 let src_row = &src[(h - 1 - row) * w * 4..][..w * 4];
                 let dst_row = &mut out[row * w * 4..][..w * 4];
-                for (s, d) in src_row.chunks_exact(4).zip(dst_row.chunks_exact_mut(4)) {
+                let (src_px, _) = src_row.as_chunks::<4>();
+                let (dst_px, _) = dst_row.as_chunks_mut::<4>();
+                for (s, d) in src_px.iter().zip(dst_px.iter_mut()) {
                     d[0] = s[2]; // B
                     d[1] = s[1]; // G
                     d[2] = s[0]; // R

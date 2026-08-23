@@ -149,7 +149,9 @@ mod imp {
                 // BGRX → RGBA (alfa opaco).
                 let src = std::slice::from_raw_parts(bits as *const u8, (width * height * 4) as usize);
                 let mut pixels = vec![0u8; src.len()];
-                for (s, d) in src.chunks_exact(4).zip(pixels.chunks_exact_mut(4)) {
+                let (src_px, _) = src.as_chunks::<4>();
+                let (dst_px, _) = pixels.as_chunks_mut::<4>();
+                for (s, d) in src_px.iter().zip(dst_px.iter_mut()) {
                     d[0] = s[2];
                     d[1] = s[1];
                     d[2] = s[0];

@@ -102,7 +102,7 @@ impl RgbaImage {
     /// Converte para RGB8 (descarta alfa; a captura é opaca).
     pub fn to_rgb(&self) -> Vec<u8> {
         let mut rgb = Vec::with_capacity(self.width as usize * self.height as usize * 3);
-        for px in self.pixels.chunks_exact(4) {
+        for px in self.pixels.as_chunks::<4>().0 {
             rgb.extend_from_slice(&px[..3]);
         }
         rgb

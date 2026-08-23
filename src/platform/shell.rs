@@ -196,7 +196,7 @@ mod imp {
     unsafe fn create_icon(rgba: &[u8], width: u32, height: u32) -> Result<HICON> {
         assert_eq!(rgba.len(), (width * height * 4) as usize);
         let mut bgra = Vec::with_capacity(rgba.len());
-        for px in rgba.chunks_exact(4) {
+        for px in rgba.as_chunks::<4>().0 {
             bgra.extend_from_slice(&[px[2], px[1], px[0], px[3]]);
         }
         let color = CreateBitmap(

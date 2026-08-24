@@ -138,6 +138,7 @@ pub struct HotkeysConfig {
     pub fullscreen: HotkeyDef,
     pub region: HotkeyDef,
     pub edit: HotkeyDef,
+    pub ocr: HotkeyDef,
 }
 
 impl Default for HotkeysConfig {
@@ -148,6 +149,9 @@ impl Default for HotkeysConfig {
             fullscreen: HotkeyDef::new(&["CTRL"], "PrintScreen"),
             region: HotkeyDef::new(&["SHIFT"], "PrintScreen"),
             edit: HotkeyDef::new(&["CTRL", "SHIFT"], "PrintScreen"),
+            // Segue a família do PrtScr em vez de inventar outra tecla: as
+            // três combinações livres com ele já estavam tomadas.
+            ocr: HotkeyDef::new(&["CTRL", "ALT"], "PrintScreen"),
         }
     }
 }
@@ -291,6 +295,12 @@ impl Config {
                 .and_then(|h| h.get("edit"))
                 .map(|v| HotkeyDef::from_json(v, &defaults.hotkeys.edit))
                 .unwrap_or_else(|| defaults.hotkeys.edit.clone()),
+            // Ausente nos `config.json` anteriores ao OCR: cai no padrão,
+            // como qualquer campo novo.
+            ocr: hotkeys_value
+                .and_then(|h| h.get("ocr"))
+                .map(|v| HotkeyDef::from_json(v, &defaults.hotkeys.ocr))
+                .unwrap_or_else(|| defaults.hotkeys.ocr.clone()),
         };
 
         let editor_value = root.get("editor");
@@ -373,6 +383,7 @@ impl Config {
                     ("fullscreen", self.hotkeys.fullscreen.to_json()),
                     ("region", self.hotkeys.region.to_json()),
                     ("edit", self.hotkeys.edit.to_json()),
+                    ("ocr", self.hotkeys.ocr.to_json()),
                 ]),
             ),
             (

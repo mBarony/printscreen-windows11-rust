@@ -183,6 +183,7 @@ impl Resident {
             HotkeyAction::Fullscreen => self.capture_fullscreen(),
             HotkeyAction::Region => self.launch_select(GuiPurpose::Region),
             HotkeyAction::Edit => self.launch_select(GuiPurpose::Edit),
+            HotkeyAction::Ocr => self.launch_select(GuiPurpose::Ocr),
         }
     }
 
@@ -448,6 +449,7 @@ impl Resident {
 enum GuiPurpose {
     Region,
     Edit,
+    Ocr,
 }
 
 impl GuiPurpose {
@@ -455,6 +457,7 @@ impl GuiPurpose {
         match self {
             Self::Region => "region",
             Self::Edit => "edit",
+            Self::Ocr => "ocr",
         }
     }
 }

@@ -189,6 +189,62 @@ fn decode_dib(bytes: &[u8]) -> Result<RgbaImage> {
     Ok(RgbaImage::from_raw(width, height, pixels))
 }
 
+/// Põe texto na área de transferência, em `CF_UNICODETEXT`.
+///
+/// O Windows guarda UTF-16 terminado em zero. A conversão a partir do `str`
+/// é feita aqui, e não por quem chama, porque é detalhe do formato — o resto
+/// do programa trabalha em UTF-8.
+///
+/// Texto vazio é recusado em vez de esvaziar a área de transferência: quem
+/// pede para copiar um reconhecimento que não achou nada preferiria manter o
+/// que já tinha copiado antes a perdê-lo em silêncio.
+#[cfg(windows)]
+pub fn set_text(text: &str) -> Result<()> {
+    use windows_sys::Win32::Foundation::GetLastError;
+    use windows_sys::Win32::System::DataExchange::{
+        CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData,
+    };
+    use windows_sys::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
+
+    const CF_UNICODETEXT: u32 = 13;
+
+    if text.is_empty() {
+        return Err(err!("nada a copiar"));
+    }
+
+    let wide: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
+    let bytes = std::mem::size_of_val(wide.as_slice());
+
+    // SAFETY: mesma sequência e mesma política de posse do `set_image` — o
+    // HGLOBAL passa a ser do sistema assim que o SetClipboardData aceita.
+    unsafe {
+        if OpenClipboard(std::ptr::null_mut()) == 0 {
+            return Err(err!("OpenClipboard falhou ({})", GetLastError()));
+        }
+        let result = (|| -> Result<()> {
+            if EmptyClipboard() == 0 {
+                return Err(err!("EmptyClipboard falhou ({})", GetLastError()));
+            }
+            let hglobal = GlobalAlloc(GMEM_MOVEABLE, bytes);
+            if hglobal.is_null() {
+                return Err(err!("GlobalAlloc falhou ({})", GetLastError()));
+            }
+            let dst = GlobalLock(hglobal);
+            if dst.is_null() {
+                return Err(err!("GlobalLock falhou ({})", GetLastError()));
+            }
+            std::ptr::copy_nonoverlapping(wide.as_ptr(), dst as *mut u16, wide.len());
+            GlobalUnlock(hglobal);
+            if SetClipboardData(CF_UNICODETEXT, hglobal as _).is_null() {
+                return Err(err!("SetClipboardData falhou ({})", GetLastError()));
+            }
+            Ok(())
+        })();
+        CloseClipboard();
+        result
+    }
+}
+
 /// Fora do Windows não há área de transferência de imagem.
 #[cfg(not(windows))]
 #[allow(dead_code)]
@@ -198,5 +254,11 @@ pub fn get_image() -> Result<RgbaImage> {
 
 #[cfg(not(windows))]
 pub fn set_image(_image: &RgbaImage) -> Result<()> {
+    Err(err!("área de transferência disponível apenas no Windows"))
+}
+
+#[cfg(not(windows))]
+#[allow(dead_code)]
+pub fn set_text(_text: &str) -> Result<()> {
     Err(err!("área de transferência disponível apenas no Windows"))
 }

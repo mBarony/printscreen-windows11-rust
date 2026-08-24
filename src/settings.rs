@@ -104,6 +104,7 @@ pub fn show(ctx: &egui::Context, state: &mut SettingsState) {
                             HotkeyAction::Fullscreen,
                             HotkeyAction::Region,
                             HotkeyAction::Edit,
+                            HotkeyAction::Ocr,
                         ] {
                             ui.label(action.label());
                             hotkey_editor(ui, state, action);
@@ -390,6 +391,7 @@ fn hotkey_mut(config: &mut Config, action: HotkeyAction) -> &mut HotkeyDef {
         HotkeyAction::Fullscreen => &mut config.hotkeys.fullscreen,
         HotkeyAction::Region => &mut config.hotkeys.region,
         HotkeyAction::Edit => &mut config.hotkeys.edit,
+        HotkeyAction::Ocr => &mut config.hotkeys.ocr,
     }
 }
 
@@ -399,6 +401,7 @@ fn conflict_pairs(config: &Config) -> Vec<(HotkeyAction, HotkeyAction)> {
         (HotkeyAction::Fullscreen, &config.hotkeys.fullscreen),
         (HotkeyAction::Region, &config.hotkeys.region),
         (HotkeyAction::Edit, &config.hotkeys.edit),
+        (HotkeyAction::Ocr, &config.hotkeys.ocr),
     ];
     let normalize = |def: &HotkeyDef| {
         let mut mods: Vec<String> = def

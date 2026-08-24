@@ -16,6 +16,8 @@ pub enum HotkeyAction {
     Fullscreen,
     Region,
     Edit,
+    /// Seleciona uma região, reconhece o texto e o copia — sem abrir o editor.
+    Ocr,
 }
 
 impl HotkeyAction {
@@ -24,6 +26,7 @@ impl HotkeyAction {
             Self::Fullscreen => "Capturar tela cheia",
             Self::Region => "Capturar região",
             Self::Edit => "Capturar e editar",
+            Self::Ocr => "Reconhecer texto",
         }
     }
 }
@@ -110,12 +113,13 @@ pub fn pretty(def: &HotkeyDef) -> String {
     parts.join(" + ")
 }
 
-/// Ids fixos por ação no `RegisterHotKey` (1 a 3).
+/// Ids fixos por ação no `RegisterHotKey` (1 a 4).
 fn hotkey_id(action: HotkeyAction) -> i32 {
     match action {
         HotkeyAction::Fullscreen => 1,
         HotkeyAction::Region => 2,
         HotkeyAction::Edit => 3,
+        HotkeyAction::Ocr => 4,
     }
 }
 
@@ -150,6 +154,7 @@ impl Hotkeys {
             (HotkeyAction::Fullscreen, &config.fullscreen),
             (HotkeyAction::Region, &config.region),
             (HotkeyAction::Edit, &config.edit),
+            (HotkeyAction::Ocr, &config.ocr),
         ];
         for (action, def) in wanted {
             let pretty = pretty(def);
@@ -173,7 +178,12 @@ impl Hotkeys {
 
     /// Mapeia o id do `WM_HOTKEY` para a ação.
     pub fn action_for(&self, id: i32) -> Option<HotkeyAction> {
-        [HotkeyAction::Fullscreen, HotkeyAction::Region, HotkeyAction::Edit]
+        [
+            HotkeyAction::Fullscreen,
+            HotkeyAction::Region,
+            HotkeyAction::Edit,
+            HotkeyAction::Ocr,
+        ]
             .into_iter()
             .find(|&a| hotkey_id(a) == id && self.registered.contains(&a))
     }

@@ -39,6 +39,8 @@ pub enum Purpose {
     SaveDirect,
     /// RF-03: recorta e abre o editor ao soltar o arrasto.
     Edit,
+    /// Reconhece o texto do recorte e o copia, sem abrir janela nenhuma.
+    Ocr,
 }
 
 /// Destino escolhido para a região confirmada.
@@ -50,6 +52,9 @@ pub enum SelectedAction {
     SaveToFile,
     /// Fluxo "capturar e editar": abrir o editor com o recorte.
     OpenEditor,
+    /// Fluxo "reconhecer texto": o recorte vai para o OCR, e o texto para a
+    /// área de transferência.
+    RecognizeText,
 }
 
 /// Resultado terminal de uma sessão de seleção.
@@ -170,6 +175,15 @@ fn confirm_region(session: &mut SelectSession, idx: usize, rect: (u32, u32, u32,
                 monitor: idx,
                 rect,
                 action: SelectedAction::OpenEditor,
+            });
+        }
+        // Reconhecer texto: como o editar, resolve ao soltar — nao ha o que
+        // escolher depois, o destino do texto ja esta decidido.
+        Purpose::Ocr => {
+            session.outcome = Some(Outcome::Selected {
+                monitor: idx,
+                rect,
+                action: SelectedAction::RecognizeText,
             });
         }
         Purpose::SaveDirect => {
@@ -425,6 +439,16 @@ pub fn overlay_ui(ctx: &egui::Context, session: &mut SelectSession, idx: usize) 
                                         monitor: idx,
                                         rect: (x, y, w, h),
                                         action: SelectedAction::OpenEditor,
+                                    });
+                                    ctx.request_repaint_of(egui::ViewportId::ROOT);
+                                    return;
+                                }
+                                // Reconhecer texto: tambem resolve ao soltar.
+                                Purpose::Ocr => {
+                                    session.outcome = Some(Outcome::Selected {
+                                        monitor: idx,
+                                        rect: (x, y, w, h),
+                                        action: SelectedAction::RecognizeText,
                                     });
                                     ctx.request_repaint_of(egui::ViewportId::ROOT);
                                     return;

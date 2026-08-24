@@ -160,6 +160,13 @@ impl GuiApp {
                                 &defaults,
                             )));
                         }
+                        // Reconhecer texto: nenhuma janela se abre. O OCR
+                        // bloqueia a thread que o chama (é assim que a API
+                        // WinRT funciona) e uma tela cheia leva centenas de
+                        // milissegundos, então vai para thread de trabalho.
+                        SelectedAction::RecognizeText => {
+                            jobs::spawn(move || recognize_and_copy(&cropped));
+                        }
                     }
                 }
             }
@@ -403,3 +410,49 @@ fn remove_root_from_alt_tab() {
 /// Título do viewport-raiz deste processo. Distinto do nome do app: o residente
 /// procura janelas por título e não deve encontrar a raiz do filho.
 pub const ROOT_TITLE: &str = "RustShot GUI";
+
+/// Reconhece o texto do recorte e o põe na área de transferência.
+///
+/// Roda em thread de trabalho por contrato do módulo: a API do WinRT é
+/// assíncrona e `ocr::recognize` espera o resultado, então chamá-la da thread
+/// da interface congelaria a janela por centenas de milissegundos.
+///
+/// Nenhuma janela se abre em nenhum dos desfechos — o aviso de sistema é toda
+/// a resposta que este fluxo dá.
+#[cfg(feature = "ocr")]
+fn recognize_and_copy(image: &crate::imgbuf::RgbaImage) {
+    let text = match crate::platform::ocr::recognize(image, None) {
+        Ok(text) => text,
+        Err(err) => {
+            // Cobre tanto a falha do motor quanto o caso comum de não haver
+            // texto nenhum na região escolhida.
+            notify::toast_error("Nada reconhecido", &format!("{err}"));
+            return;
+        }
+    };
+    match crate::clipboard::copy_text(&text) {
+        Ok(()) => {
+            let chars = text.chars().count();
+            let lines = text.lines().count();
+            notify::toast(
+                "Texto copiado",
+                &format!(
+                    "{chars} caractere{} em {lines} linha{}, pronto para colar.",
+                    if chars == 1 { "" } else { "s" },
+                    if lines == 1 { "" } else { "s" }
+                ),
+            );
+        }
+        Err(err) => notify::toast_error("Falha ao copiar o texto", &format!("{err:#}")),
+    }
+}
+
+/// Sem a feature `ocr` o atalho continua existindo, mas avisa em vez de fingir
+/// que funcionou — silêncio aqui seria pior que a mensagem.
+#[cfg(not(feature = "ocr"))]
+fn recognize_and_copy(_image: &crate::imgbuf::RgbaImage) {
+    notify::toast_error(
+        "Reconhecimento de texto indisponível",
+        "Esta build foi compilada sem a feature `ocr`.",
+    );
+}

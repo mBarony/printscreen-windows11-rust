@@ -41,3 +41,33 @@ pub fn copy_image(image: &RgbaImage) -> Result<()> {
         last_err.map(|e| e.to_string()).unwrap_or_default()
     ))
 }
+
+/// Copia texto para a área de transferência, com a mesma política de
+/// repetição da imagem — quem trava o clipboard trava para os dois formatos.
+// Só o OCR usa texto; sem a feature o programa não copia texto nenhum.
+#[cfg_attr(not(feature = "ocr"), allow(dead_code))]
+pub fn copy_text(text: &str) -> Result<()> {
+    let mut last_err = None;
+    for attempt in 1..=ATTEMPTS {
+        match platform::clipboard::set_text(text) {
+            Ok(()) => {
+                log::info!(
+                    "{} caracteres copiados para a área de transferência (tentativa {attempt})",
+                    text.chars().count()
+                );
+                return Ok(());
+            }
+            Err(error) => {
+                log::warn!("clipboard tentativa {attempt}/{ATTEMPTS} falhou: {error}");
+                last_err = Some(error);
+                if attempt < ATTEMPTS {
+                    std::thread::sleep(RETRY_DELAY);
+                }
+            }
+        }
+    }
+    Err(err!(
+        "área de transferência indisponível: {}",
+        last_err.map(|e| e.to_string()).unwrap_or_default()
+    ))
+}

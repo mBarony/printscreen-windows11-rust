@@ -82,9 +82,14 @@ windows = { version = "0.58", optional = true, default-features = false, feature
 ] }
 
 [features]
-# Reconhecimento de texto. Fora do padrão enquanto é protótipo — assim dá para
-# medir o custo real no exe comparando `cargo build --release` com
-# `cargo build --release --features ocr`, sem editar arquivo nenhum.
+# Reconhecimento de texto. Entra por padrão desde que virou funcionalidade de
+# verdade, com atalho próprio: sem isto o atalho existiria e não faria nada.
+#
+# Continua sendo feature, e não código incondicional, por dois motivos: dá para
+# medir o custo no exe a qualquer momento (`--no-default-features`, hoje ~16 KB
+# de diferença), e é o único ponto do programa que depende da crate `windows` —
+# o resto fala Win32 por `windows-sys`.
+default = ["ocr"]
 ocr = ["dep:windows"]
 
 [build-dependencies]

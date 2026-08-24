@@ -526,6 +526,7 @@ CÓDIGOS DE SAÍDA:
                     purpose = Some(match value()?.as_str() {
                         "region" => Purpose::SaveDirect,
                         "edit" => Purpose::Edit,
+                        "ocr" => Purpose::Ocr,
                         other => return Err(format!("--purpose desconhecido: {other}")),
                     });
                 }

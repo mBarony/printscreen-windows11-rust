@@ -2,6 +2,18 @@
 
 Histórico de versões do RustShot. Datas em 2026.
 
+## Não lançado
+
+- **A janela de captura passou a comprometer 61 MB a menos de memória.** O
+  padrão do wgpu para `max_non_sampler_bindings` é 1.000.000, e no D3D12 esse
+  número não é um teto: o backend cria um descriptor heap shader-visible com
+  essa quantidade de descritores na criação do device, antes de existir um
+  pixel. Este app usa entre cinco e nove. Baixar o limite para 4096 derrubou
+  a memória privada do overlay de seleção de 105,7 MB para 44,4 MB, e a de
+  qualquer janela em cerca de 60 MB. O working set quase não muda — o heap
+  era memória comprometida e pouco residente —, mas é a comprometida que
+  conta contra o limite de commit do sistema.
+
 ## v1.7.0 — 24/08
 
 Port das funcionalidades do

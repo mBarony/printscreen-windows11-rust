@@ -387,6 +387,19 @@ fn wgpu_options() -> eframe::egui_wgpu::WgpuConfiguration {
                 // Igual ao padrão do eframe: textura grande o bastante para a
                 // captura inteira de um monitor 4K/5K.
                 max_texture_dimension_2d: 8192,
+                // O padrão do wgpu é 1.000.000, e no D3D12 esse número não é
+                // um teto: o backend cria um descriptor heap shader-visible
+                // com exatamente essa quantidade de descritores no
+                // `CreateDevice` (`wgpu-hal/src/dx12/device.rs`, capacity_views
+                // → `descriptor.rs`, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE).
+                // São dezenas de MB comprometidos antes de existir um pixel.
+                //
+                // Este app usa entre cinco e nove descritores: o atlas de
+                // fontes, uma textura por monitor e os uniformes. 4096 é três
+                // ordens de grandeza acima disso e custa algumas centenas de
+                // KB. Não aperto mais porque estourar o heap não degrada — o
+                // wgpu-hal devolve OutOfMemory e o device cai.
+                max_non_sampler_bindings: 4096,
                 ..wgpu::Limits::default()
             },
             memory_hints: wgpu::MemoryHints::MemoryUsage,

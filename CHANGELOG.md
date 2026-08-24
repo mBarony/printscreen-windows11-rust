@@ -2,7 +2,7 @@
 
 Histórico de versões do RustShot. Datas em 2026.
 
-## Não lançado
+## v1.7.0 — 24/08
 
 Port das funcionalidades do
 [omasnap](https://github.com/tobi/omasnap), a ferramenta equivalente para
@@ -127,8 +127,9 @@ Arch Linux.
 - A imagem é ampliada 1,5× antes de reconhecer, truque emprestado do
   PowerOCR: o motor foi treinado para texto de documento e erra mais em
   fonte de interface no tamanho original.
-- O custo no executável foi medido em duas máquinas independentes: **~15 KB**
-  (14.848 e 16.384 bytes), contra 9 MB de folga até o alvo de 15 MB. A crate
+- O custo no executável foi medido três vezes, em duas máquinas: **17.920
+  bytes** nesta versão (release, LTO), e 14.848 e 16.384 bytes nas medições
+  do protótipo. O exe tem 5,77 MB contra o alvo de 15 MB do CI. A crate
   `windows` não é dependência nova — já entrava pelo backend DX12 do wgpu
   desde a v1.3. Ver `docs/ocr-viabilidade.md`.
 

@@ -1,8 +1,8 @@
 # RustShot
 
-Aplicação standalone de captura de tela para **Windows 11 (x64)**, escrita em Rust. Um único `rustshot.exe`, sem instalador e sem runtime externo: roda em segundo plano na bandeja do sistema e oferece três modos de captura por atalhos globais configuráveis.
+Aplicação standalone de captura de tela para **Windows 11 (x64)**, escrita em Rust. Um único `rustshot.exe`, sem instalador e sem runtime externo: roda em segundo plano na bandeja do sistema e oferece quatro atalhos globais configuráveis: três de captura e um de reconhecimento de texto.
 
-> Implementação da [Especificação Técnica v1.0](#especificação) (RustShot v1.3).
+> Implementação da [Especificação Técnica v1.0](#especificação) (RustShot v1.7).
 
 ## Funcionalidades
 
@@ -11,10 +11,11 @@ Aplicação standalone de captura de tela para **Windows 11 (x64)**, escrita em 
 | **Tela cheia** | `Ctrl+PrtScr` | Captura e salva automaticamente na pasta configurada |
 | **Região** | `Shift+PrtScr` | Congela a tela, você arrasta um retângulo; a seleção fica na tela até você decidir: `Ctrl+C` copia para a área de transferência, `Ctrl+S` salva como arquivo (arrastar de novo refaz; `Esc` cancela). `Space` alterna para escolher uma **janela** inteira, `Ctrl+A` pega o monitor todo |
 | **Região + edição** | `Ctrl+Shift+PrtScr` | Como acima, mas abre o editor de anotações |
+| **Reconhecer texto** | `Ctrl+Alt+PrtScr` | Arraste sobre um texto na tela e ele vai para a área de transferência, com as quebras de linha. Nenhuma janela se abre; um aviso no alto da tela mostra o começo do que foi copiado e permite recopiá-lo emendado numa linha só |
 
-- **Editor de anotações**: linha (`L`), seta (`S`), retângulo (`R`), elipse (`E`), mão livre (`F`), marca-texto (`H`), marcador numerado (`N`), conta-gotas (`I`), **redação** (`D`), **holofote** (`O`), **cortar faixa** (`X`) e texto (`T`); **Recortar** (`C`) mantém apenas a área arrastada (confirme com `Enter`), levando as anotações junto e podendo ser desfeita; 8 cores + seletor livre, espessura 1–12 px, fonte 12–72 px (`Ctrl+scroll` ajusta a espessura — ou a fonte, com Texto ativo); retângulo e elipse podem sair preenchidos, e o retângulo aceita cantos arredondados; o texto é multilinha (`Ctrl+Enter` confirma) e pode ganhar uma pílula clara de fundo para continuar legível sobre qualquer imagem; as teclas das ferramentas e o papel da roda (traço×zoom) são configuráveis na janela de Configurações; `Ctrl+Z`/`Ctrl+Y` desfaz/refaz; `Shift` restringe a forma (45°/quadrado/círculo) e `Alt` a desenha a partir do centro; a roda do mouse dá zoom (25–400%) e o botão do meio faz pan; `Ctrl+C` copia a imagem anotada para a área de transferência e fecha o editor; `Ctrl+S` salva como arquivo e fecha; `Esc` descarta (confirmando se houver edições).
-- **Esconder, destacar, encurtar**: a **redação** (`D`) apaga uma região de vez — em mosaico sintético (o padrão) ou cor chapada; o **holofote** (`O`) escurece o resto da imagem e amplia o que ficou dentro; **cortar faixa** (`X`) remove uma tira da imagem e junta o que sobrou, levando as anotações junto. Um botão da toolbar põe a captura sobre um **fundo decorativo** com sombra, em quatro variações.
-- **Anotações continuam editáveis**: com a ferramenta **Mover** (`M`), clique numa anotação para selecioná-la — ou arraste a partir de um ponto vazio para **laçar várias**, que passam a se mover e a ser apagadas em bloco — a imagem só é mesclada ao salvar/copiar. Arraste o corpo para reposicionar ou as **alças** para redimensionar (linha e seta têm as duas pontas; `Shift` preserva a proporção ou prende em 45°). As setas do teclado empurram 1 px, ou 10 px com `Shift`; `Alt+D` duplica; `Delete` apaga. Trocar a cor, a espessura ou o tamanho da fonte com algo selecionado **repinta a anotação** em vez de valer só para a próxima. Se o editor fechar sem querer, o menu da bandeja oferece **recuperar a edição não salva** — com o histórico de desfazer intacto.
+- **Editor de anotações**: linha (`L`), seta (`S`), retângulo (`R`), elipse (`E`), mão livre (`F`), marca-texto (`H`), numerador (`N`), conta-gotas (`I`), **ocultar** (`D`), **holofote** (`O`), **remover faixa** (`X`) e texto (`T`); **Recortar** (`C`) mantém apenas a área arrastada (confirme com `Enter`), levando as anotações junto e podendo ser desfeita; 8 cores + seletor livre, espessura 1–12 px, fonte 12–72 px (`Ctrl+scroll` ajusta a espessura — ou a fonte, com Texto ativo); retângulo e elipse podem sair preenchidos, e o retângulo aceita cantos arredondados; o texto é multilinha (`Ctrl+Enter` confirma) e pode ganhar uma pílula clara de fundo para continuar legível sobre qualquer imagem; as teclas das ferramentas e o papel da roda (traço×zoom) são configuráveis na janela de Configurações; `Ctrl+Z`/`Ctrl+Y` desfaz/refaz; `Shift` restringe a forma (45°/quadrado/círculo) e `Alt` a desenha a partir do centro; a roda do mouse dá zoom (25–400%) e o botão do meio faz pan; `Ctrl+C` copia a imagem anotada para a área de transferência e fecha o editor; `Ctrl+S` salva como arquivo e fecha; `Esc` descarta (confirmando se houver edições).
+- **Esconder, destacar, encurtar**: **ocultar** (`D`) apaga uma região de vez — em mosaico sintético (o padrão) ou cor chapada; o **holofote** (`O`) escurece o resto da imagem e amplia o que ficou dentro; **remover faixa** (`X`) joga fora uma tira da imagem e junta o que sobrou, levando as anotações junto. Um botão da toolbar põe a captura sobre um **fundo decorativo** com sombra, em quatro variações.
+- **Anotações continuam editáveis**: com a ferramenta **Selecionar** (`M`), clique numa anotação para selecioná-la — no contorno, ou no miolo quando não há nada mais sob o cursor — ou arraste a partir de um ponto vazio para **laçar várias**, que passam a se mover e a ser apagadas em bloco — a imagem só é mesclada ao salvar/copiar. Arraste o corpo para reposicionar ou as **alças** para redimensionar (linha e seta têm as duas pontas; `Shift` preserva a proporção ou prende em 45°). As setas do teclado empurram 1 px, ou 10 px com `Shift`; `Alt+D` duplica; `Delete` apaga, e `Ctrl+A` seleciona todas de uma vez. Trocar a cor, a espessura ou o tamanho da fonte com algo selecionado **repinta a anotação** em vez de valer só para a próxima. Se o editor fechar sem querer, o menu da bandeja oferece **recuperar a edição não salva** — com o histórico de desfazer intacto.
 - **Multi-monitor e DPI alto**: capturas em pixels físicos, manifesto **Per-Monitor V2** embutido, suporte a escalas mistas (100–300%) e coordenadas negativas. Escopo da tela cheia configurável: todos os monitores compostos, apenas o principal, ou o monitor sob o cursor.
 - **Bandeja do sistema**: a aplicação não tem janela principal — menu com os três modos, abrir pasta de capturas, configurações, "Iniciar com o Windows" e Sair.
 - **Configuração persistente** em `config.json` (leitura tolerante; arquivo corrompido é renomeado para `.bak` e recriado). Alterações têm efeito imediato, sem reiniciar.
@@ -41,29 +42,28 @@ Códigos de saída: `0` sucesso, `1` falha ao capturar ou abrir a imagem, `2`
 erro de uso. Região e janela não têm modo "sem janela": as duas exigem uma
 seleção na tela.
 
-### Reconhecimento de texto (experimental)
+### Reconhecimento de texto
 
-Compilado com a feature `ocr` — que **não** entra nas builds oficiais —, o
-executável ganha mais um modo:
+Usa o motor do próprio Windows (`Windows.Media.Ocr`), o mesmo da Ferramenta de Captura: num Windows 11 não há nada a instalar. São três portas de entrada, e as duas primeiras copiam o texto para a área de transferência com as quebras de linha, mostrando um aviso no alto da tela para recopiá-lo emendado numa linha só:
 
-```powershell
-rustshot --ocr captura.png        # mostra o texto reconhecido na imagem
-```
+- **`Ctrl+Alt+PrtScr`** — arraste sobre um texto na tela; nenhuma janela se abre.
+- **Botão na barra do editor** — reconhece o texto da imagem que está aberta.
+- **`rustshot --ocr captura.png`** — lê um arquivo e mostra o texto numa caixa de mensagem, sem copiar. É o modo de linha de comando, anterior aos outros dois.
 
-Usa o motor do próprio Windows (`Windows.Media.Ocr`), o mesmo da Ferramenta
-de Captura: num Windows 11 não há nada a instalar, além do pacote do idioma
-desejado (Configurações › Hora e idioma › Idioma). Ainda não há botão nem
-atalho, e o texto é mostrado, não copiado. O estudo de viabilidade, com o
-custo medido no binário e a comparação com o PowerOCR do PowerToys, está em
-[`docs/ocr-viabilidade.md`](docs/ocr-viabilidade.md).
+Se o idioma do seu perfil não tiver pacote de OCR instalado, o motor cai no primeiro pacote disponível em vez de falhar — um Windows em pt-BR com apenas o pacote en-US funciona. Para instalar outro idioma: Configurações › Hora e idioma › Idioma.
+
+O reconhecimento entra nas builds oficiais. Continua atrás da feature de compilação `ocr`, ligada por padrão, porque é o único ponto do programa que usa a crate `windows` (o resto fala Win32 por `windows-sys`) e porque assim dá para medir o custo dela no executável a qualquer momento — hoje 17.920 bytes:
 
 ```powershell
-cargo build --release --features ocr
+cargo build --release                       # com OCR (padrão)
+cargo build --release --no-default-features # sem OCR, para comparar
 ```
+
+O estudo de viabilidade, com o custo medido no binário e a comparação com o PowerOCR do PowerToys, está em [`docs/ocr-viabilidade.md`](docs/ocr-viabilidade.md).
 
 ## Build
 
-Toolchain: `stable-x86_64-pc-windows-msvc` (Rust 1.81+).
+Toolchain: `stable-x86_64-pc-windows-msvc` (Rust 1.88+, pelo `as_chunks` das conversões de pixel).
 
 **Script de build** (recomendado) — roda as mesmas verificações do CI, compila
 e relata o artefato:

@@ -136,6 +136,27 @@ jobs:
             $notes = @("RustShot v$version para Windows 11 x64.")
           }
 
+          # O CHANGELOG é escrito enquadrado em coluna, e o GitHub renderiza cada quebra simples como <br> no corpo da release — o parágrafo vira escada e não reflui na largura de quem lê. Aqui as quebras por coluna são desfeitas: parágrafos e itens de lista viram uma linha só, e o que é estrutura (tabela, bloco de código, citação, bloco indentado) passa intacto.
+          $juntas = @()
+          $buf = ''
+          $emItem = $false
+          $emBloco = $false
+          function Despeja { if ($script:buf -ne '') { $script:juntas += $script:buf; $script:buf = '' }; $script:emItem = $false }
+          foreach ($l in $notes) {
+            if ($l -match '^\s*```') { Despeja; $emBloco = -not $emBloco; $juntas += $l; continue }
+            if ($emBloco)            { $juntas += $l; continue }
+            if ($l -match '^\s*$')   { Despeja; $juntas += ''; continue }
+            if ($l -match '^(\*|-|\+|\d+[.)])\s') { Despeja; $buf = $l; $emItem = $true; continue }
+            if ($l -match '^[|>]')   { Despeja; $juntas += $l; continue }
+            if ($l -match '^\s{2,}') {
+              if ($emItem) { $buf = $buf + ' ' + $l.Trim() } else { Despeja; $juntas += $l }
+              continue
+            }
+            if ($buf -ne '') { $buf = $buf + ' ' + $l } else { $buf = $l }
+          }
+          Despeja
+          $notes = $juntas
+
           $notes += ''
           $notes += '## Instalação'
           $notes += ''

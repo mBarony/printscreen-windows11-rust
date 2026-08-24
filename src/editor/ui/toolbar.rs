@@ -407,6 +407,23 @@ fn left_side(ctx: &egui::Context, ui: &mut egui::Ui, session: &mut EditorSession
     {
         session.doc.set_backdrop(backdrop.next());
     }
+
+    // --- Reconhecer o texto da imagem ---
+    //
+    // Vizinha da moldura porque também age sobre a imagem inteira, e não
+    // sobre uma anotação. O editor só levanta a bandeira: quem reconhece é o
+    // `app`, que é quem tem onde pendurar o aviso do resultado.
+    if icon_button(ui, Icon::Ocr, false, true)
+        .on_hover_text("Reconhecer o texto da imagem e copiá-lo")
+        .clicked()
+    {
+        log::info!("barra do editor: reconhecimento de texto pedido");
+        session.ocr_requested = true;
+        // Quem recolhe a bandeira é a janela-raiz, e ela dorme: sem este
+        // toque o pedido ficaria armado até algo mais a acordar. Mesmo
+        // tropeço que a janela de configurações já teve.
+        ui.ctx().request_repaint_of(egui::ViewportId::ROOT);
+    }
 }
 
 /// Amostra da cor atual que abre a paleta ao ser clicada.

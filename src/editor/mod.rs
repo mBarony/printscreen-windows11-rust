@@ -185,6 +185,12 @@ pub struct EditorSession {
     pub confirm_discard: bool,
     /// Frames restantes de tentativa de tomar o foco (zera ao conseguir).
     pub focus_frames: u8,
+    /// Pedido de reconhecimento de texto sobre a imagem visível.
+    ///
+    /// O editor não conhece o estado do processo, e o OCR precisa dele para
+    /// pendurar o aviso; então a barra só levanta a bandeira e quem a recolhe
+    /// é o `app`, no mesmo lugar onde já trata os outros desfechos.
+    pub ocr_requested: bool,
     /// Sessão terminou (salvou ou descartou); a janela fecha no próximo frame.
     pub finished: bool,
     /// Quantas operações já foram gravadas em disco, e se a imagem de origem
@@ -233,6 +239,7 @@ impl EditorSession {
             wheel_accum: 0.0,
             confirm_discard: false,
             focus_frames: FOCUS_CLAIM_FRAMES,
+            ocr_requested: false,
             finished: false,
             saved_ops: None,
             source_saved: false,

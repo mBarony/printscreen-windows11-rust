@@ -73,6 +73,11 @@ Arch Linux.
 - **Seleção múltipla**: arrastar a partir de um ponto vazio laça as
   anotações que couberem inteiramente dentro; elas passam a se mover e a ser
   apagadas em bloco, cada gesto como um único passo de desfazer.
+- **Reconhecer texto** (`Ctrl+Alt+PrtScr`, ou o botão na barra do editor):
+  a região selecionada — ou a imagem aberta no editor — vai ao motor de OCR
+  do Windows e o texto cai na área de transferência, com as quebras de
+  linha. Um aviso no alto da tela mostra o começo do que foi copiado e
+  deixa recopiar tudo emendado numa linha só, para colar em campo único.
 - **Selecionar tudo** (`Ctrl+A`) marca todas as anotações de uma vez, sem
   precisar cercá-las com o laço. Com `Delete` em seguida, limpar a captura
   inteira são dois toques.

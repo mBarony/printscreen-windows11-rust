@@ -28,6 +28,7 @@ pub enum Icon {
     Fill,
     TextPill,
     Backdrop,
+    Ocr,
     Text,
     Crop,
     Cut,
@@ -60,7 +61,7 @@ impl Icon {
     }
 
     #[cfg(test)]
-    pub const ALL: [Icon; 23] = [
+    pub const ALL: [Icon; 24] = [
         Icon::Move,
         Icon::Line,
         Icon::Arrow,
@@ -75,6 +76,7 @@ impl Icon {
         Icon::Fill,
         Icon::TextPill,
         Icon::Backdrop,
+        Icon::Ocr,
         Icon::Text,
         Icon::Crop,
         Icon::Cut,
@@ -103,6 +105,7 @@ impl Icon {
             Icon::Fill => "fill",
             Icon::TextPill => "text_pill",
             Icon::Backdrop => "backdrop",
+            Icon::Ocr => "ocr",
             Icon::Text => "text",
             Icon::Crop => "crop",
             Icon::Cut => "cut",
@@ -242,6 +245,18 @@ pub fn geometry(icon: Icon) -> Vec<Primitive> {
         Icon::Backdrop => vec![
             Stroke(rectangle(0.06, 0.06, 0.94, 0.94)),
             Fill(rectangle(0.26, 0.26, 0.74, 0.74)),
+        ],
+        // Mira de leitura com linhas de texto dentro: reconhecer o que está
+        // escrito na imagem. Os cantos soltos dizem "ler daqui", e não
+        // "desenhar uma caixa" — moldura fechada seria o Recortar.
+        Icon::Ocr => vec![
+            Stroke(vec![(0.06, 0.28), (0.06, 0.08), (0.26, 0.08)]),
+            Stroke(vec![(0.74, 0.08), (0.94, 0.08), (0.94, 0.28)]),
+            Stroke(vec![(0.94, 0.72), (0.94, 0.92), (0.74, 0.92)]),
+            Stroke(vec![(0.26, 0.92), (0.06, 0.92), (0.06, 0.72)]),
+            Stroke(vec![(0.24, 0.38), (0.76, 0.38)]),
+            Stroke(vec![(0.24, 0.54), (0.76, 0.54)]),
+            Stroke(vec![(0.24, 0.70), (0.56, 0.70)]),
         ],
         // "A" sobre a pílula que fica atrás do texto.
         Icon::TextPill => vec![

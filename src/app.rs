@@ -210,6 +210,39 @@ impl GuiApp {
             }
         }
 
+        // Pedido de reconhecimento vindo da barra do editor. Termina no mesmo
+        // lugar que o do atalho — mesma cópia, mesmo aviso.
+        {
+            let pedido = {
+                let mut shared = self.shared.lock().unwrap();
+                match &mut shared.flow {
+                    Flow::Editing(session) if session.ocr_requested => {
+                        session.ocr_requested = false;
+                        log::info!("reconhecendo o texto da imagem do editor");
+                        Some(session.doc.visible_image().clone())
+                    }
+                    _ => None,
+                }
+            };
+            if let Some(image) = pedido {
+                // O editor não sabe em que monitor está, e descobrir custaria
+                // uma captura. A largura do monitor da raiz basta para o caso
+                // comum de uma tela só; com várias, o aviso sai centrado na
+                // principal em vez da que tem o editor.
+                let anchor = match self.ctx.input(|i| i.viewport().monitor_size) {
+                    Some(size) => (
+                        size.x / 2.0 - crate::ocr_popup::SIZE.0 / 2.0,
+                        crate::ocr_popup::TOP_MARGIN,
+                    ),
+                    None => (crate::ocr_popup::TOP_MARGIN, crate::ocr_popup::TOP_MARGIN),
+                };
+                let shared = self.shared.clone();
+                let ctx = self.ctx.clone();
+                shared.lock().unwrap().ocr_running = true;
+                jobs::spawn(move || recognize_and_copy(&image, &shared, anchor, &ctx));
+            }
+        }
+
         // Editor concluído (salvou ou descartou).
         {
             let mut shared = self.shared.lock().unwrap();

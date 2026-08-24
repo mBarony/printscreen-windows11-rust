@@ -59,11 +59,23 @@ pub struct AppShared {
     pub config: Config,
     pub flow: Flow,
     pub settings: Option<SettingsState>,
+    /// Reconhecimento em curso numa thread de trabalho.
+    ///
+    /// Sem isto o processo encerraria antes de o OCR terminar: quando o
+    /// overlay resolve, o fluxo vira `Idle` e nada mais segura a janela — o
+    /// texto até chegava à área de transferência, porque a saída espera as
+    /// threads, mas o aviso nunca nascia.
+    pub ocr_running: bool,
+    /// Aviso do reconhecimento de texto, enquanto estiver na tela.
+    pub ocr_popup: Option<crate::ocr_popup::OcrPopup>,
     pub quit: bool,
 }
 
 pub struct GuiApp {
     shared: Arc<Mutex<AppShared>>,
+    /// Cópia do contexto para acordar a janela a partir de thread de
+    /// trabalho — é assim que o OCR avisa que terminou.
+    ctx: egui::Context,
     window_icon: Arc<egui::IconData>,
 }
 
@@ -99,7 +111,15 @@ impl GuiApp {
         };
 
         Self {
-            shared: Arc::new(Mutex::new(AppShared { config, flow, settings, quit: false })),
+            shared: Arc::new(Mutex::new(AppShared {
+                config,
+                flow,
+                settings,
+                ocr_running: false,
+                ocr_popup: None,
+                quit: false,
+            })),
+            ctx: cc.egui_ctx.clone(),
             window_icon: Arc::new(app_icon_data()),
         }
     }
@@ -160,12 +180,30 @@ impl GuiApp {
                                 &defaults,
                             )));
                         }
-                        // Reconhecer texto: nenhuma janela se abre. O OCR
-                        // bloqueia a thread que o chama (é assim que a API
-                        // WinRT funciona) e uma tela cheia leva centenas de
-                        // milissegundos, então vai para thread de trabalho.
+                        // Reconhecer texto: o OCR bloqueia a thread que o
+                        // chama (é assim que a API WinRT funciona) e uma tela
+                        // cheia leva centenas de milissegundos, então vai
+                        // para thread de trabalho. O texto é copiado lá, e o
+                        // aviso só aparece depois — a cópia não espera por
+                        // janela nenhuma.
                         SelectedAction::RecognizeText => {
-                            jobs::spawn(move || recognize_and_copy(&cropped));
+                            // Alto e centro do monitor onde a seleção
+                            // aconteceu: é a tela para onde o usuário está
+                            // olhando, e sai de graça porque já a temos aqui.
+                            let anchor = {
+                                let scale = shot.scale.max(0.5);
+                                (
+                                    shot.x as f32 / scale + shot.width as f32 / scale / 2.0
+                                        - crate::ocr_popup::SIZE.0 / 2.0,
+                                    shot.y as f32 / scale + crate::ocr_popup::TOP_MARGIN,
+                                )
+                            };
+                            let shared = self.shared.clone();
+                            let ctx = self.ctx.clone();
+                            shared.lock().unwrap().ocr_running = true;
+                            jobs::spawn(move || {
+                                recognize_and_copy(&cropped, &shared, anchor, &ctx)
+                            });
                         }
                     }
                 }
@@ -194,13 +232,25 @@ impl GuiApp {
             }
             pending
         };
+
+        // Aviso do reconhecimento: some quando o tempo acaba ou quando fecham.
+        {
+            let mut shared = self.shared.lock().unwrap();
+            if shared.ocr_popup.as_ref().is_some_and(|popup| popup.closed) {
+                shared.ocr_popup = None;
+            }
+        }
         if let Some(new_config) = pending {
             self.publish_config(new_config);
         }
 
         // Tarefa cumprida: o processo de GUI existe só enquanto há janela.
         let mut shared = self.shared.lock().unwrap();
-        if matches!(shared.flow, Flow::Idle) && shared.settings.is_none() {
+        if matches!(shared.flow, Flow::Idle)
+            && shared.settings.is_none()
+            && !shared.ocr_running
+            && shared.ocr_popup.is_none()
+        {
             shared.quit = true;
         }
     }
@@ -305,6 +355,38 @@ impl GuiApp {
             // mais que isto, então o processo nunca fica vivo com a janela já
             // escondida. Uma janela de 1×1 a 20 Hz não custa nada, e só
             // enquanto as configurações estão abertas.
+            ctx.request_repaint_after(std::time::Duration::from_millis(50));
+        }
+
+        if let Some(popup) = &shared.ocr_popup {
+            let id = egui::ViewportId::from_hash_of("rustshot_ocr_popup");
+            let (w, h) = crate::ocr_popup::SIZE;
+            let builder = egui::ViewportBuilder::default()
+                .with_title(crate::ocr_popup::WINDOW_TITLE)
+                // Sem moldura, sem barra de tarefas e sem foco: é um aviso,
+                // não uma janela de trabalho. Roubar o foco de quem acabou de
+                // capturar seria pior que não aparecer.
+                .with_decorations(false)
+                .with_taskbar(false)
+                .with_active(false)
+                .with_resizable(false)
+                .with_always_on_top()
+                .with_position(egui::Pos2::new(popup.anchor.0, popup.anchor.1))
+                .with_inner_size(egui::Vec2::new(w, h));
+            let state = self.shared.clone();
+            ctx.show_viewport_deferred(id, builder, move |ctx, _class| {
+                let mut shared = state.lock().unwrap();
+                if let Some(popup) = &mut shared.ocr_popup {
+                    crate::ocr_popup::show(ctx, popup);
+                    if popup.closed {
+                        ctx.request_repaint_of(egui::ViewportId::ROOT);
+                    }
+                }
+            });
+
+            // Mesma rede das configurações: quem destrói o viewport é a raiz,
+            // e ela dorme. Sem isto o aviso ficaria na tela depois de o seu
+            // tempo acabar, esperando alguém mexer o mouse.
             ctx.request_repaint_after(std::time::Duration::from_millis(50));
         }
     }
@@ -420,39 +502,57 @@ pub const ROOT_TITLE: &str = "RustShot GUI";
 /// Nenhuma janela se abre em nenhum dos desfechos — o aviso de sistema é toda
 /// a resposta que este fluxo dá.
 #[cfg(feature = "ocr")]
-fn recognize_and_copy(image: &crate::imgbuf::RgbaImage) {
+fn recognize_and_copy(
+    image: &crate::imgbuf::RgbaImage,
+    shared: &Arc<Mutex<AppShared>>,
+    anchor: (f32, f32),
+    ctx: &egui::Context,
+) {
     let text = match crate::platform::ocr::recognize(image, None) {
         Ok(text) => text,
         Err(err) => {
             // Cobre tanto a falha do motor quanto o caso comum de não haver
             // texto nenhum na região escolhida.
             notify::toast_error("Nada reconhecido", &format!("{err}"));
+            shared.lock().unwrap().ocr_running = false;
+            ctx.request_repaint();
             return;
         }
     };
-    match crate::clipboard::copy_text(&text) {
-        Ok(()) => {
-            let chars = text.chars().count();
-            let lines = text.lines().count();
-            notify::toast(
-                "Texto copiado",
-                &format!(
-                    "{chars} caractere{} em {lines} linha{}, pronto para colar.",
-                    if chars == 1 { "" } else { "s" },
-                    if lines == 1 { "" } else { "s" }
-                ),
-            );
-        }
-        Err(err) => notify::toast_error("Falha ao copiar o texto", &format!("{err:#}")),
+    if let Err(err) = crate::clipboard::copy_text(&text) {
+        notify::toast_error("Falha ao copiar o texto", &format!("{err:#}"));
+        shared.lock().unwrap().ocr_running = false;
+        ctx.request_repaint();
+        return;
     }
+
+    // Copiado. Só agora o aviso aparece, e ele é opcional por natureza: se
+    // esta janela falhasse em nascer, o texto já estaria na área de
+    // transferência do mesmo jeito.
+    {
+        let mut shared = shared.lock().unwrap();
+        shared.ocr_popup = Some(crate::ocr_popup::OcrPopup::new(text, anchor));
+        shared.ocr_running = false;
+    }
+    // A raiz está dormindo — esta thread é a única que sabe que há janela nova.
+    ctx.request_repaint();
 }
 
 /// Sem a feature `ocr` o atalho continua existindo, mas avisa em vez de fingir
 /// que funcionou — silêncio aqui seria pior que a mensagem.
 #[cfg(not(feature = "ocr"))]
-fn recognize_and_copy(_image: &crate::imgbuf::RgbaImage) {
+fn recognize_and_copy(
+    _image: &crate::imgbuf::RgbaImage,
+    shared: &Arc<Mutex<AppShared>>,
+    _anchor: (f32, f32),
+    ctx: &egui::Context,
+) {
     notify::toast_error(
         "Reconhecimento de texto indisponível",
         "Esta build foi compilada sem a feature `ocr`.",
     );
+    // Baixar a bandeira aqui também: sem isto o processo ficaria vivo para
+    // sempre esperando um reconhecimento que nunca vai acontecer.
+    shared.lock().unwrap().ocr_running = false;
+    ctx.request_repaint();
 }

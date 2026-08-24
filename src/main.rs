@@ -31,6 +31,7 @@ mod jobs;
 mod jpeg;
 mod json;
 mod notify;
+mod ocr_popup;
 mod overlay;
 mod platform;
 mod resident;

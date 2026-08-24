@@ -108,14 +108,22 @@ Arch Linux.
   compor, para as junções não ficarem mais escuras que o resto — o que
   apareceria em traços translúcidos.
 
-**Reconhecimento de texto (experimental)**
+**Reconhecimento de texto**
 
-- `rustshot --ocr <imagem>` lê o texto de uma imagem pelo motor do próprio
-  Windows (`Windows.Media.Ocr`), o mesmo da Ferramenta de Captura — nada a
-  instalar num Windows 11 limpo. Está atrás da feature de compilação `ocr`,
-  **fora do padrão**: as builds oficiais não o incluem enquanto a
-  funcionalidade não tiver interface. Ainda não há botão nem atalho, e o
-  texto reconhecido é mostrado, não copiado.
+- Lê o texto pelo motor do próprio Windows (`Windows.Media.Ocr`), o mesmo da
+  Ferramenta de Captura — nada a instalar num Windows 11 limpo. Três portas
+  de entrada: o atalho global `Ctrl+Alt+PrtScr`, o botão na barra do editor,
+  e `rustshot --ocr <imagem>` para uso em linha de comando.
+- A feature de compilação `ocr` passou a ser **padrão** agora que a
+  funcionalidade tem interface. Continua existindo como feature para dar
+  para medir o custo com `--no-default-features`, e porque é o único ponto
+  do programa que depende da crate `windows` — o resto fala Win32 por
+  `windows-sys`. Compilar sem ela continua válido: o atalho avisa em vez de
+  fingir que funcionou.
+- Quando o perfil do usuário não tem pacote de OCR, o motor cai no primeiro
+  instalado em vez de falhar. Um Windows em pt-BR com apenas o pacote en-US
+  — configuração comum — falhava antes com "The operation completed
+  successfully", porque a API devolve nulo, e não erro, nesse caso.
 - A imagem é ampliada 1,5× antes de reconhecer, truque emprestado do
   PowerOCR: o motor foi treinado para texto de documento e erra mais em
   fonte de interface no tamanho original.

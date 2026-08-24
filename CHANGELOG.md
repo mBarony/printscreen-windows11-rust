@@ -2,7 +2,7 @@
 
 Histórico de versões do RustShot. Datas em 2026.
 
-## Não lançado
+## v1.7.1 — 24/08
 
 - **A janela de captura passou a comprometer 61 MB a menos de memória.** O
   padrão do wgpu para `max_non_sampler_bindings` é 1.000.000, e no D3D12 esse

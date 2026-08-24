@@ -10,8 +10,8 @@
 1 RT_MANIFEST "rustshot.exe.manifest"
 
 1 VERSIONINFO
-FILEVERSION     1,7,0,0
-PRODUCTVERSION  1,7,0,0
+FILEVERSION     1,7,1,0
+PRODUCTVERSION  1,7,1,0
 FILEOS          0x40004L // VOS_NT_WINDOWS32
 FILETYPE        0x1L     // VFT_APP
 BEGIN
@@ -21,11 +21,11 @@ BEGIN
         BEGIN
             VALUE "CompanyName",      "RustShot"
             VALUE "FileDescription",  "RustShot - captura de tela para Windows 11"
-            VALUE "FileVersion",      "1.7.0"
+            VALUE "FileVersion",      "1.7.1"
             VALUE "InternalName",     "rustshot"
             VALUE "OriginalFilename", "rustshot.exe"
             VALUE "ProductName",      "RustShot"
-            VALUE "ProductVersion",   "1.7.0"
+            VALUE "ProductVersion",   "1.7.1"
             VALUE "LegalCopyright",   "Licenca BSD-3-Clause"
         END
     END

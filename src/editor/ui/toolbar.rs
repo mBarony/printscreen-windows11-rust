@@ -28,9 +28,15 @@ use super::interact::{
 };
 
 /// Lado do botão de ícone da toolbar, em pontos.
-pub(super) const ICON_BUTTON: f32 = 26.0;
+pub(super) const ICON_BUTTON: f32 = 30.0;
 /// Lado da amostra de cor da paleta, em pontos.
 const SWATCH: f32 = 20.0;
+/// Arredondamento do realce do botão e do fundo dos grupos.
+const ROUND: u8 = 8;
+/// Folga entre os botões de um mesmo grupo.
+const TIGHT: f32 = 2.0;
+/// Folga entre grupos — é ela que os separa, no lugar de um traço.
+const LOOSE: f32 = 8.0;
 
 /// Dica de hover de uma ferramenta da toolbar: a tecla configurada (issue
 /// #1/#4) e, para as ferramentas cujo nome não basta, o que ela faz.
@@ -57,35 +63,72 @@ pub(super) fn tool_hint(tool: Tool, key: Option<Key>) -> String {
 
 /// Botão quadrado de ícone: fundo só quando ativo ou sob o cursor, para a
 /// faixa ficar leve — a identificação vem do ícone e do tooltip.
+///
+/// O realce do cursor entra e sai por animação curta. Numa fila de dezoito
+/// botões, o fundo aparecendo de estalo a cada pixel percorrido pisca; a
+/// transição resolve isso sem custar nada além de um `f32` por botão.
 pub(super) fn icon_button(ui: &mut egui::Ui, icon: Icon, selected: bool, enabled: bool) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(
         Vec2::splat(ICON_BUTTON),
         if enabled { Sense::click() } else { Sense::hover() },
     );
     let hovered = enabled && response.hovered();
+    let warmth = ui.ctx().animate_bool(response.id, hovered);
     let visuals = ui.visuals();
+
+    // A ferramenta ativa fica marcada por um fundo discreto, não pela cor de
+    // destaque cheia: numa fila de quatorze ícones um retângulo saturado puxa
+    // o olho para si e some com o desenho que está por baixo dele.
     let background = if selected {
-        visuals.selection.bg_fill
-    } else if hovered {
-        visuals.widgets.hovered.bg_fill
+        visuals.selection.bg_fill.gamma_multiply(0.30)
     } else {
-        Color32::TRANSPARENT
+        // Do transparente até o realce de hover, conforme a animação.
+        visuals.widgets.hovered.bg_fill.gamma_multiply(warmth * 0.8)
     };
     let color = if !enabled {
         visuals.weak_text_color()
-    } else if selected {
-        visuals.selection.stroke.color
-    } else if hovered {
+    } else if selected || hovered {
         visuals.strong_text_color()
     } else {
         visuals.text_color()
     };
-    if background != Color32::TRANSPARENT {
+    if background.a() > 0 {
         ui.painter()
-            .rect_filled(rect, CornerRadius::same(6), background);
+            .rect_filled(rect, CornerRadius::same(ROUND), background);
     }
-    icons::paint(ui.painter(), rect.shrink(ICON_BUTTON * 0.26), icon, color);
+    icons::paint(ui.painter(), rect.shrink(ICON_BUTTON * 0.28), icon, color);
     response
+}
+
+/// Agrupa controles afins numa unidade que não quebra no meio quando a linha
+/// envolve.
+///
+/// Sem fundo, de propósito: quem separa os grupos é o espaço em volta e um
+/// traço fino entre eles. Caixas atrás de cada punhado de ícones competem
+/// com os próprios ícones — a barra fica desenhada em vez de organizada.
+fn group<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing = Vec2::new(TIGHT, TIGHT);
+        ui.horizontal(|ui| add(ui)).inner
+    })
+    .inner
+}
+
+/// Fronteira entre dois grupos: folga, traço fino, folga.
+fn group_divider(ui: &mut egui::Ui) {
+    ui.add_space(LOOSE);
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(1.0, ICON_BUTTON * 0.55), Sense::hover());
+    ui.painter().rect_filled(
+        rect,
+        CornerRadius::same(1),
+        ui.visuals()
+            .widgets
+            .noninteractive
+            .bg_stroke
+            .color
+            .gamma_multiply(0.8),
+    );
+    ui.add_space(LOOSE);
 }
 
 /// Amostra de cor clicável da paleta.
@@ -147,14 +190,14 @@ pub(super) fn draw(ctx: &egui::Context, session: &mut EditorSession, target: &Sa
                 .show(
                 ui,
                 |ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(3.0, 3.0);
+                    ui.spacing_mut().item_spacing = Vec2::new(0.0, TIGHT);
                     ui.horizontal_wrapped(|ui| {
-                        ui.spacing_mut().item_spacing = Vec2::new(3.0, 3.0);
+                        ui.spacing_mut().item_spacing = Vec2::new(0.0, TIGHT);
                         left_side(ctx, ui, session);
                     });
                 },
                 |ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(3.0, 3.0);
+                    ui.spacing_mut().item_spacing = Vec2::new(0.0, TIGHT);
                     pedido = right_side(ui, can_undo, can_redo);
                 },
             );
@@ -187,80 +230,100 @@ enum RightAction {
 fn right_side(ui: &mut egui::Ui, can_undo: bool, can_redo: bool) -> Option<RightAction> {
     let mut pedido = None;
 
-    if icon_button(ui, Icon::Close, false, true)
-        .on_hover_text("Cancelar (Esc)")
-        .clicked()
-    {
-        pedido = Some(RightAction::Close);
-    }
-    if icon_button(ui, Icon::Save, false, true)
-        .on_hover_text("Salvar e fechar (Ctrl+S)")
-        .clicked()
-    {
-        pedido = Some(RightAction::Save);
-    }
-    if icon_button(ui, Icon::Copy, false, true)
-        .on_hover_text("Copiar e fechar (Ctrl+C)")
-        .clicked()
-    {
-        pedido = Some(RightAction::Copy);
-    }
+    // Sair do editor e desfazer são coisas diferentes, e ficam em blocos
+    // diferentes: um clique errado entre elas custa caro dos dois lados.
+    group(ui, |ui| {
+        if icon_button(ui, Icon::Close, false, true)
+            .on_hover_text("Cancelar (Esc)")
+            .clicked()
+        {
+            pedido = Some(RightAction::Close);
+        }
+        if icon_button(ui, Icon::Save, false, true)
+            .on_hover_text("Salvar e fechar (Ctrl+S)")
+            .clicked()
+        {
+            pedido = Some(RightAction::Save);
+        }
+        if icon_button(ui, Icon::Copy, false, true)
+            .on_hover_text("Copiar e fechar (Ctrl+C)")
+            .clicked()
+        {
+            pedido = Some(RightAction::Copy);
+        }
+    });
 
-    separator(ui);
+    group_divider(ui);
 
-    if icon_button(ui, Icon::Redo, false, can_redo)
-        .on_hover_text("Refazer (Ctrl+Y)")
-        .clicked()
-    {
-        pedido = Some(RightAction::Redo);
-    }
-    if icon_button(ui, Icon::Undo, false, can_undo)
-        .on_hover_text("Desfazer (Ctrl+Z)")
-        .clicked()
-    {
-        pedido = Some(RightAction::Undo);
-    }
+    group(ui, |ui| {
+        if icon_button(ui, Icon::Redo, false, can_redo)
+            .on_hover_text("Refazer (Ctrl+Y)")
+            .clicked()
+        {
+            pedido = Some(RightAction::Redo);
+        }
+        if icon_button(ui, Icon::Undo, false, can_undo)
+            .on_hover_text("Desfazer (Ctrl+Z)")
+            .clicked()
+        {
+            pedido = Some(RightAction::Undo);
+        }
+    });
 
-    separator(ui);
+    ui.add_space(LOOSE);
 
     pedido
 }
 
 /// Ferramentas, cor, traço e os controles da ferramenta ativa.
 fn left_side(ctx: &egui::Context, ui: &mut egui::Ui, session: &mut EditorSession) {
-    // --- Ferramentas ---
-    for (index, group) in TOOL_GROUPS.iter().enumerate() {
-        if index > 0 {
-            separator(ui);
-        }
-        for &tool in *group {
-            let key = session
-                .tool_keys
-                .iter()
-                .find(|(candidate, _)| *candidate == tool)
-                .and_then(|(_, key)| *key);
-            let selected = session.tool == tool;
-            if icon_button(ui, Icon::of(tool), selected, true)
-                .on_hover_text(format!("{} — {}", tool.label(), tool_hint(tool, key)))
-                .clicked()
-            {
-                select_tool(session, tool);
+    // --- Bloco 1: as ferramentas, com divisórias internas por família ---
+    group(ui, |ui| {
+        for (index, tools) in TOOL_GROUPS.iter().enumerate() {
+            if index > 0 {
+                separator(ui);
+            }
+            for &tool in *tools {
+                let key = session
+                    .tool_keys
+                    .iter()
+                    .find(|(candidate, _)| *candidate == tool)
+                    .and_then(|(_, key)| *key);
+                let selected = session.tool == tool;
+                if icon_button(ui, Icon::of(tool), selected, true)
+                    .on_hover_text(format!("{} — {}", tool.label(), tool_hint(tool, key)))
+                    .clicked()
+                {
+                    select_tool(session, tool);
+                }
+            }
+            // Confirmação do recorte, junto da ferramenta que a pede.
+            if tools.contains(&Tool::Crop) && session.tool == Tool::Crop {
+                let ready = session.crop_pending.is_some();
+                if icon_button(ui, Icon::Check, false, ready)
+                    .on_hover_text("Aplicar recorte (Enter)")
+                    .clicked()
+                {
+                    apply_crop(session);
+                }
             }
         }
-        // Confirmação do recorte, junto da ferramenta que a pede.
-        if group.contains(&Tool::Crop) && session.tool == Tool::Crop {
-            let ready = session.crop_pending.is_some();
-            if icon_button(ui, Icon::Check, false, ready)
-                .on_hover_text("Aplicar recorte (Enter)")
-                .clicked()
-            {
-                apply_crop(session);
-            }
-        }
-    }
+    });
 
-    separator(ui);
+    group_divider(ui);
 
+    // --- Bloco 2: como a anotação fica — cor, traço e o que a ferramenta
+    // ativa (ou a seleção) acrescenta ---
+    group(ui, |ui| tool_options(ctx, ui, session));
+
+    group_divider(ui);
+
+    // --- Bloco 3: o que vale para a imagem inteira ---
+    group(ui, |ui| image_options(ui, session));
+}
+
+/// Cor, espessura e os controles que só existem para a ferramenta ativa.
+fn tool_options(ctx: &egui::Context, ui: &mut egui::Ui, session: &mut EditorSession) {
     // --- Cor: na barra fica só a atual; a paleta sai num popup ---
     //
     // As oito amostras lado a lado custavam uns 180 pontos numa barra que já
@@ -395,11 +458,11 @@ fn left_side(ctx: &egui::Context, ui: &mut egui::Ui, session: &mut EditorSession
             restyle_selection(ctx, session);
         }
     }
+}
 
-    separator(ui);
-
-    // --- Moldura decorativa: vale para a imagem inteira, então não depende
-    // de ferramenta e fica sempre à mão ---
+/// O que age sobre a imagem inteira, e não sobre uma anotação.
+fn image_options(ui: &mut egui::Ui, session: &mut EditorSession) {
+    // --- Moldura decorativa: não depende de ferramenta e fica sempre à mão ---
     let backdrop = session.doc.backdrop();
     if icon_button(ui, Icon::Backdrop, backdrop != BackdropStyle::None, true)
         .on_hover_text(format!("Fundo: {} (clique para trocar)", backdrop.label()))
@@ -455,15 +518,24 @@ fn color_popup(ctx: &egui::Context, ui: &mut egui::Ui, session: &mut EditorSessi
 }
 
 /// Separador vertical discreto entre grupos da toolbar.
+/// Divisória fina entre famílias de botões **dentro** de um bloco.
+///
+/// Entre blocos quem separa é o espaço, não um traço: com o fundo do grupo
+/// já marcando a fronteira, um traço ali seria ruído em cima de ruído.
 pub(super) fn separator(ui: &mut egui::Ui) {
-    ui.add_space(4.0);
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(1.0, ICON_BUTTON * 0.6), Sense::hover());
+    ui.add_space(3.0);
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(1.0, ICON_BUTTON * 0.5), Sense::hover());
     ui.painter().rect_filled(
         rect,
-        CornerRadius::ZERO,
-        ui.visuals().widgets.noninteractive.bg_stroke.color,
+        CornerRadius::same(1),
+        ui.visuals()
+            .widgets
+            .noninteractive
+            .bg_stroke
+            .color
+            .gamma_multiply(0.7),
     );
-    ui.add_space(4.0);
+    ui.add_space(3.0);
 }
 
 /// Amostra da espessura atual — o valor numérico ao lado dá a precisão.
@@ -477,4 +549,128 @@ pub(super) fn stroke_preview(ui: &mut egui::Ui, width: f32) {
         ],
         Stroke::new(thickness, ui.visuals().text_color()),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::editor::icons::{geometry, Primitive};
+
+    const PAD: f32 = 16.0;
+
+    /// Prévia da barra montada, sem GPU e sem Windows — o mesmo truque que
+    /// `icons::tests::svg_preview` usa para os ícones soltos, aqui aplicado
+    /// ao layout: blocos, folgas e estado ativo saem das constantes reais.
+    ///
+    /// É uma reprodução do layout, não uma captura dele: serve para julgar
+    /// proporção e agrupamento, não para provar que o egui desenhou assim.
+    ///
+    /// `cargo test --bin rustshot ui::toolbar::tests::svg_barra -- --ignored --nocapture`
+    #[test]
+    #[ignore = "gera a prévia sob demanda"]
+    fn svg_barra() {
+        // (ícones do bloco, qual deles aparece ativo)
+        let tools = ferramentas();
+        let blocos: [(&[Icon], Option<usize>); 5] = [
+            (&tools, Some(2)),
+            (&[Icon::Fill, Icon::TextPill], None),
+            (&[Icon::Backdrop, Icon::Ocr], None),
+            (&[Icon::Close, Icon::Save, Icon::Copy], None),
+            (&[Icon::Redo, Icon::Undo], None),
+        ];
+
+        let altura = ICON_BUTTON + PAD * 2.0;
+        // Cada fronteira entre blocos custa folga + traço + folga.
+        let fronteira = LOOSE * 2.0 + 1.0;
+        let largura: f32 = blocos
+            .iter()
+            .map(|(icones, _)| bloco_largura(icones.len()))
+            .sum::<f32>()
+            + fronteira * (blocos.len() - 1) as f32
+            + PAD * 2.0;
+
+        let mut svg = format!(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{largura:.0}\" \
+             height=\"{altura:.0}\" viewBox=\"0 0 {largura:.2} {altura:.2}\">\
+             <rect width=\"100%\" height=\"100%\" fill=\"#ffffff\"/>"
+        );
+
+        let mut x = PAD;
+        for (i, (icones, ativo)) in blocos.into_iter().enumerate() {
+            if i > 0 {
+                // Fronteira entre grupos: folga, traço fino, folga.
+                let cx = x + LOOSE;
+                svg.push_str(&format!(
+                    "<rect x=\"{cx:.2}\" y=\"{:.2}\" width=\"1\" height=\"{:.2}\" \
+                     fill=\"#d6d6da\"/>",
+                    PAD + ICON_BUTTON * 0.22,
+                    ICON_BUTTON * 0.55
+                ));
+                x += LOOSE * 2.0 + 1.0;
+            }
+            svg.push_str(&bloco_svg(icones, ativo, x));
+            x += bloco_largura(icones.len());
+        }
+        svg.push_str("</svg>");
+        println!("{svg}");
+    }
+
+    /// Os ícones das ferramentas na ordem real da barra — derivados de
+    /// `TOOL_GROUPS`, para a prévia não descolar dela.
+    fn ferramentas() -> Vec<Icon> {
+        TOOL_GROUPS
+            .iter()
+            .flat_map(|grupo| grupo.iter().map(|&tool| Icon::of(tool)))
+            .collect()
+    }
+
+    fn bloco_largura(n: usize) -> f32 {
+        n as f32 * ICON_BUTTON + n.saturating_sub(1) as f32 * TIGHT
+    }
+
+    fn bloco_svg(icones: &[Icon], ativo: Option<usize>, x: f32) -> String {
+        let mut svg = String::new();
+        for (i, icone) in icones.iter().enumerate() {
+            let bx = x + i as f32 * (ICON_BUTTON + TIGHT);
+            let by = PAD;
+            if ativo == Some(i) {
+                svg.push_str(&format!(
+                    "<rect x=\"{bx:.2}\" y=\"{by:.2}\" width=\"{ICON_BUTTON:.2}\" \
+                     height=\"{ICON_BUTTON:.2}\" rx=\"{ROUND}\" fill=\"#e6e7ea\"/>"
+                ));
+            }
+            svg.push_str(&icone_svg(*icone, bx, by));
+        }
+        svg
+    }
+
+    /// Um ícone dentro do quadrado do botão, com o mesmo recuo da toolbar.
+    fn icone_svg(icone: Icon, bx: f32, by: f32) -> String {
+        let inset = ICON_BUTTON * 0.28;
+        let lado = ICON_BUTTON - inset * 2.0;
+        let mut svg = String::new();
+        for primitivo in geometry(icone) {
+            let (pontos, preenche) = match primitivo {
+                Primitive::Stroke(p) => (p, false),
+                Primitive::Fill(p) => (p, true),
+            };
+            let coords: Vec<String> = pontos
+                .iter()
+                .map(|(px, py)| {
+                    format!("{:.2},{:.2}", bx + inset + px * lado, by + inset + py * lado)
+                })
+                .collect();
+            svg.push_str(&if preenche {
+                format!("<polygon points=\"{}\" fill=\"#2b2c30\"/>", coords.join(" "))
+            } else {
+                format!(
+                    "<polyline points=\"{}\" fill=\"none\" stroke=\"#2b2c30\" \
+                     stroke-width=\"1.6\" stroke-linecap=\"round\" \
+                     stroke-linejoin=\"round\"/>",
+                    coords.join(" ")
+                )
+            });
+        }
+        svg
+    }
 }

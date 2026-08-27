@@ -538,7 +538,7 @@ CÓDIGOS DE SAÍDA:
                 }
                 "--purpose" => {
                     purpose = Some(match value()?.as_str() {
-                        "region" => Purpose::SaveDirect,
+                        "region" => Purpose::CopyDirect,
                         "edit" => Purpose::Edit,
                         "ocr" => Purpose::Ocr,
                         other => return Err(format!("--purpose desconhecido: {other}")),

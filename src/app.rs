@@ -17,7 +17,7 @@ use crate::config::{self, Config};
 use crate::editor::{self, EditorSession};
 use crate::overlay::{self, Outcome, Purpose, SelectSession, SelectedAction};
 use crate::settings::SettingsState;
-use crate::storage::{self, SaveTarget};
+use crate::storage::SaveTarget;
 use crate::{capture, jobs, notify, tray};
 
 /// O que este processo foi lançado para fazer.
@@ -137,12 +137,12 @@ impl GuiApp {
                     let outcome = sel.outcome.take().expect("checado acima");
                     let old = std::mem::replace(&mut shared.flow, Flow::Idle);
                     let Flow::Selecting(sel) = old else { unreachable!() };
-                    Some((sel, outcome, SaveTarget::from_config(&shared.config)))
+                    Some((sel, outcome))
                 }
                 _ => None,
             }
         };
-        if let Some((session, outcome, target)) = outcome_step {
+        if let Some((session, outcome)) = outcome_step {
             match outcome {
                 Outcome::Cancelled => {
                     log::info!("seleção de região cancelada");
@@ -151,7 +151,7 @@ impl GuiApp {
                     let shot = &session.monitors[monitor].shot;
                     let cropped = capture::crop(&shot.image, x, y, w, h);
                     match action {
-                        // Ctrl+C na seleção pendente: só copia (v1.2).
+                        // Capturar região: copia e encerra.
                         SelectedAction::CopyToClipboard => {
                             jobs::spawn(move || match crate::clipboard::copy_image(&cropped) {
                                 Ok(()) => notify::toast(
@@ -162,10 +162,6 @@ impl GuiApp {
                                     notify::toast_error("Falha ao copiar", &format!("{err:#}"))
                                 }
                             });
-                        }
-                        // Ctrl+S na seleção pendente: só salva (v1.2).
-                        SelectedAction::SaveToFile => {
-                            storage::save_in_background(target, cropped);
                         }
                         SelectedAction::OpenEditor => {
                             // A partir daqui há trabalho do usuário nesta

@@ -2,10 +2,11 @@
 //! bordas, sempre no topo, fora do Alt-Tab, exibindo a captura congelada
 //! daquele monitor com véu escuro (~60%).
 //!
-//! Fluxo "Capturar região" (v1.2): soltar o arrasto **não** conclui nada — a
-//! seleção permanece na tela (`pending`) até o usuário decidir o destino:
-//! `Ctrl+C` copia a região para a área de transferência, `Ctrl+S` salva como
-//! arquivo; um novo arrasto refaz a seleção e `Esc`/botão direito cancela.
+//! Fluxo "Capturar região": soltar o arrasto copia a região para a área de
+//! transferência e encerra. Não há passo de escolha — capturar uma região é
+//! quase sempre para colar em seguida, e perguntar o destino cobrava uma
+//! tecla a mais de todo mundo para servir ao caso raro. `Esc`/botão direito
+//! cancelam. Salvar em arquivo continua no fluxo de tela cheia e no editor.
 //! Fluxo "Capturar e editar": soltar o arrasto abre o editor imediatamente.
 //!
 //! Coordenadas: cada janela cobre exatamente o seu monitor, então
@@ -35,8 +36,8 @@ const MIN_SELECTION_PX: f32 = 3.0;
 /// O que fazer com a região confirmada.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Purpose {
-    /// RF-02: a seleção fica pendente até Ctrl+C (copiar) ou Ctrl+S (salvar).
-    SaveDirect,
+    /// RF-02: copia a região ao soltar o arrasto, sem perguntar o destino.
+    CopyDirect,
     /// RF-03: recorta e abre o editor ao soltar o arrasto.
     Edit,
     /// Reconhece o texto do recorte e o copia, sem abrir janela nenhuma.
@@ -46,10 +47,8 @@ pub enum Purpose {
 /// Destino escolhido para a região confirmada.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SelectedAction {
-    /// `Ctrl+C` na seleção pendente: copiar para a área de transferência.
+    /// Fluxo "capturar região": copiar o recorte para a área de transferência.
     CopyToClipboard,
-    /// `Ctrl+S` na seleção pendente: salvar como arquivo.
-    SaveToFile,
     /// Fluxo "capturar e editar": abrir o editor com o recorte.
     OpenEditor,
     /// Fluxo "reconhecer texto": o recorte vai para o OCR, e o texto para a
@@ -75,13 +74,6 @@ struct Drag {
     current: (f32, f32),
 }
 
-/// Seleção confirmada aguardando o destino (Ctrl+C/Ctrl+S), fluxo região.
-struct Pending {
-    monitor: usize,
-    /// (x, y, largura, altura) em px da imagem do monitor.
-    rect: (u32, u32, u32, u32),
-}
-
 /// Um monitor participando do overlay.
 pub struct OverlayMonitor {
     pub shot: MonitorShot,
@@ -100,7 +92,6 @@ pub struct SelectSession {
     /// Janela em destaque (índice em `windows`).
     hovered_window: Option<usize>,
     drag: Option<Drag>,
-    pending: Option<Pending>,
     pub outcome: Option<Outcome>,
 }
 
@@ -139,7 +130,6 @@ impl SelectSession {
                 })
                 .collect(),
             drag: None,
-            pending: None,
             outcome: None,
         }
     }
@@ -166,30 +156,15 @@ impl SelectSession {
 
 /// Confirma uma região do monitor `idx`.
 ///
-/// No fluxo "capturar e editar" o editor abre na hora; no fluxo "capturar
-/// região" a seleção fica pendente à espera de Ctrl+C ou Ctrl+S.
+/// Os três fluxos resolvem ao soltar o arrasto: o destino já está decidido
+/// pelo atalho que abriu o overlay, e não há o que perguntar depois.
 fn confirm_region(session: &mut SelectSession, idx: usize, rect: (u32, u32, u32, u32)) {
-    match session.purpose {
-        Purpose::Edit => {
-            session.outcome = Some(Outcome::Selected {
-                monitor: idx,
-                rect,
-                action: SelectedAction::OpenEditor,
-            });
-        }
-        // Reconhecer texto: como o editar, resolve ao soltar — nao ha o que
-        // escolher depois, o destino do texto ja esta decidido.
-        Purpose::Ocr => {
-            session.outcome = Some(Outcome::Selected {
-                monitor: idx,
-                rect,
-                action: SelectedAction::RecognizeText,
-            });
-        }
-        Purpose::SaveDirect => {
-            session.pending = Some(Pending { monitor: idx, rect });
-        }
-    }
+    let action = match session.purpose {
+        Purpose::Edit => SelectedAction::OpenEditor,
+        Purpose::Ocr => SelectedAction::RecognizeText,
+        Purpose::CopyDirect => SelectedAction::CopyToClipboard,
+    };
+    session.outcome = Some(Outcome::Selected { monitor: idx, rect, action });
 }
 
 /// Retângulo da janela `i` em coordenadas do monitor `idx`, recortado a ele.
@@ -234,35 +209,6 @@ pub fn overlay_ui(ctx: &egui::Context, session: &mut SelectSession, idx: usize) 
         return;
     }
 
-    // Seleção pendente (fluxo região): Ctrl+C copia, Ctrl+S salva. As teclas
-    // chegam ao viewport com foco — o do monitor onde o usuário clicou.
-    if session.pending.is_some() {
-        let (copy, save) = ctx.input_mut(|i| {
-            // O egui-winit converte Ctrl+C em `Event::Copy` (sem emitir
-            // `Event::Key`); o `consume_key` fica como retaguarda.
-            let copy_event = i.events.iter().any(|e| matches!(e, egui::Event::Copy));
-            (
-                copy_event || i.consume_key(egui::Modifiers::COMMAND, egui::Key::C),
-                i.consume_key(egui::Modifiers::COMMAND, egui::Key::S),
-            )
-        });
-        if copy || save {
-            let pending = session.pending.take().expect("checado acima");
-            let action = if copy {
-                SelectedAction::CopyToClipboard
-            } else {
-                SelectedAction::SaveToFile
-            };
-            session.outcome = Some(Outcome::Selected {
-                monitor: pending.monitor,
-                rect: pending.rect,
-                action,
-            });
-            ctx.request_repaint_of(egui::ViewportId::ROOT);
-            return;
-        }
-    }
-
     // --- Modo janela: Space alterna, setas navegam, Enter confirma ---
     let (space, select_all, enter, arrow) = ctx.input_mut(|i| {
         let arrow = [
@@ -284,7 +230,6 @@ pub fn overlay_ui(ctx: &egui::Context, session: &mut SelectSession, idx: usize) 
     if space && !session.windows.is_empty() {
         session.window_mode = !session.window_mode;
         session.drag = None;
-        session.pending = None;
         session.hovered_window = None;
     }
     if select_all {
@@ -405,8 +350,6 @@ pub fn overlay_ui(ctx: &egui::Context, session: &mut SelectSession, idx: usize) 
                     );
                     if p.0 >= 0.0 && p.1 >= 0.0 && p.0 <= img_w && p.1 <= img_h {
                         let p = clamp(p);
-                        // Novo arrasto substitui a seleção pendente anterior.
-                        session.pending = None;
                         session.drag = Some(Drag { monitor: idx, start: p, current: p });
                     }
                 }
@@ -432,34 +375,11 @@ pub fn overlay_ui(ctx: &egui::Context, session: &mut SelectSession, idx: usize) 
                             let y = y0.floor().max(0.0) as u32;
                             let w = ((x1 - x0).round() as u32).max(1).min(img_w as u32 - x);
                             let h = ((y1 - y0).round() as u32).max(1).min(img_h as u32 - y);
-                            match session.purpose {
-                                // Capturar e editar: abre o editor ao soltar.
-                                Purpose::Edit => {
-                                    session.outcome = Some(Outcome::Selected {
-                                        monitor: idx,
-                                        rect: (x, y, w, h),
-                                        action: SelectedAction::OpenEditor,
-                                    });
-                                    ctx.request_repaint_of(egui::ViewportId::ROOT);
-                                    return;
-                                }
-                                // Reconhecer texto: tambem resolve ao soltar.
-                                Purpose::Ocr => {
-                                    session.outcome = Some(Outcome::Selected {
-                                        monitor: idx,
-                                        rect: (x, y, w, h),
-                                        action: SelectedAction::RecognizeText,
-                                    });
-                                    ctx.request_repaint_of(egui::ViewportId::ROOT);
-                                    return;
-                                }
-                                // Capturar região: a seleção fica na tela até
-                                // Ctrl+C (copiar) ou Ctrl+S (salvar).
-                                Purpose::SaveDirect => {
-                                    session.pending =
-                                        Some(Pending { monitor: idx, rect: (x, y, w, h) });
-                                }
-                            }
+                            // Os três fluxos resolvem aqui: o destino veio do
+                            // atalho que abriu o overlay.
+                            confirm_region(session, idx, (x, y, w, h));
+                            ctx.request_repaint_of(egui::ViewportId::ROOT);
+                            return;
                         }
                         // Clique sem arrasto: continua selecionando.
                     }
@@ -514,9 +434,7 @@ pub fn overlay_ui(ctx: &egui::Context, session: &mut SelectSession, idx: usize) 
 
             // --- Posição do ponteiro, enquanto não há nada selecionado ---
             if let Some(p) = pointer_pts {
-                let idle = session.drag.is_none()
-                    && session.pending.is_none()
-                    && !session.window_mode;
+                let idle = session.drag.is_none() && !session.window_mode;
                 if idle {
                     if let Some((px, py)) = pointer_px {
                         badge(
@@ -531,7 +449,7 @@ pub fn overlay_ui(ctx: &egui::Context, session: &mut SelectSession, idx: usize) 
 
             // --- Guias em cruz sob o cursor (só antes de haver seleção) ---
             if let Some(p) = pointer_pts {
-                if session.drag.is_none() && session.pending.is_none() && !session.window_mode {
+                if session.drag.is_none() && !session.window_mode {
                     let guide = Stroke::new(1.0_f32, Color32::from_white_alpha(70));
                     painter.line_segment(
                         [Pos2::new(full.min.x, p.y), Pos2::new(full.max.x, p.y)],
@@ -561,27 +479,16 @@ pub fn overlay_ui(ctx: &egui::Context, session: &mut SelectSession, idx: usize) 
                 }
             }
 
-            // --- Seleção pendente aguardando Ctrl+C / Ctrl+S ---
-            if let Some(pending) = &session.pending {
-                if pending.monitor == idx {
-                    let (x, y, w, h) = pending.rect;
-                    let (x0, y0) = (x as f32, y as f32);
-                    let (x1, y1) = (x0 + w as f32, y0 + h as f32);
-                    let sel_pts =
-                        draw_selection(painter, texture.id(), full, ppp, img_w, img_h, x0, y0, x1, y1);
-
-                    // Badge fixo com as dimensões, no canto da seleção.
-                    let text = format!("{w} × {h} px");
-                    badge(painter, full, sel_pts.right_bottom() + Vec2::new(10.0, 10.0), &text);
-                }
-            }
-
             // Dica de uso (fora do arrasto).
             if session.drag.is_none() {
-                let hint = if session.pending.is_some() {
-                    "Ctrl+C copia • Ctrl+S salva • Esc cancela • Arraste para refazer"
-                } else {
-                    "Arraste para selecionar • Esc ou botão direito cancela"
+                let hint = match session.purpose {
+                    Purpose::CopyDirect => {
+                        "Arraste para copiar a região • Esc ou botão direito cancela"
+                    }
+                    Purpose::Edit => "Arraste para editar a região • Esc ou botão direito cancela",
+                    Purpose::Ocr => {
+                        "Arraste para reconhecer o texto • Esc ou botão direito cancela"
+                    }
                 };
                 let pos = Pos2::new(full.center().x, full.min.y + 32.0);
                 badge(painter, full, pos, hint);

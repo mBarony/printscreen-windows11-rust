@@ -2,6 +2,24 @@
 
 Histórico de versões do RustShot. Datas em 2026.
 
+## Não lançado
+
+- **Capturar região passou a copiar direto.** Soltar o arrasto põe a região
+  na área de transferência e encerra, sem o passo de escolher entre `Ctrl+C`
+  e `Ctrl+S`. A pergunta cobrava uma tecla a mais de todo mundo para servir
+  ao caso raro: quem captura uma região quase sempre vai colar em seguida, e
+  quem quer arquivo tem a captura de tela cheia e o editor. Saíram junto o
+  estado pendente do overlay e o destino "salvar" da seleção; a dica na tela
+  agora diz o que aquele arrasto vai fazer, que muda conforme o atalho usado.
+- **O aviso do OCR deixou de ter o texto por cima do botão.** A prévia era
+  desenhada primeiro e tomava a linha inteira, e o botão vinha por cima; além
+  disso um reconhecimento de várias linhas crescia para baixo e passava por
+  ele. Agora o botão é posicionado antes e a prévia fica com o espaço
+  restante, cortada no fim da linha e limitada a duas linhas.
+- **O botão desse aviso ficou maior**, com um alvo de clique de 108×28 pontos
+  no lugar do `small_button` anterior. A janela acompanhou, de 400×68 para
+  440×76 pontos.
+
 ## v1.7.1 — 24/08
 
 - **A janela de captura passou a comprometer 61 MB a menos de memória.** O

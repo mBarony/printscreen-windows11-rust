@@ -28,6 +28,8 @@ pub struct Config {
     pub output_dir: String,
     /// Template do nome do arquivo; tokens `{date}` e `{time}`.
     pub filename_template: String,
+    /// Formato de saída das capturas salvas. `Auto` decide por imagem.
+    pub image_format: crate::imgout::Format,
     pub fullscreen_scope: FullscreenScope,
     pub hotkeys: HotkeysConfig,
     pub editor: EditorConfig,
@@ -40,6 +42,7 @@ impl Default for Config {
             version: 1,
             output_dir: String::new(),
             filename_template: "screenshot_{date}_{time}".into(),
+            image_format: crate::imgout::Format::Auto,
             fullscreen_scope: FullscreenScope::AllMonitors,
             hotkeys: HotkeysConfig::default(),
             editor: EditorConfig::default(),
@@ -357,6 +360,14 @@ impl Config {
                 .unwrap_or(defaults.version),
             output_dir: str_field("output_dir", &defaults.output_dir),
             filename_template: str_field("filename_template", &defaults.filename_template),
+            // Configs da v1.0 traziam `image_format` e o campo passou anos
+            // ignorado; agora volta a valer, com "auto" a mais. Um valor
+            // desconhecido cai no padrão, como o resto.
+            image_format: root
+                .get("image_format")
+                .and_then(Value::as_str)
+                .and_then(crate::imgout::Format::from_str_tolerant)
+                .unwrap_or(defaults.image_format),
             fullscreen_scope: root
                 .get("fullscreen_scope")
                 .and_then(Value::as_str)
@@ -376,6 +387,7 @@ impl Config {
             ("version", json::n(self.version as f64)),
             ("output_dir", json::s(&self.output_dir)),
             ("filename_template", json::s(&self.filename_template)),
+            ("image_format", json::s(self.image_format.as_str())),
             ("fullscreen_scope", json::s(self.fullscreen_scope.as_str())),
             (
                 "hotkeys",
@@ -595,11 +607,20 @@ mod tests {
     }
 
     #[test]
-    fn old_config_with_image_format_still_loads() {
-        // Configs da v1.0 traziam "image_format"; o campo é ignorado hoje.
+    fn old_config_with_image_format_volta_a_valer() {
+        // Configs da v1.0 traziam "image_format", e o campo passou da v1.1
+        // até a v1.8 ignorado. Voltou a valer: quem pedia PNG lá atrás passa
+        // a receber PNG de novo, que era a intenção original.
         let cfg = Config::from_json_text(r#"{ "image_format": "png", "output_dir": "C:\\y" }"#)
             .unwrap();
         assert_eq!(cfg.output_dir, "C:\\y");
+        assert_eq!(cfg.image_format, crate::imgout::Format::Png);
+    }
+
+    #[test]
+    fn image_format_desconhecido_cai_no_padrao() {
+        let cfg = Config::from_json_text(r#"{ "image_format": "webp" }"#).unwrap();
+        assert_eq!(cfg.image_format, crate::imgout::Format::Auto);
     }
 
     #[test]
@@ -619,6 +640,7 @@ mod tests {
                 ..EditorConfig::default()
             },
             start_with_windows: true,
+            image_format: crate::imgout::Format::Png,
             ..Config::default()
         };
 

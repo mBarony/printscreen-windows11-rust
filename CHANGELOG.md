@@ -25,6 +25,15 @@ Histórico de versões do RustShot. Datas em 2026.
 - Uma prévia SVG da barra montada, gerável sob demanda por teste ignorado, no
   mesmo molde da que já existia para os ícones soltos: dá para julgar
   proporção e agrupamento sem GPU e sem Windows.
+- **Saída em PNG, com escolha automática de formato.** Até aqui tudo saía em
+  JPG q90, que borra bordas de texto e interface — justamente o conteúdo mais
+  comum de uma captura de tela. O padrão passa a ser `auto`: a decisão é por
+  imagem, contando cores distintas numa amostra. Interface e texto repetem
+  cor em áreas grandes e vão para PNG, que guarda tudo intacto; fotos e
+  gradientes quase não repetem e vão para JPG, que poupa espaço onde a perda
+  não se nota. Dá para forçar um dos dois pelo seletor em Configurações ou
+  pelo `image_format` do `config.json` — campo que existia na v1.0, ficou
+  ignorado da v1.1 até aqui, e volta a valer.
 - **Fixar a captura na tela** (`Ctrl+P`, ou o botão de alfinete na barra do
   editor). A imagem vira uma janelinha sem bordas, sempre no topo, que fica
   até você fechá-la com `Esc` — para consultar algo enquanto trabalha noutra

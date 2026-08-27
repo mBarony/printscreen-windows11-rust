@@ -1731,6 +1731,7 @@ dependencies = [
  "egui",
  "embed-resource",
  "log",
+ "png",
  "wgpu",
  "windows",
  "windows-sys 0.59.0",

@@ -21,8 +21,8 @@ Aplicação standalone de captura de tela para **Windows 11 (x64)**, escrita em 
 - **Bandeja do sistema**: a aplicação não tem janela principal — menu com os três modos, abrir pasta de capturas, configurações, "Iniciar com o Windows" e Sair.
 - **Configuração persistente** em `config.json` (leitura tolerante; arquivo corrompido é renomeado para `.bak` e recriado). Alterações têm efeito imediato, sem reiniciar.
 - **Instância única**: uma segunda instância notifica e encerra.
-- **Visual Windows 11 (Fluent)**: tema claro/escuro seguindo o sistema, cor de destaque do Windows, cards e cantos arredondados, fonte **Segoe UI Variable** na interface — o texto das anotações permanece na Inter embutida, garantindo que o preview do editor seja idêntico ao JPG exportado.
-- Saída sempre em JPG (qualidade 90); nomes `screenshot_2026-08-02_14-30-05.jpg` com sufixos `_1`, `_2`… em caso de colisão; notificação de confirmação (balão da bandeja, com o nome e o ícone do RustShot) a cada captura salva.
+- **Visual Windows 11 (Fluent)**: tema claro/escuro seguindo o sistema, cor de destaque do Windows, cards e cantos arredondados, fonte **Segoe UI Variable** na interface — o texto das anotações permanece na Inter embutida, garantindo que o preview do editor seja idêntico ao arquivo exportado.
+- Saída em **PNG ou JPG (qualidade 90), escolhido por imagem**: PNG para texto e interface, onde as bordas têm de sair nítidas; JPG para conteúdo fotográfico, onde ele poupa espaço sem perda visível. Dá para fixar um dos dois em Configurações. Nomes `screenshot_2026-08-02_14-30-05.png` com sufixos `_1`, `_2`… em caso de colisão; notificação de confirmação (balão da bandeja, com o nome e o ícone do RustShot) a cada captura salva.
 
 ## Linha de comando
 

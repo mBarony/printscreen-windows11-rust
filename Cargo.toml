@@ -39,6 +39,12 @@ wgpu = { version = "25", default-features = false, features = ["dx12"] }
 egui = { version = "0.32", default-features = false }
 ab_glyph = "0.2"           # rasterização de texto na exportação (já é dep. do epaint)
 log = "0.4"                # fachada usada também por eframe/wgpu
+# Codificação PNG. Como a crate `windows` do OCR, não é dependência nova: já
+# entra hoje por `eframe -> image -> png` (e por `arboard`, pelo mesmo
+# caminho). O JPEG continua vendorizado porque o codificador cabe em três
+# arquivos; o PNG não caberia — o formato exige `deflate`, e um deflate
+# próprio seriam ~500 linhas para comprimir pior que o desta crate.
+png = { version = "0.18", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [

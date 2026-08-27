@@ -1,7 +1,7 @@
 # Semitransparência
 
 **Plataforma:** nucleo · **Estado:** falta · **Esforço:** P
-**Depende de:** formato-png
+**Depende de:** formato-png (já entregue)
 
 ## O que é
 

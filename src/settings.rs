@@ -172,6 +172,32 @@ pub fn show(ctx: &egui::Context, state: &mut SettingsState) {
                             }
                         });
                 });
+
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    ui.label("Formato do arquivo:");
+                    egui::ComboBox::from_id_salt("image_format")
+                        .selected_text(state.draft.image_format.label())
+                        .show_ui(ui, |ui| {
+                            for format in [
+                                crate::imgout::Format::Auto,
+                                crate::imgout::Format::Png,
+                                crate::imgout::Format::Jpg,
+                            ] {
+                                ui.selectable_value(
+                                    &mut state.draft.image_format,
+                                    format,
+                                    format.label(),
+                                );
+                            }
+                        })
+                        .response
+                        .on_hover_text(
+                            "Automático usa PNG para texto e interface, e JPG para imagens \
+                             fotográficas — o PNG guarda bordas nítidas, o JPG poupa espaço \
+                             onde isso não se nota.",
+                        );
+                });
             });
 
             ui.add_space(10.0);

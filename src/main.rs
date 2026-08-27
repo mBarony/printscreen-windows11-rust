@@ -27,6 +27,7 @@ mod editor;
 mod error;
 mod hotkeys;
 mod imgbuf;
+mod imgout;
 mod jobs;
 mod jpeg;
 mod json;

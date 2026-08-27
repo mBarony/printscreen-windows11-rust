@@ -12,16 +12,13 @@ use crate::imgbuf::RgbaImage;
 use crate::notify;
 use crate::platform::time;
 
-/// Formato único de saída: JPG (sem alfa) com esta qualidade.
-const JPG_QUALITY: u8 = 90;
-const EXTENSION: &str = "jpg";
-
 /// Snapshot dos campos de configuração de que o salvamento precisa —
 /// congelado no momento da captura para não depender de mutações posteriores.
 #[derive(Clone)]
 pub struct SaveTarget {
     pub output_dir: PathBuf,
     pub filename_template: String,
+    pub image_format: crate::imgout::Format,
 }
 
 impl SaveTarget {
@@ -29,6 +26,7 @@ impl SaveTarget {
         Self {
             output_dir: config.effective_output_dir(),
             filename_template: config.filename_template.clone(),
+            image_format: config.image_format,
         }
     }
 }
@@ -105,14 +103,18 @@ pub fn next_free_path(dir: &Path, template: &str, extension: &str) -> PathBuf {
 /// Reserva atomicamente o próximo caminho livre com `create_new`: duas
 /// capturas no mesmo segundo (saves em threads paralelas) recebem arquivos
 /// distintos em vez de a segunda truncar a primeira.
-fn claim_free_path(dir: &Path, template: &str) -> Result<(PathBuf, std::fs::File)> {
+fn claim_free_path(
+    dir: &Path,
+    template: &str,
+    extension: &str,
+) -> Result<(PathBuf, std::fs::File)> {
     let stem = expand_stem(template);
     let mut n = 0u32;
     loop {
         let name = if n == 0 {
-            format!("{stem}.{EXTENSION}")
+            format!("{stem}.{extension}")
         } else {
-            format!("{stem}_{n}.{EXTENSION}")
+            format!("{stem}_{n}.{extension}")
         };
         let candidate = dir.join(name);
         match std::fs::OpenOptions::new().write(true).create_new(true).open(&candidate) {
@@ -138,16 +140,21 @@ fn sanitize_filename(name: &str) -> String {
     cleaned.trim().trim_end_matches('.').to_string()
 }
 
-/// Codifica e grava a imagem em JPG; retorna o caminho final.
+/// Codifica e grava a imagem; retorna o caminho final.
+///
+/// O formato sai do `config.json`, e com `auto` é decidido por imagem — daí
+/// a extensão ser resolvida **antes** de reservar o caminho: reservar como
+/// `.jpg` e gravar um PNG dentro deixaria o arquivo mentindo sobre si.
 pub fn write_image(target: &SaveTarget, image: &RgbaImage) -> Result<PathBuf> {
     let dir = ensure_output_dir(target)?;
-
-    // JPG não tem alfa: converte para RGB antes de reservar o caminho, para
-    // manter mínima a janela entre reserva e escrita.
-    let rgb = image.to_rgb();
-    let (path, file) = claim_free_path(&dir, &target.filename_template)?;
+    let format = crate::imgout::resolve(target.image_format, image);
+    let extension = match format {
+        crate::imgout::Format::Png => "png",
+        _ => "jpg",
+    };
+    let (path, file) = claim_free_path(&dir, &target.filename_template, extension)?;
     let writer = std::io::BufWriter::new(file);
-    crate::jpeg::encode_rgb(writer, &rgb, image.width(), image.height(), JPG_QUALITY)
+    crate::imgout::encode(writer, image, format)
         .with_context(|| format!("gravando {}", path.display()))?;
     Ok(path)
 }
@@ -206,27 +213,58 @@ mod tests {
     fn claim_is_atomic_and_sequential() {
         let dir = std::env::temp_dir().join(format!("rustshot-claim-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let (first, f1) = claim_free_path(&dir, "fixed").unwrap();
-        let (second, f2) = claim_free_path(&dir, "fixed").unwrap();
+        let (first, f1) = claim_free_path(&dir, "fixed", "jpg").unwrap();
+        let (second, f2) = claim_free_path(&dir, "fixed", "jpg").unwrap();
         drop((f1, f2));
         assert_eq!(first.file_name().unwrap().to_str().unwrap(), "fixed.jpg");
         assert_eq!(second.file_name().unwrap().to_str().unwrap(), "fixed_1.jpg");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    fn target_para(dir: &Path, format: crate::imgout::Format) -> SaveTarget {
+        SaveTarget {
+            output_dir: dir.to_path_buf(),
+            filename_template: "sample".into(),
+            image_format: format,
+        }
+    }
+
     #[test]
     fn write_image_produces_valid_jpeg() {
         let dir = std::env::temp_dir().join(format!("rustshot-jpg-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let target = SaveTarget {
-            output_dir: dir.clone(),
-            filename_template: "sample".into(),
-        };
+        let target = target_para(&dir, crate::imgout::Format::Jpg);
         let image = RgbaImage::filled(40, 24, [200, 40, 40, 255]);
         let path = write_image(&target, &image).unwrap();
         let bytes = std::fs::read(&path).unwrap();
         assert_eq!(&bytes[..3], &[0xFF, 0xD8, 0xFF], "assinatura JPEG");
         assert_eq!(&bytes[bytes.len() - 2..], &[0xFF, 0xD9], "EOI");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn write_image_em_png_usa_a_extensao_certa() {
+        // O arquivo não pode mentir sobre si: PNG dentro, .png fora.
+        let dir = std::env::temp_dir().join(format!("rustshot-png-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let target = target_para(&dir, crate::imgout::Format::Png);
+        let image = RgbaImage::filled(40, 24, [200, 40, 40, 255]);
+        let path = write_image(&target, &image).unwrap();
+        assert_eq!(path.extension().unwrap(), "png");
+        let bytes = std::fs::read(&path).unwrap();
+        assert_eq!(&bytes[..8], b"\x89PNG\r\n\x1a\n", "assinatura PNG");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn write_image_no_automatico_escolhe_png_para_cor_chapada() {
+        // Uma imagem de cor única é o extremo de "poucas cores": PNG.
+        let dir = std::env::temp_dir().join(format!("rustshot-auto-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let target = target_para(&dir, crate::imgout::Format::Auto);
+        let image = RgbaImage::filled(40, 24, [10, 120, 200, 255]);
+        let path = write_image(&target, &image).unwrap();
+        assert_eq!(path.extension().unwrap(), "png");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

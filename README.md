@@ -50,6 +50,8 @@ Usa o motor do próprio Windows (`Windows.Media.Ocr`), o mesmo da Ferramenta de 
 - **Botão na barra do editor** — reconhece o texto da imagem que está aberta.
 - **`rustshot --ocr captura.png`** — lê um arquivo e mostra o texto numa caixa de mensagem, sem copiar. É o modo de linha de comando, anterior aos outros dois.
 
+O aviso some assim que você cola (`Ctrl+V`), em qualquer aplicativo — colar é o fim natural da tarefa. Sem isso, some sozinho em 8 segundos, e o relógio para enquanto o cursor estiver sobre ele.
+
 Se o idioma do seu perfil não tiver pacote de OCR instalado, o motor cai no primeiro pacote disponível em vez de falhar — um Windows em pt-BR com apenas o pacote en-US funciona. Para instalar outro idioma: Configurações › Hora e idioma › Idioma.
 
 O reconhecimento entra nas builds oficiais. Continua atrás da feature de compilação `ocr`, ligada por padrão, porque é o único ponto do programa que usa a crate `windows` (o resto fala Win32 por `windows-sys`) e porque assim dá para medir o custo dela no executável a qualquer momento — hoje 17.920 bytes:

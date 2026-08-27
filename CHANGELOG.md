@@ -2,6 +2,17 @@
 
 Histórico de versões do RustShot. Datas em 2026.
 
+## Não lançado
+
+- **O aviso do OCR some ao colar.** `Ctrl+V` em qualquer aplicativo fecha a
+  janela na hora: colar é o fim natural da tarefa, e insistir no aviso depois
+  disso é ruído sobre o que o usuário foi fazer. O aviso não tem foco nesse
+  momento — quem recebe a tecla é a janela de destino —, então a detecção é
+  por consulta ao estado do teclado no pulso de 100 ms que a janela já tinha.
+  Não há hook instalado: nada é interceptado nem registrado, a colagem segue
+  para o destino como sempre, e a consulta é a duas teclas específicas. O
+  fechamento por tempo continua valendo para quem não colar.
+
 ## v1.8.0 — 27/08
 
 - **Capturar região passou a copiar direto.** Soltar o arrasto põe a região

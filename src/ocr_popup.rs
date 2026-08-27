@@ -6,8 +6,9 @@
 //! padrão. Ela é uma segunda chance: quem for colar num campo de uma linha só
 //! aperta o botão e o mesmo texto é recopiado emendado, sem repetir a captura.
 //!
-//! Some sozinha depois de alguns segundos. O relógio para enquanto o cursor
-//! estiver sobre ela: ninguém deve perder a janela no meio de uma decisão.
+//! Some sozinha ao colar, e depois de alguns segundos se ninguém colar. O
+//! relógio para enquanto o cursor estiver sobre ela: ninguém deve perder a
+//! janela no meio de uma decisão.
 
 use crate::clipboard;
 
@@ -104,6 +105,35 @@ impl OcrPopup {
     }
 }
 
+/// `true` quando o usuário acabou de apertar Ctrl+V — em qualquer aplicativo.
+///
+/// O aviso não tem foco no momento em que isso acontece: quem recebe a tecla é
+/// a janela onde o texto está sendo colado. Por isso a consulta ao estado
+/// global do teclado, em vez de um evento do egui, que nunca chegaria aqui.
+///
+/// Não é um hook de teclado: nada é interceptado nem registrado, a colagem
+/// segue para o destino como sempre, e a consulta é a duas teclas específicas.
+#[cfg(windows)]
+fn paste_pressed() -> bool {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_CONTROL, VK_V};
+
+    // SAFETY: `GetAsyncKeyState` só lê estado de teclado e aceita qualquer
+    // código; não há ponteiro nem recurso envolvido.
+    unsafe {
+        // Ctrl tem de estar segurado agora (0x8000). No V vale o bit de "foi
+        // pressionada desde a última consulta" (0x0001): um toque curto cabe
+        // inteiro entre dois pulsos de 100 ms e seria perdido se olhássemos
+        // só o estado instantâneo.
+        GetAsyncKeyState(VK_CONTROL as i32) as u16 & 0x8000 != 0
+            && GetAsyncKeyState(VK_V as i32) as u16 & 0x0001 != 0
+    }
+}
+
+#[cfg(not(windows))]
+fn paste_pressed() -> bool {
+    false
+}
+
 pub fn show(ctx: &egui::Context, popup: &mut OcrPopup) {
     if ctx.input(|i| i.viewport().close_requested()) {
         popup.closed = true;
@@ -113,6 +143,18 @@ pub fn show(ctx: &egui::Context, popup: &mut OcrPopup) {
     let now = ctx.input(|i| i.time);
     if popup.deadline.is_infinite() {
         popup.deadline = now + LIFETIME_SECS;
+        // Descarta um Ctrl+V anterior a esta janela: o bit de "foi
+        // pressionada" acumula desde a última consulta, e sem esta leitura o
+        // aviso poderia nascer e sumir no mesmo quadro.
+        let _ = paste_pressed();
+    }
+
+    // Colar é o fim natural da tarefa: o texto já estava na área de
+    // transferência antes desta janela existir, e insistir no aviso depois
+    // disso é ruído sobre o que o usuário foi fazer.
+    if paste_pressed() {
+        popup.closed = true;
+        return;
     }
 
     // As duas metades do `Sides` não podem tocar `popup` ao mesmo tempo: o

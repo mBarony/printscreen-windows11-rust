@@ -13,10 +13,16 @@ use crate::clipboard;
 
 /// Quantos caracteres do começo aparecem na prévia.
 const PREVIEW_CHARS: usize = 60;
+/// Quantas linhas da prévia aparecem. Mais que isto não caberia na janela:
+/// o texto cresceria para baixo e por cima do botão.
+const PREVIEW_LINES: usize = 2;
 /// Segundos na tela sem ninguém encostar.
 const LIFETIME_SECS: f64 = 8.0;
 /// Tamanho da janela, em pontos.
-pub const SIZE: (f32, f32) = (400.0, 68.0);
+pub const SIZE: (f32, f32) = (440.0, 76.0);
+/// Tamanho mínimo do botão, em pontos — alvo de clique confortável, que o
+/// `small_button` de antes não dava.
+const BUTTON_SIZE: (f32, f32) = (108.0, 28.0);
 /// Distância do topo do monitor, em pontos.
 pub const TOP_MARGIN: f32 = 24.0;
 
@@ -73,10 +79,25 @@ impl OcrPopup {
 
     /// Prévia truncada, preservando as quebras quando elas existem — é vendo
     /// a prévia mudar que se percebe o efeito do botão.
+    ///
+    /// O corte é em dois eixos, e os dois importam: por linhas, senão um
+    /// reconhecimento de parágrafo inteiro cresceria para baixo e passaria
+    /// por cima do botão; por caracteres, para a linha não empurrá-lo para
+    /// fora da janela.
     fn preview(&self) -> String {
         let text = self.current();
-        let mut preview: String = text.chars().take(PREVIEW_CHARS).collect();
-        if text.chars().count() > PREVIEW_CHARS {
+        let mut preview = text
+            .lines()
+            .take(PREVIEW_LINES)
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut cortado = text.lines().count() > PREVIEW_LINES;
+
+        if preview.chars().count() > PREVIEW_CHARS {
+            preview = preview.chars().take(PREVIEW_CHARS).collect();
+            cortado = true;
+        }
+        if cortado {
             preview.push('…');
         }
         preview
@@ -105,25 +126,27 @@ pub fn show(ctx: &egui::Context, popup: &mut OcrPopup) {
     let mut toggled = false;
 
     egui::CentralPanel::default().show(ctx, |ui| {
-        // Prévia à esquerda, botão encostado na direita. `Sides` precisa da
-        // altura explícita: o padrão dele é `interact_size.y`, menor que o
-        // conteúdo, e o botão sairia cortado.
-        egui::Sides::new()
-            .height(SIZE.1 - 16.0)
-            .shrink_left()
-            .show(
-                ui,
-                |ui| {
-                    ui.label(
-                        egui::RichText::new(preview)
-                            .size(12.0)
-                            .color(ui.visuals().weak_text_color()),
-                    );
-                },
-                |ui| {
-                    toggled = ui.small_button(label).on_hover_text(hint).clicked();
-                },
+        // O botão entra primeiro, encostado à direita, e só depois a prévia
+        // recebe o que sobrou. É o que impede a sobreposição: com a prévia
+        // primeiro, um texto largo tomava a linha inteira e o botão era
+        // desenhado por cima dele.
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            toggled = ui
+                .add(egui::Button::new(label).min_size(BUTTON_SIZE.into()))
+                .on_hover_text(hint)
+                .clicked();
+            ui.add_space(8.0);
+            // `truncate` corta no fim do espaço disponível em vez de
+            // transbordar — a prévia nunca decide a largura do botão.
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(preview)
+                        .size(12.0)
+                        .color(ui.visuals().weak_text_color()),
+                )
+                .truncate(),
             );
+        });
 
         // O relógio para enquanto o cursor estiver sobre a janela.
         if ctx.input(|i| i.pointer.has_pointer()) {
@@ -179,6 +202,29 @@ mod tests {
         let preview = popup.preview();
         assert_eq!(preview.chars().count(), PREVIEW_CHARS + 1);
         assert!(preview.ends_with('…'));
+    }
+
+    #[test]
+    fn a_previa_corta_no_limite_de_linhas() {
+        // Um parágrafo inteiro cresceria para baixo e passaria por cima do
+        // botão; a prévia para na segunda linha e avisa que cortou.
+        let popup = OcrPopup::new("uma\nduas\ntres\nquatro".to_owned(), (0.0, 0.0));
+        assert_eq!(popup.preview(), "uma\nduas…");
+    }
+
+    #[test]
+    fn a_previa_no_limite_exato_de_linhas_nao_marca_corte() {
+        let popup = OcrPopup::new("uma\nduas".to_owned(), (0.0, 0.0));
+        assert_eq!(popup.preview(), "uma\nduas");
+    }
+
+    #[test]
+    fn emendar_cabe_numa_linha_e_o_corte_por_linhas_deixa_de_valer() {
+        // Emendado, o mesmo texto que estourava o limite de linhas passa a
+        // caber — é o efeito que o botão anuncia.
+        let mut popup = OcrPopup::new("uma\nduas\ntres\nquatro".to_owned(), (0.0, 0.0));
+        popup.joined = true;
+        assert_eq!(popup.preview(), "uma duas tres quatro");
     }
 
     #[test]

@@ -349,6 +349,15 @@ Para desfazer, remova o certificado desses dois repositórios pelo `certlm.msc`.
 Ver [CHANGELOG.md](CHANGELOG.md) — da v1.0 (implementação da especificação) à
 v1.3 (código standalone, sem dependências além do núcleo de GUI).
 
+## O que vem a seguir
+
+O [backlog](backlog/README.md) tem uma feature por arquivo, separada por
+plataforma: o que é portátil em `nucleo/`, e o que depende de API do sistema
+em `windows/`, `linux/` (Hyprland sobre Wayland) e `macos/`. O andamento fica
+em [controle_backlog.md](backlog/controle_backlog.md), junto das decisões que
+ainda não foram tomadas — entre elas o OCR no Linux, que não tem motor de
+sistema para usar.
+
 ## Especificação
 
 Este repositório implementa a "RustShot — Especificação Técnica v1.0" (02/08/2026):

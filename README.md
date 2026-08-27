@@ -2,7 +2,7 @@
 
 Aplicação standalone de captura de tela para **Windows 11 (x64)**, escrita em Rust. Um único `rustshot.exe`, sem instalador e sem runtime externo: roda em segundo plano na bandeja do sistema e oferece quatro atalhos globais configuráveis: três de captura e um de reconhecimento de texto.
 
-> Implementação da [Especificação Técnica v1.0](#especificação) (RustShot v1.7).
+> Implementação da [Especificação Técnica v1.0](#especificação) (RustShot v1.8).
 
 ## Funcionalidades
 
@@ -241,7 +241,7 @@ plataforma compilam como stubs, só para rodar os testes de lógica.
 - **v1.1**: saída fixa em JPG (qualidade 90) e todo o estado ao lado do exe — a v1.0 usava PNG por padrão e `%APPDATA%\RustShot`. O retângulo preto que aparecia no canto do monitor era o viewport-raiz "oculto" do eframe: uma janela realmente invisível não recebe `WM_PAINT` e mataria os atalhos, então a solução é o oposto — a janela fica **visível para o SO**, mas com 1×1 px, fora da área da tela (-32000,-32000), sem ativação, sem redimensionar/maximizar, fora do Alt-Tab (`WS_EX_TOOLWINDOW`) e imune a Alt+F4.
 - **v1.3 (standalone)**: dependências de conveniência substituídas por código próprio chamando Win32 (tabela acima). Efeitos visíveis: as notificações passam de toasts WinRT (que apareciam como "Windows PowerShell") para **balões da bandeja com o nome e o ícone do RustShot**, e o seletor de pasta usa o diálogo clássico do shell. Formatos e comportamento do `config.json` permanecem idênticos.
 - **v1.2**: a captura de região deixou de concluir ao soltar o mouse — a seleção ficava **pendente na tela** e o destino era escolhido pelo teclado (`Ctrl+C` copia, `Ctrl+S` salva). No editor, `Ctrl+C` passou a **fechar a janela** depois de copiar, espelhando o `Ctrl+S` — e isso continua valendo. Detalhe de plataforma: `Ctrl+C` chega ao egui como `Event::Copy` (não como tecla), e é assim que o editor o detecta.
-- **Depois da v1.7.1**: a região voltou a concluir ao soltar o mouse, agora **sempre copiando** para a área de transferência. O passo de escolha cobrava uma tecla a mais de todo mundo para servir a um caso raro: quem captura uma região quase sempre vai colar em seguida, e quem quer arquivo tem a tela cheia e o editor. Com isso saíram o estado pendente do overlay e o destino "salvar" da seleção.
+- **v1.8.0**: a região voltou a concluir ao soltar o mouse, agora **sempre copiando** para a área de transferência. O passo de escolha cobrava uma tecla a mais de todo mundo para servir a um caso raro: quem captura uma região quase sempre vai colar em seguida, e quem quer arquivo tem a tela cheia e o editor. Com isso saíram o estado pendente do overlay e o destino "salvar" da seleção.
 
 
 ## Limitações conhecidas (v1)

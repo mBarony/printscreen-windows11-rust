@@ -2,7 +2,7 @@
 
 Histórico de versões do RustShot. Datas em 2026.
 
-## Não lançado
+## v1.8.0 — 27/08
 
 - **Capturar região passou a copiar direto.** Soltar o arrasto põe a região
   na área de transferência e encerra, sem o passo de escolher entre `Ctrl+C`

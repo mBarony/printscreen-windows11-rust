@@ -12,6 +12,19 @@ Histórico de versões do RustShot. Datas em 2026.
   Não há hook instalado: nada é interceptado nem registrado, a colagem segue
   para o destino como sempre, e a consulta é a duas teclas específicas. O
   fechamento por tempo continua valendo para quem não colar.
+- **A barra do editor ficou mais limpa e mais organizada.** Os botões passaram
+  de 26 para 30 pontos, com o ícone proporcionalmente maior, e o realce do
+  cursor entra por uma animação curta — numa fila de quatorze, o fundo
+  surgindo de estalo a cada pixel percorrido piscava. Os controles deixaram de
+  ser uma fila só com traços soltos e viraram blocos: ferramentas, opções do
+  que está selecionado e imagem inteira à esquerda; saída e histórico à
+  direita, em blocos separados de propósito, porque um clique errado entre
+  fechar e desfazer custa caro dos dois lados. A ferramenta ativa passou a ser
+  marcada por um fundo discreto no lugar da cor de destaque cheia, que puxava
+  o olho e apagava o desenho do próprio ícone.
+- Uma prévia SVG da barra montada, gerável sob demanda por teste ignorado, no
+  mesmo molde da que já existia para os ícones soltos: dá para julgar
+  proporção e agrupamento sem GPU e sem Windows.
 
 ## v1.8.0 — 27/08
 

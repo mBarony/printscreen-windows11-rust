@@ -191,6 +191,10 @@ pub struct EditorSession {
     /// pendurar o aviso; então a barra só levanta a bandeira e quem a recolhe
     /// é o `app`, no mesmo lugar onde já trata os outros desfechos.
     pub ocr_requested: bool,
+    /// Pedido de fixar a imagem visível na tela. Mesma mecânica de bandeira
+    /// do `ocr_requested`: quem cria a janela é o `app`, que é o dono dos
+    /// viewports.
+    pub pin_requested: bool,
     /// Sessão terminou (salvou ou descartou); a janela fecha no próximo frame.
     pub finished: bool,
     /// Quantas operações já foram gravadas em disco, e se a imagem de origem
@@ -240,6 +244,7 @@ impl EditorSession {
             confirm_discard: false,
             focus_frames: FOCUS_CLAIM_FRAMES,
             ocr_requested: false,
+            pin_requested: false,
             finished: false,
             saved_ops: None,
             source_saved: false,

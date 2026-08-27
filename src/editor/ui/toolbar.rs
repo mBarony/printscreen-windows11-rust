@@ -207,6 +207,9 @@ pub(super) fn draw(ctx: &egui::Context, session: &mut EditorSession, target: &Sa
                 Some(RightAction::Redo) => perform_redo(session),
                 Some(RightAction::Copy) => copy_and_close(session),
                 Some(RightAction::Save) => save_and_close(session, target),
+                // O editor não cria janelas: levanta a bandeira e o `app`,
+                // dono dos viewports, fixa e fecha esta.
+                Some(RightAction::Pin) => session.pin_requested = true,
                 Some(RightAction::Close) => request_close(session),
                 None => {}
             }
@@ -219,6 +222,7 @@ enum RightAction {
     Redo,
     Copy,
     Save,
+    Pin,
     Close,
 }
 
@@ -250,6 +254,12 @@ fn right_side(ui: &mut egui::Ui, can_undo: bool, can_redo: bool) -> Option<Right
             .clicked()
         {
             pedido = Some(RightAction::Copy);
+        }
+        if icon_button(ui, Icon::Pin, false, true)
+            .on_hover_text("Fixar na tela (Ctrl+P) — fica sempre no topo até fechar")
+            .clicked()
+        {
+            pedido = Some(RightAction::Pin);
         }
     });
 
@@ -575,7 +585,7 @@ mod tests {
             (&tools, Some(2)),
             (&[Icon::Fill, Icon::TextPill], None),
             (&[Icon::Backdrop, Icon::Ocr], None),
-            (&[Icon::Close, Icon::Save, Icon::Copy], None),
+            (&[Icon::Close, Icon::Save, Icon::Copy, Icon::Pin], None),
             (&[Icon::Redo, Icon::Undo], None),
         ];
 

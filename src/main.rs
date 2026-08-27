@@ -33,6 +33,7 @@ mod json;
 mod notify;
 mod ocr_popup;
 mod overlay;
+mod pinned;
 mod platform;
 mod resident;
 mod resident_link;

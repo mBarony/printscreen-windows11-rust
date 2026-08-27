@@ -25,6 +25,12 @@ Histórico de versões do RustShot. Datas em 2026.
 - Uma prévia SVG da barra montada, gerável sob demanda por teste ignorado, no
   mesmo molde da que já existia para os ícones soltos: dá para julgar
   proporção e agrupamento sem GPU e sem Windows.
+- **Fixar a captura na tela** (`Ctrl+P`, ou o botão de alfinete na barra do
+  editor). A imagem vira uma janelinha sem bordas, sempre no topo, que fica
+  até você fechá-la com `Esc` — para consultar algo enquanto trabalha noutra
+  janela. Como não tem barra de título, o corpo inteiro é a área de arrasto, e
+  a roda redimensiona entre 15% e 400%. Uma captura maior que 520 pontos nasce
+  encolhida: em tamanho natural, uma tela cheia fixada cobriria o monitor.
 
 ## v1.8.0 — 27/08
 

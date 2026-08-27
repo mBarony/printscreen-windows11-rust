@@ -15,12 +15,12 @@ no arquivo da feature é a fonte da verdade; esta página é o resumo.
 | Plataforma | Total | Falta | Parcial | Concluído | Em aberto |
 |---|---:|---:|---:|---:|---:|
 | Núcleo (vale para as três plataformas) | 26 | 24 | 2 | 0 | 0 |
-| Windows | 7 | 7 | 0 | 0 | 0 |
+| Windows | 7 | 5 | 0 | 2 | 0 |
 | Linux (Hyprland + Wayland) | 12 | 11 | 0 | 0 | 1 |
 | macOS | 13 | 13 | 0 | 0 | 0 |
-| **Total** | **58** | **55** | **2** | **0** | **1** |
+| **Total** | **58** | **53** | **2** | **2** | **1** |
 
-Progresso: **0 de 58** (0%).
+Progresso: **2 de 58** (3%).
 
 ---
 
@@ -58,8 +58,8 @@ Progresso: **0 de 58** (0%).
 - [ ] **[API por esquema de URL](windows/api-por-url.md)** · M
 - [ ] **[Arrastar para outro aplicativo](windows/arrastar-para-outro-app.md)** · M
 - [ ] **[Captura com rolagem](windows/captura-com-rolagem.md)** · G
-- [ ] **[Fixar a captura na tela](windows/fixar-na-tela.md)** · M
-- [ ] **[Redimensionar a janela fixada](windows/redimensionar-fixada.md)** · P
+- [x] **[Fixar a captura na tela](windows/fixar-na-tela.md)** · M
+- [x] **[Redimensionar a janela fixada](windows/redimensionar-fixada.md)** · P
 - [ ] **[Seleção inteligente](windows/selecao-inteligente.md)** · G
 - [ ] **[Upload para S3](windows/upload-s3.md)** · G
 
@@ -125,3 +125,4 @@ Itens que não são bloqueados por trabalho, e sim por uma escolha:
 | Data | O que entrou |
 |---|---|
 | 27/08/2026 | Backlog criado com 58 itens, a partir da página do Shottr |
+| 27/08/2026 | `windows/fixar-na-tela` e `windows/redimensionar-fixada` concluídos |

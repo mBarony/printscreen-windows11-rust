@@ -38,6 +38,7 @@ pub enum Icon {
     Save,
     Close,
     Check,
+    Pin,
 }
 
 impl Icon {
@@ -61,7 +62,7 @@ impl Icon {
     }
 
     #[cfg(test)]
-    pub const ALL: [Icon; 24] = [
+    pub const ALL: [Icon; 25] = [
         Icon::Move,
         Icon::Line,
         Icon::Arrow,
@@ -86,6 +87,7 @@ impl Icon {
         Icon::Save,
         Icon::Check,
         Icon::Close,
+        Icon::Pin,
     ];
 
     #[cfg(test)]
@@ -115,6 +117,7 @@ impl Icon {
             Icon::Save => "save",
             Icon::Close => "close",
             Icon::Check => "check",
+            Icon::Pin => "pin",
         }
     }
 }
@@ -307,6 +310,21 @@ pub fn geometry(icon: Icon) -> Vec<Primitive> {
             Stroke(vec![(0.82, 0.18), (0.18, 0.82)]),
         ],
         Icon::Check => vec![Stroke(vec![(0.12, 0.52), (0.4, 0.8), (0.88, 0.2)])],
+        // Alfinete visto de lado: cabeça larga, colarinho e a agulha descendo
+        // até a ponta. Espetado na diagonal, como um alfinete de mural — em
+        // pé ele lia como taça.
+        Icon::Pin => vec![
+            Stroke(vec![(0.30, 0.10), (0.72, 0.34)]),
+            Stroke(vec![
+                (0.36, 0.22),
+                (0.24, 0.44),
+                (0.30, 0.58),
+                (0.58, 0.44),
+                (0.62, 0.30),
+                (0.36, 0.22),
+            ]),
+            Stroke(vec![(0.34, 0.56), (0.12, 0.92)]),
+        ],
     }
 }
 

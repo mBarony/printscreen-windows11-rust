@@ -68,6 +68,8 @@ pub struct AppShared {
     pub ocr_running: bool,
     /// Aviso do reconhecimento de texto, enquanto estiver na tela.
     pub ocr_popup: Option<crate::ocr_popup::OcrPopup>,
+    /// Captura fixada na tela, enquanto o usuário não a fechar.
+    pub pinned: Option<crate::pinned::PinnedShot>,
     pub quit: bool,
 }
 
@@ -117,6 +119,7 @@ impl GuiApp {
                 settings,
                 ocr_running: false,
                 ocr_popup: None,
+                pinned: None,
                 quit: false,
             })),
             ctx: cc.egui_ctx.clone(),
@@ -239,6 +242,28 @@ impl GuiApp {
             }
         }
 
+        // Pedido de fixar vindo da barra do editor: a imagem visível vira uma
+        // janela sempre no topo, e o editor fecha — como copiar e salvar.
+        {
+            let mut shared = self.shared.lock().unwrap();
+            let pedido = match &mut shared.flow {
+                Flow::Editing(session) if session.pin_requested => {
+                    session.pin_requested = false;
+                    Some(session.doc.visible_image().clone())
+                }
+                _ => None,
+            };
+            if let Some(image) = pedido {
+                log::info!("fixando a imagem do editor na tela");
+                // Um canto qualquer perto do alto: a janela é arrastável, e
+                // adivinhar melhor exigiria saber em que monitor o editor
+                // está — que é a mesma limitação do aviso do OCR.
+                let anchor = (120.0, 120.0);
+                shared.pinned = Some(crate::pinned::PinnedShot::new(image, anchor));
+                shared.flow = Flow::Idle;
+            }
+        }
+
         // Editor concluído (salvou ou descartou).
         {
             let mut shared = self.shared.lock().unwrap();
@@ -263,10 +288,14 @@ impl GuiApp {
         };
 
         // Aviso do reconhecimento: some quando o tempo acaba ou quando fecham.
+        // A captura fixada só sai quando fecham — é o ponto dela.
         {
             let mut shared = self.shared.lock().unwrap();
             if shared.ocr_popup.as_ref().is_some_and(|popup| popup.closed) {
                 shared.ocr_popup = None;
+            }
+            if shared.pinned.as_ref().is_some_and(|pin| pin.closed) {
+                shared.pinned = None;
             }
         }
         if let Some(new_config) = pending {
@@ -279,6 +308,7 @@ impl GuiApp {
             && shared.settings.is_none()
             && !shared.ocr_running
             && shared.ocr_popup.is_none()
+            && shared.pinned.is_none()
         {
             shared.quit = true;
         }
@@ -416,6 +446,33 @@ impl GuiApp {
             // Mesma rede das configurações: quem destrói o viewport é a raiz,
             // e ela dorme. Sem isto o aviso ficaria na tela depois de o seu
             // tempo acabar, esperando alguém mexer o mouse.
+            ctx.request_repaint_after(std::time::Duration::from_millis(50));
+        }
+
+        if let Some(pinned) = &shared.pinned {
+            let id = egui::ViewportId::from_hash_of("rustshot_pinned");
+            let (w, h) = pinned.size();
+            let builder = egui::ViewportBuilder::default()
+                .with_title(crate::pinned::WINDOW_TITLE)
+                // Sem moldura e sempre no topo, como o aviso do OCR — mas
+                // esta recebe foco e aparece na barra de tarefas: é uma
+                // janela de trabalho, que fica até o usuário fechá-la, e
+                // precisa ser alcançável pelo Alt-Tab.
+                .with_decorations(false)
+                .with_always_on_top()
+                .with_resizable(false)
+                .with_position(egui::Pos2::new(pinned.anchor.0, pinned.anchor.1))
+                .with_inner_size(egui::Vec2::new(w, h));
+            let state = self.shared.clone();
+            ctx.show_viewport_deferred(id, builder, move |ctx, _class| {
+                let mut shared = state.lock().unwrap();
+                if let Some(pinned) = &mut shared.pinned {
+                    crate::pinned::show(ctx, pinned);
+                    if pinned.closed {
+                        ctx.request_repaint_of(egui::ViewportId::ROOT);
+                    }
+                }
+            });
             ctx.request_repaint_after(std::time::Duration::from_millis(50));
         }
     }

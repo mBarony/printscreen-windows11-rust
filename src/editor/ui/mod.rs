@@ -66,7 +66,7 @@ pub fn show(ctx: &egui::Context, session: &mut EditorSession, target: &SaveTarge
         // texto do egui (ex.: o hex do seletor de cores, o valor dos sliders).
         let typing = ctx.wants_keyboard_input();
         let tool_keys = session.tool_keys;
-        let (undo, redo, copy, save, cancel, tool_key, confirm) = ctx.input_mut(|i| {
+        let (undo, redo, copy, save, pin, cancel, tool_key, confirm) = ctx.input_mut(|i| {
             // O egui-winit converte Ctrl+C em `Event::Copy` (sem emitir
             // `Event::Key`), então o Ctrl+C do editor é detectado pelo
             // evento de cópia — o `consume_key` fica como retaguarda.
@@ -89,6 +89,7 @@ pub fn show(ctx: &egui::Context, session: &mut EditorSession, target: &SaveTarge
                 i.consume_key(Modifiers::COMMAND, Key::Y),
                 copy_event || i.consume_key(Modifiers::COMMAND, Key::C),
                 i.consume_key(Modifiers::COMMAND, Key::S),
+                i.consume_key(Modifiers::COMMAND, Key::P),
                 i.consume_key(Modifiers::NONE, Key::Escape),
                 tool_key,
                 // Enter confirma o recorte, mas não pode roubar o Enter que
@@ -110,6 +111,9 @@ pub fn show(ctx: &egui::Context, session: &mut EditorSession, target: &SaveTarge
         }
         if copy {
             copy_and_close(session);
+        }
+        if pin {
+            session.pin_requested = true;
         }
         if save {
             save_and_close(session, target);

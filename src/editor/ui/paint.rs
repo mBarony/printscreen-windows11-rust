@@ -9,7 +9,7 @@ use egui::{
 };
 
 
-use crate::editor::shapes::{
+use crate::editor::shapes::{arrow_path, 
     arrow_geometry, marker_geometry, stroke_appearance, text_pill_metrics, Layer, Point, Shape, MARKER_INK, TEXT_PILL_COLOR,
 };
 use crate::editor::{
@@ -26,9 +26,23 @@ pub(super) fn paint_shape(painter: &egui::Painter, layer: &Layer, ts: ToScreen) 
         Shape::Line { a, b } => {
             painter.line_segment([ts.pos(*a), ts.pos(*b)], stroke);
         }
-        Shape::Arrow { a, b } => {
-            let geo = arrow_geometry(*a, *b, style.stroke_width);
-            painter.line_segment([ts.pos(geo.shaft_a), ts.pos(geo.shaft_b)], stroke);
+        Shape::Arrow { a, b, bend } => {
+            // A ponta é calculada na tangente do fim da curva: com a seta
+            // dobrada, apontá-la na direção da corda deixaria a farpa torta
+            // em relação ao traço que chega nela.
+            let path = arrow_path(*a, *b, *bend);
+            let penultimo = path[path.len().saturating_sub(2)];
+            let geo = arrow_geometry(penultimo, *b, style.stroke_width);
+            if path.len() > 2 {
+                let mut pontos: Vec<_> = path.iter().map(|p| ts.pos(*p)).collect();
+                // Encurta o fim para o traço não vazar por dentro da ponta.
+                if let Some(ultimo) = pontos.last_mut() {
+                    *ultimo = ts.pos(geo.shaft_b);
+                }
+                painter.add(egui::Shape::line(pontos, stroke));
+            } else {
+                painter.line_segment([ts.pos(geo.shaft_a), ts.pos(geo.shaft_b)], stroke);
+            }
             painter.add(egui::Shape::convex_polygon(
                 geo.head.iter().map(|p| ts.pos(*p)).collect(),
                 color32(style.color),
@@ -180,7 +194,7 @@ pub(super) fn shape_screen_bbox(ctx: &egui::Context, layer: &Layer, ts: ToScreen
             ts.pos(*center),
             Vec2::new(ts.len(*rx), ts.len(*ry)) * 2.0,
         ),
-        Shape::Line { a, b } | Shape::Arrow { a, b } => {
+        Shape::Line { a, b } | Shape::Arrow { a, b, .. } => {
             Rect::from_two_pos(ts.pos(*a), ts.pos(*b)).expand(half_stroke)
         }
         Shape::Rect { min, max } => {

@@ -15,7 +15,7 @@ use crate::imgbuf::RgbaImage;
 
 use super::backdrop::{self, BackdropStyle};
 use super::raster;
-use super::shapes::{
+use super::shapes::{arrow_path, 
     arrow_geometry, marker_geometry, stroke_appearance, text_pill_metrics, Layer, Point, Shape,
     MARKER_INK, TEXT_PILL_COLOR,
 };
@@ -47,15 +47,35 @@ pub fn render(
                     style.color,
                 );
             }
-            Shape::Arrow { a, b } => {
-                let geo = arrow_geometry(*a, *b, style.stroke_width);
-                raster::stroke_line(
-                    &mut buffer,
-                    (geo.shaft_a.x, geo.shaft_a.y),
-                    (geo.shaft_b.x, geo.shaft_b.y),
-                    style.stroke_width,
-                    style.color,
-                );
+            Shape::Arrow { a, b, bend } => {
+                // A ponta segue a tangente do fim da curva; a haste é a
+                // curva amostrada, encurtada para não vazar por dentro dela.
+                let path = arrow_path(*a, *b, *bend);
+                let penultimo = path[path.len().saturating_sub(2)];
+                let geo = arrow_geometry(penultimo, *b, style.stroke_width);
+                let mut path = path;
+                if let Some(ultimo) = path.last_mut() {
+                    *ultimo = geo.shaft_b;
+                }
+                if path.len() > 2 {
+                    for par in path.windows(2) {
+                        raster::stroke_line(
+                            &mut buffer,
+                            (par[0].x, par[0].y),
+                            (par[1].x, par[1].y),
+                            style.stroke_width,
+                            style.color,
+                        );
+                    }
+                } else {
+                    raster::stroke_line(
+                        &mut buffer,
+                        (geo.shaft_a.x, geo.shaft_a.y),
+                        (geo.shaft_b.x, geo.shaft_b.y),
+                        style.stroke_width,
+                        style.color,
+                    );
+                }
                 raster::fill_triangle(
                     &mut buffer,
                     (geo.head[0].x, geo.head[0].y),

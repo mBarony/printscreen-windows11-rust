@@ -196,9 +196,12 @@ fn encode_shape(shape: &Shape) -> Value {
         Shape::Line { a, b } => {
             json::obj(vec![("kind", json::s("line")), ("a", point(*a)), ("b", point(*b))])
         }
-        Shape::Arrow { a, b } => {
-            json::obj(vec![("kind", json::s("arrow")), ("a", point(*a)), ("b", point(*b))])
-        }
+        Shape::Arrow { a, b, bend } => json::obj(vec![
+            ("kind", json::s("arrow")),
+            ("a", point(*a)),
+            ("b", point(*b)),
+            ("bend", json::n(*bend as f64)),
+        ]),
         Shape::Rect { min, max } => json::obj(vec![
             ("kind", json::s("rect")),
             ("min", point(*min)),
@@ -250,6 +253,7 @@ fn decode_shape(v: &Value) -> Option<Shape> {
         "arrow" => Some(Shape::Arrow {
             a: read_point(v.get("a"))?,
             b: read_point(v.get("b"))?,
+            bend: v.get("bend").and_then(|b| b.as_f64()).unwrap_or(0.0) as f32,
         }),
         "rect" => Some(Shape::Rect {
             min: read_point(v.get("min"))?,
@@ -429,7 +433,7 @@ mod tests {
     fn every_shape() -> Vec<Shape> {
         vec![
             Shape::Line { a: p(1.0, 2.0), b: p(3.0, 4.0) },
-            Shape::Arrow { a: p(5.0, 6.0), b: p(7.0, 8.0) },
+            Shape::Arrow { a: p(5.0, 6.0), b: p(7.0, 8.0), bend: 0.25 },
             Shape::Rect { min: p(9.0, 10.0), max: p(11.0, 12.0) },
             Shape::Ellipse { center: p(13.0, 14.0), rx: 15.0, ry: 16.0 },
             Shape::Freehand { points: vec![p(17.0, 18.0), p(19.0, 20.0)], highlight: true },

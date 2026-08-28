@@ -14,13 +14,13 @@ no arquivo da feature é a fonte da verdade; esta página é o resumo.
 
 | Plataforma | Total | Falta | Parcial | Concluído | Em aberto |
 |---|---:|---:|---:|---:|---:|
-| Núcleo (vale para as três plataformas) | 26 | 11 | 1 | 14 | 0 |
+| Núcleo (vale para as três plataformas) | 26 | 10 | 1 | 15 | 0 |
 | Windows | 7 | 5 | 0 | 2 | 0 |
 | Linux (Hyprland + Wayland) | 12 | 11 | 0 | 0 | 1 |
 | macOS | 13 | 13 | 0 | 0 | 0 |
-| **Total** | **58** | **40** | **1** | **16** | **1** |
+| **Total** | **58** | **39** | **1** | **17** | **1** |
 
-Progresso: **16 de 58** (28%).
+Progresso: **17 de 58** (29%).
 
 ---
 
@@ -50,7 +50,7 @@ Progresso: **16 de 58** (28%).
 - [ ] **[Salvar e copiar automáticos](nucleo/salvar-copiar-automaticos.md)** · P
 - [x] **[Seleção quadrada](nucleo/selecao-quadrada.md)** · P
 - [x] **[Semitransparência](nucleo/semitransparencia.md)** · P
-- [ ] **[Seta em arco](nucleo/seta-em-arco.md)** · M
+- [x] **[Seta em arco](nucleo/seta-em-arco.md)** · M
 - [x] **[Seta reversível](nucleo/seta-reversivel.md)** · P
 
 ## Windows
@@ -133,3 +133,4 @@ Itens que não são bloqueados por trabalho, e sim por uma escolha:
 | 28/08/2026 | Redimensionar a captura e desfazer o recorte |
 | 28/08/2026 | Captura com atraso e repetir a última região |
 | 28/08/2026 | Guias de alinhamento e semitransparência na exportação |
+| 28/08/2026 | Seta em arco, com alça de dobra |

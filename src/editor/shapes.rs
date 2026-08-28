@@ -119,7 +119,9 @@ pub use super::spotlight::{SpotlightForm, MAGNIFICATION_DEFAULT, MAGNIFICATION_M
 #[derive(Debug, Clone, PartialEq)]
 pub enum Shape {
     Line { a: Point, b: Point },
-    Arrow { a: Point, b: Point },
+    /// `bend` desloca o ponto de controle perpendicularmente à reta `a`–`b`,
+    /// como fração do comprimento: 0 é reta, positivo curva para um lado.
+    Arrow { a: Point, b: Point, bend: f32 },
     Rect { min: Point, max: Point },
     Ellipse { center: Point, rx: f32, ry: f32 },
     /// Traço à mão livre já suavizado. `highlight` o transforma em
@@ -207,9 +209,11 @@ impl Layer {
         let reach = tol + self.style.stroke_width / 2.0;
         match &self.shape {
             Shape::Line { a, b } => dist_to_segment(p, *a, *b) <= reach,
-            Shape::Arrow { a, b } => {
-                let geo = arrow_geometry(*a, *b, self.style.stroke_width);
-                dist_to_segment(p, geo.shaft_a, geo.shaft_b) <= reach
+            Shape::Arrow { a, b, bend } => {
+                let path = arrow_path(*a, *b, *bend);
+                let penultimo = path[path.len().saturating_sub(2)];
+                let geo = arrow_geometry(penultimo, *b, self.style.stroke_width);
+                path.windows(2).any(|s| dist_to_segment(p, s[0], s[1]) <= reach)
                     || point_in_triangle(p, geo.head)
                     || (0..3).any(|i| dist_to_segment(p, geo.head[i], geo.head[(i + 1) % 3]) <= tol)
             }
@@ -309,7 +313,7 @@ impl Layer {
     /// a fonte em mãos.
     pub fn bbox(&self) -> Option<(Point, Point)> {
         match &self.shape {
-            Shape::Line { a, b } | Shape::Arrow { a, b } => Some(normalize(*a, *b)),
+            Shape::Line { a, b } | Shape::Arrow { a, b, .. } => Some(normalize(*a, *b)),
             Shape::Rect { min, max } => Some((*min, *max)),
             Shape::Ellipse { center, rx, ry } => Some((
                 Point::new(center.x - rx, center.y - ry),
@@ -340,7 +344,14 @@ impl Layer {
     /// um borrão de pontos numa anotação pequena. O texto não tem alça: seu
     /// tamanho se ajusta pela roda.
     pub fn handles(&self, min_side: f32) -> Vec<(Handle, Point)> {
-        if let Shape::Line { a, b } | Shape::Arrow { a, b } = &self.shape {
+        if let Shape::Arrow { a, b, bend } = &self.shape {
+            return vec![
+                (Handle::Start, *a),
+                (Handle::End, *b),
+                (Handle::Bend, arc_apex(*a, *b, *bend)),
+            ];
+        }
+        if let Shape::Line { a, b } = &self.shape {
             return vec![(Handle::Start, *a), (Handle::End, *b)];
         }
         let Some((min, max)) = self.bbox() else {
@@ -367,12 +378,23 @@ impl Layer {
     pub fn resize(&mut self, handle: Handle, to: Point, constrain: bool) {
         match handle {
             Handle::Start | Handle::End => self.move_endpoint(handle, to, constrain),
+            Handle::Bend => self.bend_arrow(to),
             _ => self.resize_box(handle, to, constrain),
         }
     }
 
+    /// Dobra a seta para que o arco passe pelo ponto arrastado.
+    fn bend_arrow(&mut self, to: Point) {
+        let Shape::Arrow { a, b, bend } = &mut self.shape else {
+            return;
+        };
+        // Um arco além disso vira laço e a ponta deixa de apontar para o
+        // alvo, que é o ponto de existir uma seta.
+        *bend = bend_from_apex(*a, *b, to).clamp(-0.6, 0.6);
+    }
+
     fn move_endpoint(&mut self, handle: Handle, to: Point, constrain: bool) {
-        let (Shape::Line { a, b } | Shape::Arrow { a, b }) = &mut self.shape else {
+        let (Shape::Line { a, b } | Shape::Arrow { a, b, .. }) = &mut self.shape else {
             return;
         };
         let (moving, fixed) = if handle == Handle::Start { (&mut *a, *b) } else { (&mut *b, *a) };
@@ -520,6 +542,8 @@ pub enum Handle {
     Left,
     Start,
     End,
+    /// Alça central da seta: arrastá-la dobra o traço num arco.
+    Bend,
 }
 
 impl Handle {
@@ -547,7 +571,8 @@ impl Handle {
             Handle::Bottom => (false, false, false, true),
             Handle::BottomLeft => (true, false, false, true),
             Handle::Left => (true, false, false, false),
-            Handle::Start | Handle::End => (false, false, false, false),
+            // Extremidades e dobra não arrastam arestas de caixa.
+            Handle::Start | Handle::End | Handle::Bend => (false, false, false, false),
         }
     }
 
@@ -570,7 +595,9 @@ impl Handle {
             Handle::Bottom => Point::new(cx, max.y),
             Handle::BottomLeft => Point::new(min.x, max.y),
             Handle::Left => Point::new(min.x, cy),
-            Handle::Start | Handle::End => min,
+            // Alças de linha e seta não vivem na caixa; quem as posiciona é
+            // `Layer::handles`, com as coordenadas reais da forma.
+            Handle::Start | Handle::End | Handle::Bend => Point::new(cx, cy),
         }
     }
 }
@@ -580,7 +607,7 @@ impl Shape {
     pub fn shift_for_cut(&mut self, band: crate::editor::cut::Band) {
         let mv = |p: &mut Point| crate::editor::cut::shift_point(p, band);
         match self {
-            Self::Line { a, b } | Self::Arrow { a, b } => {
+            Self::Line { a, b } | Self::Arrow { a, b, .. } => {
                 mv(a);
                 mv(b);
             }
@@ -602,7 +629,7 @@ impl Shape {
             p.y += dy;
         };
         match self {
-            Self::Line { a, b } | Self::Arrow { a, b } => {
+            Self::Line { a, b } | Self::Arrow { a, b, .. } => {
                 mv(a);
                 mv(b);
             }
@@ -633,7 +660,7 @@ impl Shape {
             p.y *= k;
         };
         match self {
-            Self::Line { a, b } | Self::Arrow { a, b } => {
+            Self::Line { a, b } | Self::Arrow { a, b, .. } => {
                 sc(a);
                 sc(b);
             }
@@ -660,6 +687,60 @@ impl Shape {
             Self::Text { anchor, .. } => sc(anchor),
         }
     }
+}
+
+/// Vértice do arco de uma seta dobrada — o ponto por onde a curva passa, e
+/// onde fica a alça de dobra.
+///
+/// `bend` é fração do comprimento para o traço ficar com a mesma curvatura
+/// aparente em setas de qualquer tamanho; um deslocamento absoluto faria uma
+/// seta curta virar um laço e uma longa parecer reta.
+pub fn arc_apex(a: Point, b: Point, bend: f32) -> Point {
+    let mid = Point::new((a.x + b.x) / 2.0, (a.y + b.y) / 2.0);
+    let (dx, dy) = (b.x - a.x, b.y - a.y);
+    let len = (dx * dx + dy * dy).sqrt();
+    if len <= f32::EPSILON {
+        return mid;
+    }
+    // Perpendicular unitária.
+    let (px, py) = (-dy / len, dx / len);
+    Point::new(mid.x + px * bend * len, mid.y + py * bend * len)
+}
+
+/// `bend` que faria o arco passar por `apex` — o inverso de `arc_apex`.
+pub fn bend_from_apex(a: Point, b: Point, apex: Point) -> f32 {
+    let mid = Point::new((a.x + b.x) / 2.0, (a.y + b.y) / 2.0);
+    let (dx, dy) = (b.x - a.x, b.y - a.y);
+    let len = (dx * dx + dy * dy).sqrt();
+    if len <= f32::EPSILON {
+        return 0.0;
+    }
+    let (px, py) = (-dy / len, dx / len);
+    ((apex.x - mid.x) * px + (apex.y - mid.y) * py) / len
+}
+
+/// Pontos que aproximam o traço da seta: a reta, quando `bend` é zero, ou a
+/// Bézier quadrática que passa pelo vértice do arco.
+///
+/// O controle da Bézier fica no **dobro** da distância do vértice, porque
+/// uma quadrática só chega à metade do caminho até o controle.
+pub fn arrow_path(a: Point, b: Point, bend: f32) -> Vec<Point> {
+    if bend.abs() < 0.001 {
+        return vec![a, b];
+    }
+    let apex = arc_apex(a, b, bend);
+    let ctrl = Point::new(2.0 * apex.x - (a.x + b.x) / 2.0, 2.0 * apex.y - (a.y + b.y) / 2.0);
+    const STEPS: usize = 24;
+    (0..=STEPS)
+        .map(|i| {
+            let t = i as f32 / STEPS as f32;
+            let u = 1.0 - t;
+            Point::new(
+                u * u * a.x + 2.0 * u * t * ctrl.x + t * t * b.x,
+                u * u * a.y + 2.0 * u * t * ctrl.y + t * t * b.y,
+            )
+        })
+        .collect()
 }
 
 fn dist(p: Point, q: Point) -> f32 {
@@ -728,7 +809,7 @@ pub fn shape_from_drag(
             Some(if tool == Tool::Line {
                 Shape::Line { a, b }
             } else {
-                Shape::Arrow { a, b }
+                Shape::Arrow { a, b, bend: 0.0 }
             })
         }
         Tool::Rect => {
@@ -926,6 +1007,79 @@ pub fn arrow_geometry(a: Point, b: Point, stroke_width: f32) -> ArrowGeometry {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn seta_reta_tem_caminho_de_dois_pontos() {
+        let a = Point::new(0.0, 0.0);
+        let b = Point::new(100.0, 0.0);
+        assert_eq!(arrow_path(a, b, 0.0).len(), 2);
+    }
+
+    #[test]
+    fn seta_dobrada_vira_curva_que_sai_da_reta() {
+        let a = Point::new(0.0, 0.0);
+        let b = Point::new(100.0, 0.0);
+        let path = arrow_path(a, b, 0.3);
+        assert!(path.len() > 2, "a curva é amostrada em vários pontos");
+        // Extremidades presas; o meio sai da reta.
+        assert!((path[0].x - a.x).abs() < 0.01);
+        assert!((path[path.len() - 1].x - b.x).abs() < 0.01);
+        let meio = path[path.len() / 2];
+        assert!(meio.y.abs() > 10.0, "o meio deveria estar fora da reta, y={}", meio.y);
+    }
+
+    #[test]
+    fn o_arco_passa_pelo_vertice_da_alca() {
+        // É o que faz a alça parecer presa ao traço enquanto se arrasta.
+        let a = Point::new(0.0, 0.0);
+        let b = Point::new(100.0, 0.0);
+        let apex = arc_apex(a, b, 0.25);
+        let path = arrow_path(a, b, 0.25);
+        let meio = path[path.len() / 2];
+        assert!((meio.x - apex.x).abs() < 1.0, "x: {} vs {}", meio.x, apex.x);
+        assert!((meio.y - apex.y).abs() < 1.0, "y: {} vs {}", meio.y, apex.y);
+    }
+
+    #[test]
+    fn dobra_e_vertice_sao_inversos() {
+        let a = Point::new(10.0, 20.0);
+        let b = Point::new(90.0, 60.0);
+        for bend in [-0.5, -0.1, 0.0, 0.2, 0.6] {
+            let apex = arc_apex(a, b, bend);
+            let volta = bend_from_apex(a, b, apex);
+            assert!((volta - bend).abs() < 0.001, "{bend} virou {volta}");
+        }
+    }
+
+    #[test]
+    fn a_dobra_e_proporcional_ao_comprimento() {
+        // Mesma curvatura aparente em setas de tamanhos diferentes: um
+        // deslocamento absoluto faria a curta virar laço.
+        let curta = arc_apex(Point::new(0.0, 0.0), Point::new(50.0, 0.0), 0.2);
+        let longa = arc_apex(Point::new(0.0, 0.0), Point::new(200.0, 0.0), 0.2);
+        assert!((longa.y.abs() - 4.0 * curta.y.abs()).abs() < 0.01);
+    }
+
+    #[test]
+    fn seta_de_comprimento_zero_nao_quebra() {
+        let p = Point::new(5.0, 5.0);
+        assert_eq!(bend_from_apex(p, p, Point::new(9.0, 9.0)), 0.0);
+        let apex = arc_apex(p, p, 0.5);
+        assert!((apex.x - p.x).abs() < 0.01);
+    }
+
+    #[test]
+    fn a_seta_dobrada_ganha_a_alca_de_dobra() {
+        let l = layer(Shape::Arrow {
+            a: Point::new(0.0, 0.0),
+            b: Point::new(100.0, 0.0),
+            bend: 0.2,
+        });
+        let alcas = l.handles(34.0);
+        assert_eq!(alcas.len(), 3, "início, fim e dobra");
+        assert!(alcas.iter().any(|(h, _)| *h == Handle::Bend));
+    }
+
     use super::*;
 
     fn style() -> Style {
@@ -1068,7 +1222,7 @@ mod tests {
 
     #[test]
     fn hit_test_arrow_head() {
-        let arrow = layer(Shape::Arrow { a: Point::new(0.0, 50.0), b: Point::new(100.0, 50.0) });
+        let arrow = layer(Shape::Arrow { a: Point::new(0.0, 50.0), b: Point::new(100.0, 50.0), bend: 0.0 });
         // Dentro do triângulo da ponta (comprimento 12 = 4×3).
         assert!(arrow.hit_test(Point::new(95.0, 50.0), 0.0, (0.0, 0.0)));
         assert!(!arrow.hit_test(Point::new(95.0, 60.0), 2.0, (0.0, 0.0)));

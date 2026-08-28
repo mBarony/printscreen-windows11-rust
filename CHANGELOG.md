@@ -25,6 +25,11 @@ Histórico de versões do RustShot. Datas em 2026.
 - Uma prévia SVG da barra montada, gerável sob demanda por teste ignorado, no
   mesmo molde da que já existia para os ícones soltos: dá para julgar
   proporção e agrupamento sem GPU e sem Windows.
+- **A seta pode ser dobrada num arco.** Selecione-a e arraste a alça do meio.
+  A curvatura é proporcional ao comprimento, então setas de tamanhos
+  diferentes ficam com o mesmo aspecto, e a ponta acompanha a tangente do fim
+  da curva — apontá-la pela corda deixaria a farpa torta em relação ao traço
+  que chega nela.
 - **Guias de alinhamento** no editor: `Alt+H` e `Alt+V` criam uma linha de
   apoio onde o cursor está, `Alt+Shift+G` limpa todas. São só ajuda visual —
   não entram no histórico nem na imagem exportada.

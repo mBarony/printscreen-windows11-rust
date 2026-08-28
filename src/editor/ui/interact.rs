@@ -415,7 +415,7 @@ pub(super) fn handle_cursor(handle: Handle) -> CursorIcon {
         Handle::TopRight | Handle::BottomLeft => CursorIcon::ResizeNeSw,
         Handle::Top | Handle::Bottom => CursorIcon::ResizeVertical,
         Handle::Left | Handle::Right => CursorIcon::ResizeHorizontal,
-        Handle::Start | Handle::End => CursorIcon::Grab,
+        Handle::Start | Handle::End | Handle::Bend => CursorIcon::Grab,
     }
 }
 

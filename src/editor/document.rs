@@ -511,7 +511,7 @@ impl Document {
         let Some(layer) = self.layers.get_mut(index) else {
             return false;
         };
-        let Shape::Arrow { a, b } = &mut layer.shape else {
+        let Shape::Arrow { a, b, .. } = &mut layer.shape else {
             return false;
         };
         std::mem::swap(a, b);
@@ -623,14 +623,14 @@ mod tests {
         let mut d = doc();
         let a = Point::new(10.0, 10.0);
         let b = Point::new(40.0, 30.0);
-        d.push(Shape::Arrow { a, b }, style());
+        d.push(Shape::Arrow { a, b, bend: 0.0 }, style());
 
         d.begin_move();
         assert!(d.reverse_arrow(0), "a anotação é uma seta");
         d.end_move();
 
         match d.layers()[0].shape {
-            Shape::Arrow { a: na, b: nb } => {
+            Shape::Arrow { a: na, b: nb, .. } => {
                 assert_eq!((na.x, na.y), (b.x, b.y));
                 assert_eq!((nb.x, nb.y), (a.x, a.y));
             }
@@ -643,7 +643,7 @@ mod tests {
         let mut d = doc();
         let a = Point::new(10.0, 10.0);
         let b = Point::new(40.0, 30.0);
-        d.push(Shape::Arrow { a, b }, style());
+        d.push(Shape::Arrow { a, b, bend: 0.0 }, style());
         d.begin_move();
         d.reverse_arrow(0);
         d.end_move();

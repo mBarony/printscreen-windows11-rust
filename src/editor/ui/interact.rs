@@ -125,21 +125,52 @@ pub(super) fn close_edit_run(session: &mut EditorSession) {
     }
 }
 
-/// Toma a cor do pixel da imagem em `p` e volta à ferramenta anterior.
+/// Como o conta-gotas deve ler a imagem.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(super) enum PickMode {
+    /// O pixel exato sob o cursor.
+    Point,
+    /// O tom mais escuro da vizinhança — num texto, a cor da letra e não a
+    /// do fundo, que é o que um clique quase sempre pegaria.
+    TextColor,
+    /// A média de um retângulo, para áreas com ruído ou gradiente.
+    Average(Point),
+}
+
+/// Toma uma cor da imagem em `p` e volta à ferramenta anterior.
 ///
 /// A cor amostrada é sempre opaca: o que interessa é o tom que está na tela,
 /// não a transparência do buffer.
-pub(super) fn pick_color(ctx: &egui::Context, session: &mut EditorSession, p: Point) {
+pub(super) fn pick_color(
+    ctx: &egui::Context,
+    session: &mut EditorSession,
+    p: Point,
+    mode: PickMode,
+) {
     let image = session.doc.visible_image();
     let (w, h) = (image.width(), image.height());
     if w == 0 || h == 0 {
         return;
     }
-    let x = (p.x.max(0.0) as u32).min(w - 1);
-    let y = (p.y.max(0.0) as u32).min(h - 1);
-    let sample = image.pixel(x, y);
+    let coord = |p: Point| {
+        (
+            (p.x.max(0.0) as u32).min(w - 1),
+            (p.y.max(0.0) as u32).min(h - 1),
+        )
+    };
+    let (x, y) = coord(p);
 
-    session.color = [sample[0], sample[1], sample[2], 255];
+    session.color = match mode {
+        PickMode::Point => {
+            let px = image.pixel(x, y);
+            [px[0], px[1], px[2], 255]
+        }
+        PickMode::TextColor => crate::color::darkest_around(image, x, y),
+        PickMode::Average(other) => {
+            let (ox, oy) = coord(other);
+            crate::color::average(image, x, y, ox, oy)
+        }
+    };
     restyle_selection(ctx, session);
     // A seleção é preservada de propósito: tirar uma cor é para aplicá-la.
     if let Some(previous) = session.tool_before_eyedropper.take() {

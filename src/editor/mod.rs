@@ -190,6 +190,8 @@ pub struct EditorSession {
     /// O editor não conhece o estado do processo, e o OCR precisa dele para
     /// pendurar o aviso; então a barra só levanta a bandeira e quem a recolhe
     /// é o `app`, no mesmo lugar onde já trata os outros desfechos.
+    /// Onde o arrasto do conta-gotas começou, enquanto ele dura.
+    pub eyedropper_origin: Option<crate::editor::shapes::Point>,
     pub ocr_requested: bool,
     /// Pedido de fixar a imagem visível na tela. Mesma mecânica de bandeira
     /// do `ocr_requested`: quem cria a janela é o `app`, que é o dono dos
@@ -243,6 +245,7 @@ impl EditorSession {
             wheel_accum: 0.0,
             confirm_discard: false,
             focus_frames: FOCUS_CLAIM_FRAMES,
+            eyedropper_origin: None,
             ocr_requested: false,
             pin_requested: false,
             finished: false,

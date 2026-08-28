@@ -14,13 +14,13 @@ no arquivo da feature é a fonte da verdade; esta página é o resumo.
 
 | Plataforma | Total | Falta | Parcial | Concluído | Em aberto |
 |---|---:|---:|---:|---:|---:|
-| Núcleo (vale para as três plataformas) | 26 | 24 | 1 | 1 | 0 |
+| Núcleo (vale para as três plataformas) | 26 | 21 | 1 | 4 | 0 |
 | Windows | 7 | 5 | 0 | 2 | 0 |
 | Linux (Hyprland + Wayland) | 12 | 11 | 0 | 0 | 1 |
 | macOS | 13 | 13 | 0 | 0 | 0 |
-| **Total** | **58** | **53** | **1** | **3** | **1** |
+| **Total** | **58** | **50** | **1** | **6** | **1** |
 
-Progresso: **3 de 58** (5%).
+Progresso: **6 de 58** (10%).
 
 ---
 
@@ -29,17 +29,17 @@ Progresso: **3 de 58** (5%).
 - [ ] **[Captura com atraso](nucleo/captura-com-atraso.md)** · P
 - [ ] **[Colar imagem sobre a captura](nucleo/colar-imagem.md)** · M
 - [ ] **[Copiar e colar anotações](nucleo/copiar-colar-anotacoes.md)** · M
-- [ ] **[Cor do texto sob o cursor](nucleo/cor-do-texto.md)** · P
-- [ ] **[Cor média de uma área](nucleo/cor-media-de-area.md)** · P
+- [x] **[Cor do texto sob o cursor](nucleo/cor-do-texto.md)** · P
+- [x] **[Cor média de uma área](nucleo/cor-media-de-area.md)** · P
 - [ ] **[Desfazer o recorte](nucleo/desfazer-recorte.md)** · P
 - [ ] **[Duplicar arrastando](nucleo/duplicar-arrastando.md)** · P
 - [ ] **[Estilo desenhado à mão](nucleo/estilo-desenhado-a-mao.md)** · M
 - [~] **[Estilos de linha](nucleo/estilos-de-linha.md)** · M — _parcial_
 - [x] **[Saída em PNG](nucleo/formato-png.md)** · M
-- [ ] **[Outros formatos de cor](nucleo/formatos-de-cor.md)** · P
+- [x] **[Outros formatos de cor](nucleo/formatos-de-cor.md)** · P
 - [ ] **[GIF antes e depois](nucleo/gif-antes-depois.md)** · M
 - [ ] **[Guias de alinhamento](nucleo/guias.md)** · P
-- [ ] **[Leitura de QR code](nucleo/leitura-de-qr-code.md)** · M
+- [ ] **[Leitura de QR code](nucleo/leitura-de-qr-code.md)** · G
 - [ ] **[Mover o objeto durante o desenho](nucleo/mover-durante-desenho.md)** · P
 - [ ] **[Ocultar só o texto](nucleo/ocultar-so-o-texto.md)** · M
 - [ ] **[Reconstruir colunas no OCR](nucleo/reconstruir-colunas.md)** · G
@@ -127,3 +127,5 @@ Itens que não são bloqueados por trabalho, e sim por uma escolha:
 | 27/08/2026 | Backlog criado com 58 itens, a partir da página do Shottr |
 | 27/08/2026 | `windows/fixar-na-tela` e `windows/redimensionar-fixada` concluídos |
 | 27/08/2026 | `nucleo/formato-png` concluído, com escolha automática de formato |
+| 27/08/2026 | Lote de cor: média de área, cor do texto e OKLCH/APCA |
+| 27/08/2026 | `nucleo/leitura-de-qr-code` reestimado de M para G (sem como testar) |

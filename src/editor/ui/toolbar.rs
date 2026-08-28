@@ -501,7 +501,18 @@ fn image_options(ui: &mut egui::Ui, session: &mut EditorSession) {
 
 /// Amostra da cor atual que abre a paleta ao ser clicada.
 fn color_popup(ctx: &egui::Context, ui: &mut egui::Ui, session: &mut EditorSession) {
-    let button = color_swatch(ui, session.color, true).on_hover_text("Cor — clique para escolher");
+    // A dica traz a cor nos três formatos: o HEX para colar em qualquer
+    // lugar, o OKLCH para quem trabalha com design, e o contraste APCA
+    // contra branco e preto — que responde "dá para ler texto nesta cor?".
+    let rgb = [session.color[0], session.color[1], session.color[2]];
+    let dica = format!(
+        "Cor — clique para escolher\n{}\n{}\ncontraste APCA: {:.0} sobre branco, {:.0} sobre preto",
+        crate::color::format_hex(rgb),
+        crate::color::format_oklch(rgb),
+        crate::color::apca_contrast(rgb, [255, 255, 255]).abs(),
+        crate::color::apca_contrast(rgb, [0, 0, 0]).abs(),
+    );
+    let button = color_swatch(ui, session.color, true).on_hover_text(dica);
 
     egui::Popup::menu(&button)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClick)

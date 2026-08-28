@@ -22,6 +22,7 @@ compile_error!("RustShot só suporta Windows x86_64 (o manifesto declara amd64)"
 mod app;
 mod capture;
 mod clipboard;
+mod color;
 mod config;
 mod editor;
 mod error;

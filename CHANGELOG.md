@@ -25,6 +25,15 @@ Histórico de versões do RustShot. Datas em 2026.
 - Uma prévia SVG da barra montada, gerável sob demanda por teste ignorado, no
   mesmo molde da que já existia para os ícones soltos: dá para julgar
   proporção e agrupamento sem GPU e sem Windows.
+- **O conta-gotas ganhou duas amostragens.** Um clique continua pegando o
+  pixel exato. Com `Shift`, ele pega o **tom mais escuro** num quadrado de
+  20×20 px em volta do cursor — que num texto é a cor da letra, e não a do
+  fundo, que é o que o clique simples quase sempre pegava. Arrastando, ele
+  pega a **média** do retângulo, para áreas com ruído ou gradiente onde um
+  pixel só não representa o que se está olhando.
+- **A cor também aparece em OKLCH e com contraste APCA**, na dica do botão de
+  cor, ao lado do HEX. O OKLCH é perceptualmente uniforme, e o APCA responde
+  direto "dá para ler texto nesta cor?" contra branco e contra preto.
 - **Saída em PNG, com escolha automática de formato.** Até aqui tudo saía em
   JPG q90, que borra bordas de texto e interface — justamente o conteúdo mais
   comum de uma captura de tela. O padrão passa a ser `auto`: a decisão é por

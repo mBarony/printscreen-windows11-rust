@@ -19,7 +19,7 @@ use crate::editor::{
 };
 use super::{cancel_move, reset_view, ToScreen};
 use super::interact::{
-    begin_select_drag, finish_marquee, handle_at, handle_cursor, pick_color,
+    begin_select_drag, finish_marquee, handle_at, handle_cursor, pick_color, PickMode,
     restyle_selection, selected_is_text,
 };
 use super::paint::{
@@ -175,18 +175,37 @@ pub(super) fn draw(ctx: &egui::Context, session: &mut EditorSession) {
 
             if session.text_input.is_none() && !session.confirm_discard {
                 match session.tool {
-                    // Amostra a cor sob o cursor e devolve a ferramenta.
+                    // Amostra a cor e devolve a ferramenta. Um clique pega o
+                    // pixel; com Shift, o tom mais escuro por perto (a cor da
+                    // letra, quando se clica sobre texto); arrastando, a média
+                    // do retângulo, para áreas com ruído ou gradiente.
                     Tool::Eyedropper => {
                         if response.hovered() {
                             ctx.output_mut(|o| o.cursor_icon = CursorIcon::Crosshair);
                         }
-                        if response.clicked_by(PointerButton::Primary) {
-                            if let Some(p) = response
-                                .interact_pointer_pos()
-                                .or_else(|| response.hover_pos())
+                        let ponto = |r: &egui::Response| {
+                            r.interact_pointer_pos()
+                                .or_else(|| r.hover_pos())
                                 .map(|p| clamp_img(to_screen.inverse(p)))
+                        };
+                        if response.drag_started() {
+                            session.eyedropper_origin = ponto(&response);
+                        }
+                        if response.drag_stopped() {
+                            if let (Some(inicio), Some(fim)) =
+                                (session.eyedropper_origin.take(), ponto(&response))
                             {
-                                pick_color(ctx, session, p);
+                                pick_color(ctx, session, fim, PickMode::Average(inicio));
+                            }
+                        }
+                        if response.clicked_by(PointerButton::Primary) {
+                            if let Some(p) = ponto(&response) {
+                                let mode = if ctx.input(|i| i.modifiers.shift) {
+                                    PickMode::TextColor
+                                } else {
+                                    PickMode::Point
+                                };
+                                pick_color(ctx, session, p, mode);
                             }
                         }
                     }

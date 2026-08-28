@@ -441,6 +441,18 @@ fn tool_options(ctx: &egui::Context, ui: &mut egui::Ui, session: &mut EditorSess
             };
             restyle_selection(ctx, session);
         }
+        // A dica carrega a ressalva porque a funcionalidade não pode
+        // prometer sigilo que não entrega: onde o OCR não reconhece, nada é
+        // ocultado, e o nome do botão sozinho sugeriria o contrário.
+        if icon_button(ui, Icon::RedactText, session.redact_words, true)
+            .on_hover_text(
+                "Ocultar só as palavras da região, preservando gráficos e layout. \
+                 É melhor-esforço: o que o reconhecimento não achar continua visível.",
+            )
+            .clicked()
+        {
+            session.redact_words = !session.redact_words;
+        }
     }
 
     // --- Holofote: recorte e ampliação ---

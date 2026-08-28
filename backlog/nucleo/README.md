@@ -13,7 +13,7 @@ Portáteis: uma implementação serve às três plataformas. É onde mora a maio
 | [Cor do texto sob o cursor](cor-do-texto.md) | falta | P |
 | [Outros formatos de cor](formatos-de-cor.md) | falta | P |
 | [Guias de alinhamento](guias.md) | falta | P |
-| [Ocultar só o texto](ocultar-so-o-texto.md) | falta | M |
+| [Ocultar só o texto](ocultar-so-o-texto.md) | feito | M |
 | [Remover objeto](remover-objeto.md) | falta | G |
 | [Colar imagem sobre a captura](colar-imagem.md) | feito | M |
 | [Duplicar arrastando](duplicar-arrastando.md) | falta | P |

@@ -23,6 +23,15 @@
 use crate::error::Result;
 use crate::imgbuf::RgbaImage;
 
+/// Uma palavra reconhecida e onde ela está, em px da imagem entregue ao OCR.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TextBox {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+}
+
 /// Ampliação aplicada antes de reconhecer.
 ///
 /// Truque emprestado do PowerToys (PowerOCR faz o mesmo 1,5×): o motor foi
@@ -196,6 +205,56 @@ mod imp {
         Ok(text)
     }
 
+    /// Onde estão as palavras reconhecidas, em px **da imagem recebida**.
+    ///
+    /// O motor trabalha sobre uma cópia ampliada (ver `UPSCALE`), então as
+    /// caixas voltam divididas pela ampliação — quem chama pensa na imagem
+    /// que entregou, não na que o WinRT viu.
+    ///
+    /// **Bloqueia**, como o `recognize`: só chame de thread de trabalho.
+    pub fn recognize_boxes(image: &RgbaImage, language: Option<&str>) -> Result<Vec<TextBox>> {
+        if image.width() == 0 || image.height() == 0 {
+            return Err(err!("imagem vazia"));
+        }
+        let limit = max_dimension();
+        if image.width() > limit || image.height() > limit {
+            return Err(err!(
+                "imagem grande demais para o OCR ({}×{}; o limite é {limit} px por lado)",
+                image.width(),
+                image.height()
+            ));
+        }
+        let scale = if (image.width().max(image.height()) as f32 * UPSCALE) <= limit as f32 {
+            UPSCALE
+        } else {
+            1.0
+        };
+
+        let engine = engine(language)?;
+        let bitmap = software_bitmap(image, scale)?;
+        let result = engine
+            .RecognizeAsync(&bitmap)
+            .map_err(|e| err!("OCR falhou: {e}"))?
+            .get()
+            .map_err(|e| err!("OCR não concluiu: {e}"))?;
+
+        let lines = result.Lines().map_err(|e| err!("OCR sem linhas: {e}"))?;
+        let mut caixas = Vec::new();
+        for line in lines {
+            let Ok(words) = line.Words() else { continue };
+            for word in words {
+                let Ok(r) = word.BoundingRect() else { continue };
+                caixas.push(TextBox {
+                    x: r.X / scale,
+                    y: r.Y / scale,
+                    w: r.Width / scale,
+                    h: r.Height / scale,
+                });
+            }
+        }
+        Ok(caixas)
+    }
+
     /// Idiomas com pacote de OCR instalado, em etiquetas BCP-47.
     pub fn available_languages() -> Vec<String> {
         let Ok(list) = OcrEngine::AvailableRecognizerLanguages() else {
@@ -210,7 +269,7 @@ mod imp {
 
 #[cfg(windows)]
 #[allow(unused_imports)]
-pub use imp::{available_languages, recognize};
+pub use imp::{available_languages, recognize, recognize_boxes};
 
 /// Fora do Windows não há motor de OCR do sistema.
 #[cfg(not(windows))]

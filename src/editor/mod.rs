@@ -221,6 +221,11 @@ pub struct EditorSession {
     /// Onde o arrasto do conta-gotas começou, enquanto ele dura.
     pub eyedropper_origin: Option<crate::editor::shapes::Point>,
     pub ocr_requested: bool,
+    /// Ocultar só as palavras de uma região: o retângulo arrastado espera
+    /// pelo OCR, que roda em thread de trabalho como o do botão da barra.
+    pub redact_text: Option<(Point, Point)>,
+    /// A ferramenta Ocultar apaga só as palavras, não a região inteira.
+    pub redact_words: bool,
     /// Pedido de fixar a imagem visível na tela. Mesma mecânica de bandeira
     /// do `ocr_requested`: quem cria a janela é o `app`, que é o dono dos
     /// viewports.
@@ -281,6 +286,8 @@ impl EditorSession {
             focus_frames: FOCUS_CLAIM_FRAMES,
             eyedropper_origin: None,
             ocr_requested: false,
+            redact_text: None,
+            redact_words: false,
             pin_requested: false,
             finished: false,
             saved_ops: None,

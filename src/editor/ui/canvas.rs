@@ -430,6 +430,16 @@ pub(super) fn draw(ctx: &egui::Context, session: &mut EditorSession) {
                                         drag.shift,
                                         drag.alt,
                                     ) {
+                                        // Ocultar só as palavras: o retângulo
+                                        // não vira anotação agora — ele espera
+                                        // o OCR, que roda fora desta thread.
+                                        if session.redact_words {
+                                            if let Shape::Redaction { min, max, .. } = &shape {
+                                                session.redact_text = Some((*min, *max));
+                                                session.drag = None;
+                                                return;
+                                            }
+                                        }
                                         if let Shape::Redaction { min, max, seed } = &mut shape {
                                             // Uma redação minúscula não
                                             // esconderia nada; e cada uma leva

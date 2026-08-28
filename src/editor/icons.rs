@@ -30,6 +30,7 @@ pub enum Icon {
     LineDashed,
     LineDotted,
     Sketch,
+    RedactText,
     Fill,
     TextPill,
     Backdrop,
@@ -68,7 +69,7 @@ impl Icon {
     }
 
     #[cfg(test)]
-    pub const ALL: [Icon; 30] = [
+    pub const ALL: [Icon; 31] = [
         Icon::Move,
         Icon::Line,
         Icon::Arrow,
@@ -85,6 +86,7 @@ impl Icon {
         Icon::LineDashed,
         Icon::LineDotted,
         Icon::Sketch,
+        Icon::RedactText,
         Icon::Fill,
         Icon::TextPill,
         Icon::Backdrop,
@@ -120,6 +122,7 @@ impl Icon {
             Icon::LineDashed => "line_dashed",
             Icon::LineDotted => "line_dotted",
             Icon::Sketch => "sketch",
+            Icon::RedactText => "redact_text",
             Icon::Fill => "fill",
             Icon::TextPill => "text_pill",
             Icon::Backdrop => "backdrop",
@@ -299,6 +302,14 @@ pub fn geometry(icon: Icon) -> Vec<Primitive> {
                 (0.70, 0.44),
                 (0.86, 0.32),
             ]),
+        ],
+        // Linhas de texto com o miolo tapado: só as palavras somem, o
+        // contorno da região continua lá.
+        Icon::RedactText => vec![
+            Stroke(rectangle(0.08, 0.16, 0.92, 0.84)),
+            Fill(rectangle(0.20, 0.32, 0.62, 0.42)),
+            Fill(rectangle(0.20, 0.53, 0.80, 0.63)),
+            Fill(rectangle(0.68, 0.32, 0.80, 0.42)),
         ],
         // Quadrado cheio dentro de um vazado — o par contorno/preenchimento.
         Icon::Fill => vec![

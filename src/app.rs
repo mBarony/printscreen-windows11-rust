@@ -260,6 +260,26 @@ impl GuiApp {
             }
         }
 
+        // Ocultar só as palavras de uma região: o OCR bloqueia, então o
+        // retângulo arrastado vira redações depois, de volta nesta thread.
+        {
+            let pedido = {
+                let mut shared = self.shared.lock().unwrap();
+                match &mut shared.flow {
+                    Flow::Editing(session) => session.redact_text.take().map(|regiao| {
+                        (regiao, session.doc.content_image().clone(), session.style())
+                    }),
+                    _ => None,
+                }
+            };
+            if let Some(((min, max), image, style)) = pedido {
+                let shared = self.shared.clone();
+                let ctx = self.ctx.clone();
+                shared.lock().unwrap().ocr_running = true;
+                jobs::spawn(move || redact_words(&image, (min, max), style, &shared, &ctx));
+            }
+        }
+
         // Pedido de fixar vindo da barra do editor: a imagem visível vira uma
         // janela sempre no topo, e o editor fecha — como copiar e salvar.
         {
@@ -639,6 +659,113 @@ fn recognize_and_copy(
         shared.ocr_running = false;
     }
     // A raiz está dormindo — esta thread é a única que sabe que há janela nova.
+    ctx.request_repaint();
+}
+
+/// Folga em volta de cada palavra, em px da imagem.
+///
+/// A caixa que o motor devolve encosta nos glifos; sem folga sobram fiapos de
+/// letra nas bordas, e um fiapo de letra ainda é informação.
+#[cfg(feature = "ocr")]
+const WORD_PADDING: f32 = 2.0;
+
+/// Reconhece as palavras da região e vira uma redação por palavra.
+///
+/// É **melhor-esforço**: onde o OCR não reconhece, nada é ocultado. A
+/// mensagem final diz quantas palavras foram apagadas justamente para o
+/// usuário poder conferir em vez de confiar.
+#[cfg(feature = "ocr")]
+fn redact_words(
+    image: &crate::imgbuf::RgbaImage,
+    regiao: (crate::editor::shapes::Point, crate::editor::shapes::Point),
+    style: crate::editor::shapes::Style,
+    shared: &Arc<Mutex<AppShared>>,
+    ctx: &egui::Context,
+) {
+    use crate::editor::shapes::{Layer, Point, Shape};
+
+    let terminar = |shared: &Arc<Mutex<AppShared>>, ctx: &egui::Context| {
+        shared.lock().unwrap().ocr_running = false;
+        ctx.request_repaint();
+    };
+
+    let (min, max) = regiao;
+    let (x, y) = (min.x.max(0.0) as u32, min.y.max(0.0) as u32);
+    let w = (max.x - min.x).max(0.0) as u32;
+    let h = (max.y - min.y).max(0.0) as u32;
+    if w == 0 || h == 0 {
+        terminar(shared, ctx);
+        return;
+    }
+    let recorte = image.crop(x, y, w, h);
+
+    let caixas = match crate::platform::ocr::recognize_boxes(&recorte, None) {
+        Ok(caixas) if !caixas.is_empty() => caixas,
+        Ok(_) => {
+            notify::toast_error(
+                "Nenhuma palavra reconhecida",
+                "Nada foi ocultado nessa região.",
+            );
+            terminar(shared, ctx);
+            return;
+        }
+        Err(err) => {
+            notify::toast_error("Nada reconhecido", &format!("{err}"));
+            terminar(shared, ctx);
+            return;
+        }
+    };
+
+    // De volta às coordenadas da imagem: as caixas vêm relativas ao recorte.
+    let quantas = caixas.len();
+    let layers: Vec<Layer> = caixas
+        .into_iter()
+        .map(|c| Layer {
+            id: 0, // `Document::paste` dá o id e a semente do mosaico.
+            shape: Shape::Redaction {
+                min: Point::new(
+                    x as f32 + c.x - WORD_PADDING,
+                    y as f32 + c.y - WORD_PADDING,
+                ),
+                max: Point::new(
+                    x as f32 + c.x + c.w + WORD_PADDING,
+                    y as f32 + c.y + c.h + WORD_PADDING,
+                ),
+                seed: 0,
+            },
+            style,
+        })
+        .collect();
+
+    {
+        let mut shared = shared.lock().unwrap();
+        // O editor pode ter fechado enquanto o motor trabalhava.
+        if let Flow::Editing(session) = &mut shared.flow {
+            session.doc.paste(layers);
+        }
+        shared.ocr_running = false;
+    }
+    notify::toast(
+        "Texto ocultado",
+        &format!("{quantas} palavras apagadas. Confira: o que o OCR não reconhece fica visível."),
+    );
+    ctx.request_repaint();
+}
+
+/// Sem a feature `ocr`, o modo avisa em vez de fingir que ocultou.
+#[cfg(not(feature = "ocr"))]
+fn redact_words(
+    _image: &crate::imgbuf::RgbaImage,
+    _regiao: (crate::editor::shapes::Point, crate::editor::shapes::Point),
+    _style: crate::editor::shapes::Style,
+    shared: &Arc<Mutex<AppShared>>,
+    ctx: &egui::Context,
+) {
+    notify::toast_error(
+        "Reconhecimento de texto indisponível",
+        "Esta build foi compilada sem a feature `ocr`.",
+    );
+    shared.lock().unwrap().ocr_running = false;
     ctx.request_repaint();
 }
 

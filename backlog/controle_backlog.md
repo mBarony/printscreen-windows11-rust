@@ -14,13 +14,13 @@ no arquivo da feature é a fonte da verdade; esta página é o resumo.
 
 | Plataforma | Total | Falta | Parcial | Concluído | Em aberto |
 |---|---:|---:|---:|---:|---:|
-| Núcleo (vale para as três plataformas) | 26 | 5 | 0 | 21 | 0 |
+| Núcleo (vale para as três plataformas) | 26 | 4 | 0 | 22 | 0 |
 | Windows | 7 | 5 | 0 | 2 | 0 |
 | Linux (Hyprland + Wayland) | 12 | 11 | 0 | 0 | 1 |
 | macOS | 13 | 13 | 0 | 0 | 0 |
-| **Total** | **58** | **34** | **0** | **23** | **1** |
+| **Total** | **58** | **33** | **0** | **24** | **1** |
 
-Progresso: **23 de 58** (40%).
+Progresso: **24 de 58** (41%).
 
 ---
 
@@ -41,7 +41,7 @@ Progresso: **23 de 58** (40%).
 - [x] **[Guias de alinhamento](nucleo/guias.md)** · P
 - [ ] **[Leitura de QR code](nucleo/leitura-de-qr-code.md)** · G
 - [x] **[Mover o objeto durante o desenho](nucleo/mover-durante-desenho.md)** · P
-- [ ] **[Ocultar só o texto](nucleo/ocultar-so-o-texto.md)** · M
+- [x] **[Ocultar só o texto](nucleo/ocultar-so-o-texto.md)** · M
 - [ ] **[Reconstruir colunas no OCR](nucleo/reconstruir-colunas.md)** · G
 - [x] **[Redimensionar a captura](nucleo/redimensionar-captura.md)** · P
 - [x] **[Régua de tela](nucleo/regua-de-tela.md)** · M
@@ -139,3 +139,4 @@ Itens que não são bloqueados por trabalho, e sim por uma escolha:
 | 28/08/2026 | Estilo desenhado à mão |
 | 28/08/2026 | Copiar e colar anotações entre capturas |
 | 28/08/2026 | Colar imagem sobre a captura |
+| 28/08/2026 | Ocultar só o texto, por caixa de palavra do OCR |

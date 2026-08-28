@@ -28,10 +28,42 @@ use egui::{
 use crate::capture::MonitorShot;
 use crate::platform::window_list::{self, WindowTarget};
 
+/// Como o ponteiro mira no overlay.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum PickMode {
+    /// Arrastar um retângulo à mão.
+    Free,
+    /// Uma janela inteira, pela lista do sistema.
+    Window,
+    /// O elemento sob o cursor, descoberto pelos pixels.
+    Element,
+}
+
+impl PickMode {
+    /// `Space` cicla os três, nesta ordem.
+    fn next(self) -> Self {
+        match self {
+            Self::Free => Self::Window,
+            Self::Window => Self::Element,
+            Self::Element => Self::Free,
+        }
+    }
+
+    /// Nos dois modos de mira o ponteiro destaca e o clique confirma: não há
+    /// arrasto, nem cruz de guia, nem badge de posição.
+    fn aiming(self) -> bool {
+        !matches!(self, Self::Free)
+    }
+}
+
 /// Véu preto ~60% (RF-02).
 const VEIL_ALPHA: u8 = 153;
 /// Seleções menores que isso (px) são ignoradas — clique acidental.
 const MIN_SELECTION_PX: f32 = 3.0;
+/// Quanto o ponteiro precisa andar para a mira por elemento ser refeita.
+/// Refazê-la a cada quadro custaria uma inundação de meio megapixel para
+/// devolver a mesma caixa.
+const ELEMENT_RECALC_PX: u32 = 3;
 
 /// O que fazer com a região confirmada.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -87,8 +119,14 @@ pub struct SelectSession {
     pub monitors: Vec<OverlayMonitor>,
     /// Janelas visíveis no instante da captura, em px do desktop virtual.
     windows: Vec<WindowTarget>,
-    /// `true` = escolher uma janela; `false` = arrastar uma região.
-    window_mode: bool,
+    /// Como o ponteiro mira: livre (arrasto), janela inteira ou elemento
+    /// sob o cursor. `Space` cicla entre os três.
+    pick: PickMode,
+    /// Caixa do elemento sob o cursor, em px da imagem do monitor, e o
+    /// ponto em que ela foi calculada — recalcular a cada quadro custaria
+    /// uma inundação de meio megapixel por movimento do ponteiro.
+    hovered_element: Option<(u32, u32, u32, u32)>,
+    element_at_px: Option<(u32, u32)>,
     /// Janela em destaque (índice em `windows`).
     hovered_window: Option<usize>,
     drag: Option<Drag>,
@@ -111,7 +149,9 @@ impl SelectSession {
             serial,
             purpose,
             windows,
-            window_mode: false,
+            pick: PickMode::Free,
+            hovered_element: None,
+            element_at_px: None,
             hovered_window: None,
             monitors: shots
                 .into_iter()
@@ -227,10 +267,14 @@ pub fn overlay_ui(ctx: &egui::Context, session: &mut SelectSession, idx: usize) 
             arrow,
         )
     });
-    if space && !session.windows.is_empty() {
-        session.window_mode = !session.window_mode;
+    if space {
+        // A mira por elemento não depende da lista de janelas: ela sai dos
+        // pixels. Por isso o ciclo não é mais condicionado a haver janelas.
+        session.pick = session.pick.next();
         session.drag = None;
         session.hovered_window = None;
+        session.hovered_element = None;
+        session.element_at_px = None;
     }
     if select_all {
         // O monitor inteiro, sem precisar arrastar de canto a canto.
@@ -238,7 +282,7 @@ pub fn overlay_ui(ctx: &egui::Context, session: &mut SelectSession, idx: usize) 
         ctx.request_repaint_of(egui::ViewportId::ROOT);
         return;
     }
-    if session.window_mode {
+    if session.pick == PickMode::Window {
         if let Some((dx, dy)) = arrow {
             session.hovered_window =
                 window_list::window_in_direction(&session.windows, session.hovered_window, dx, dy)
@@ -318,7 +362,7 @@ pub fn overlay_ui(ctx: &egui::Context, session: &mut SelectSession, idx: usize) 
 
             // No modo janela o ponteiro destaca, e o clique confirma: não
             // há arrasto.
-            if session.window_mode {
+            if session.pick == PickMode::Window {
                 if let Some((px, py)) = pointer_px {
                     let shot = &session.monitors[idx].shot;
                     let (gx, gy) = (shot.x + px as i32, shot.y + py as i32);
@@ -336,7 +380,33 @@ pub fn overlay_ui(ctx: &egui::Context, session: &mut SelectSession, idx: usize) 
                 }
             }
 
-            if !session.window_mode && primary_pressed && session.drag.is_none() {
+            // Mira por elemento: a caixa sai dos pixels da captura
+            // congelada. Só recalcula quando o ponteiro anda de verdade —
+            // uma inundação por quadro custaria caro e daria o mesmo
+            // resultado.
+            if session.pick == PickMode::Element {
+                if let Some((px, py)) = pointer_px {
+                    let (px, py) = (px.max(0.0) as u32, py.max(0.0) as u32);
+                    let mexeu = session.element_at_px.is_none_or(|(ax, ay)| {
+                        px.abs_diff(ax) >= ELEMENT_RECALC_PX
+                            || py.abs_diff(ay) >= ELEMENT_RECALC_PX
+                    });
+                    if mexeu {
+                        session.element_at_px = Some((px, py));
+                        session.hovered_element =
+                            crate::smartpick::element_at(&session.monitors[idx].shot.image, px, py);
+                    }
+                }
+                if primary_pressed {
+                    if let Some(rect) = session.hovered_element {
+                        confirm_region(session, idx, rect);
+                        ctx.request_repaint_of(egui::ViewportId::ROOT);
+                        return;
+                    }
+                }
+            }
+
+            if !session.pick.aiming() && primary_pressed && session.drag.is_none() {
                 // Origem do próprio clique — `latest_pos()` pode estar
                 // obsoleto no frame do press logo após a janela nascer
                 // (cursor "teleportado" sem WM_MOUSEMOVE intermediário).
@@ -399,7 +469,7 @@ pub fn overlay_ui(ctx: &egui::Context, session: &mut SelectSession, idx: usize) 
             }
 
             // --- Modo janela: contorno de todas e destaque da escolhida ---
-            if session.window_mode {
+            if session.pick == PickMode::Window {
                 let faint = Stroke::new(1.0_f32, Color32::from_white_alpha(72));
                 for i in 0..session.windows.len() {
                     if Some(i) == session.hovered_window {
@@ -444,9 +514,33 @@ pub fn overlay_ui(ctx: &egui::Context, session: &mut SelectSession, idx: usize) 
                 }
             }
 
+            // --- Modo elemento: só a caixa achada, sem véu ---
+            if session.pick == PickMode::Element {
+                if let Some((x, y, w, h)) = session.hovered_element {
+                    let rect = draw_selection(
+                        painter,
+                        texture.id(),
+                        full,
+                        ppp,
+                        img_w,
+                        img_h,
+                        x as f32,
+                        y as f32,
+                        (x + w) as f32,
+                        (y + h) as f32,
+                    );
+                    badge(
+                        painter,
+                        full,
+                        Pos2::new(rect.center().x, rect.min.y - 12.0),
+                        &format!("{w} × {h} px"),
+                    );
+                }
+            }
+
             // --- Posição do ponteiro, enquanto não há nada selecionado ---
             if let Some(p) = pointer_pts {
-                let idle = session.drag.is_none() && !session.window_mode;
+                let idle = session.drag.is_none() && !session.pick.aiming();
                 if idle {
                     if let Some((px, py)) = pointer_px {
                         badge(
@@ -461,7 +555,7 @@ pub fn overlay_ui(ctx: &egui::Context, session: &mut SelectSession, idx: usize) 
 
             // --- Guias em cruz sob o cursor (só antes de haver seleção) ---
             if let Some(p) = pointer_pts {
-                if session.drag.is_none() && !session.window_mode {
+                if session.drag.is_none() && !session.pick.aiming() {
                     let guide = Stroke::new(1.0_f32, Color32::from_white_alpha(70));
                     painter.line_segment(
                         [Pos2::new(full.min.x, p.y), Pos2::new(full.max.x, p.y)],
@@ -502,8 +596,13 @@ pub fn overlay_ui(ctx: &egui::Context, session: &mut SelectSession, idx: usize) 
                         "Arraste para reconhecer o texto • Esc ou botão direito cancela"
                     }
                 };
+                let modo = match session.pick {
+                    PickMode::Free => " • Espaço: janela",
+                    PickMode::Window => " • Espaço: elemento • setas navegam",
+                    PickMode::Element => " • Espaço: arrastar",
+                };
                 let pos = Pos2::new(full.center().x, full.min.y + 32.0);
-                badge(painter, full, pos, hint);
+                badge(painter, full, pos, &format!("{hint}{modo}"));
             }
         });
 }

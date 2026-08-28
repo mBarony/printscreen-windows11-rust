@@ -9,7 +9,7 @@ Aplicação standalone de captura de tela para **Windows 11 (x64)**, escrita em 
 | Modo | Atalho padrão | Comportamento |
 |---|---|---|
 | **Tela cheia** | `Ctrl+PrtScr` | Captura e salva automaticamente na pasta configurada |
-| **Região** | `Shift+PrtScr` | Congela a tela, você arrasta um retângulo (com `Shift` ele sai quadrado) e ele vai direto para a área de transferência, pronto para colar (`Esc` cancela). `Space` alterna para escolher uma **janela** inteira, `Ctrl+A` pega o monitor todo |
+| **Região** | `Shift+PrtScr` | Congela a tela, você arrasta um retângulo (com `Shift` ele sai quadrado) e ele vai direto para a área de transferência, pronto para colar (`Esc` cancela). `Space` cicla entre arrastar, escolher uma **janela** inteira e escolher o **elemento sob o cursor** (detectado pelos pixels, então funciona em Electron e navegador); `Ctrl+A` pega o monitor todo |
 | **Região + edição** | `Ctrl+Shift+PrtScr` | Como acima, mas abre o editor de anotações |
 | **Reconhecer texto** | `Ctrl+Alt+PrtScr` | Arraste sobre um texto na tela e ele vai para a área de transferência, com as quebras de linha. Nenhuma janela se abre; um aviso no alto da tela mostra o começo do que foi copiado e permite recopiá-lo emendado numa linha só |
 

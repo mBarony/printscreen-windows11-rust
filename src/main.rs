@@ -43,6 +43,7 @@ mod platform;
 mod resident;
 mod resident_link;
 mod settings;
+mod smartpick;
 mod storage;
 mod theme;
 mod tray;

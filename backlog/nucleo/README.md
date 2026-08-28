@@ -27,6 +27,6 @@ Portáteis: uma implementação serve às três plataformas. É onde mora a maio
 | [GIF antes e depois](gif-antes-depois.md) | falta | M |
 | [Leitura de QR code](leitura-de-qr-code.md) | falta | M |
 | [Reconstruir colunas no OCR](reconstruir-colunas.md) | falta | G |
-| [Salvar e copiar automáticos](salvar-copiar-automaticos.md) | falta | P |
+| [Salvar e copiar automáticos](salvar-copiar-automaticos.md) | feito | P |
 | [Captura com atraso](captura-com-atraso.md) | falta | P |
 | [Repetir a última região](repetir-ultima-regiao.md) | falta | P |

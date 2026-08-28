@@ -31,6 +31,10 @@ pub struct Config {
     /// Formato de saída das capturas salvas. `Auto` decide por imagem.
     pub image_format: crate::imgout::Format,
     pub fullscreen_scope: FullscreenScope,
+    /// O que fazer com a captura de tela cheia, que não passa pelo editor.
+    pub after_fullscreen: AfterCapture,
+    /// Idem para "capturar região" e para repetir a última região.
+    pub after_region: AfterCapture,
     pub hotkeys: HotkeysConfig,
     pub editor: EditorConfig,
     pub start_with_windows: bool,
@@ -44,6 +48,10 @@ impl Default for Config {
             filename_template: "screenshot_{date}_{time}".into(),
             image_format: crate::imgout::Format::Auto,
             fullscreen_scope: FullscreenScope::AllMonitors,
+            // Os padrões são o que os dois fluxos já faziam antes de a
+            // escolha existir.
+            after_fullscreen: AfterCapture::Save,
+            after_region: AfterCapture::Copy,
             hotkeys: HotkeysConfig::default(),
             editor: EditorConfig::default(),
             start_with_windows: false,
@@ -83,6 +91,53 @@ impl FullscreenScope {
             "all_monitors" => Some(Self::AllMonitors),
             "primary" => Some(Self::Primary),
             "monitor_under_cursor" => Some(Self::MonitorUnderCursor),
+            _ => None,
+        }
+    }
+}
+
+/// O que acontece com uma captura que **não** passa pelo editor.
+///
+/// Existe uma escolha por fluxo porque os dois nasceram com padrões
+/// diferentes, e de propósito: quem aciona a tela cheia costuma querer o
+/// arquivo, e quem recorta uma região costuma querer colar em seguida.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AfterCapture {
+    Save,
+    Copy,
+    SaveAndCopy,
+}
+
+impl AfterCapture {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Save => "Salvar em arquivo",
+            Self::Copy => "Copiar para a área de transferência",
+            Self::SaveAndCopy => "Salvar e copiar",
+        }
+    }
+
+    pub fn saves(self) -> bool {
+        matches!(self, Self::Save | Self::SaveAndCopy)
+    }
+
+    pub fn copies(self) -> bool {
+        matches!(self, Self::Copy | Self::SaveAndCopy)
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Save => "save",
+            Self::Copy => "copy",
+            Self::SaveAndCopy => "save_and_copy",
+        }
+    }
+
+    fn from_str(text: &str) -> Option<Self> {
+        match text {
+            "save" => Some(Self::Save),
+            "copy" => Some(Self::Copy),
+            "save_and_copy" => Some(Self::SaveAndCopy),
             _ => None,
         }
     }
@@ -376,6 +431,16 @@ impl Config {
                 .and_then(Value::as_str)
                 .and_then(FullscreenScope::from_str)
                 .unwrap_or(defaults.fullscreen_scope),
+            after_fullscreen: root
+                .get("after_fullscreen")
+                .and_then(Value::as_str)
+                .and_then(AfterCapture::from_str)
+                .unwrap_or(defaults.after_fullscreen),
+            after_region: root
+                .get("after_region")
+                .and_then(Value::as_str)
+                .and_then(AfterCapture::from_str)
+                .unwrap_or(defaults.after_region),
             hotkeys,
             editor,
             start_with_windows: root
@@ -392,6 +457,8 @@ impl Config {
             ("filename_template", json::s(&self.filename_template)),
             ("image_format", json::s(self.image_format.as_str())),
             ("fullscreen_scope", json::s(self.fullscreen_scope.as_str())),
+            ("after_fullscreen", json::s(self.after_fullscreen.as_str())),
+            ("after_region", json::s(self.after_region.as_str())),
             (
                 "hotkeys",
                 json::obj(vec![
@@ -668,6 +735,29 @@ mod tests {
         assert_eq!(cfg.editor.tool_keys.rect, "B");
         assert_eq!(cfg.editor.tool_keys.line, "L");
         assert_eq!(cfg.editor.ctrl_wheel, CtrlWheel::StrokeFont);
+    }
+
+    #[test]
+    fn o_destino_da_captura_sobrevive_ao_round_trip_e_tem_padrao_por_fluxo() {
+        let cfg = Config {
+            after_fullscreen: AfterCapture::SaveAndCopy,
+            after_region: AfterCapture::Save,
+            ..Config::default()
+        };
+        let reparsed = Config::from_json_text(&cfg.to_json_text()).unwrap();
+        assert_eq!(reparsed.after_fullscreen, AfterCapture::SaveAndCopy);
+        assert_eq!(reparsed.after_region, AfterCapture::Save);
+
+        // Config anterior à opção: cada fluxo continua fazendo o que fazia.
+        let velho = Config::from_json_text(r#"{ "output_dir": "" }"#).unwrap();
+        assert_eq!(velho.after_fullscreen, AfterCapture::Save);
+        assert_eq!(velho.after_region, AfterCapture::Copy);
+        assert!(velho.after_fullscreen.saves() && !velho.after_fullscreen.copies());
+        assert!(velho.after_region.copies() && !velho.after_region.saves());
+
+        // Valor desconhecido não pode virar "não faz nada".
+        let torto = Config::from_json_text(r#"{ "after_region": "banana" }"#).unwrap();
+        assert_eq!(torto.after_region, AfterCapture::Copy);
     }
 
     #[test]

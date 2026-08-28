@@ -244,13 +244,20 @@ impl Resident {
         let w = w.min(shot.width - local_x);
         let h = h.min(shot.height - local_y);
         let image = capture::crop(&shot.image, local_x, local_y, w, h);
-        crate::jobs::spawn(move || match crate::clipboard::copy_image(&image) {
-            Ok(()) => notify::toast(
-                "Copiado para a área de transferência",
-                "A mesma região da vez anterior.",
-            ),
-            Err(err) => notify::toast_error("Falha ao copiar", &format!("{err:#}")),
-        });
+        let destino = self.config.after_region;
+        if destino.copies() {
+            let copia = image.clone();
+            crate::jobs::spawn(move || match crate::clipboard::copy_image(&copia) {
+                Ok(()) => notify::toast(
+                    "Copiado para a área de transferência",
+                    "A mesma região da vez anterior.",
+                ),
+                Err(err) => notify::toast_error("Falha ao copiar", &format!("{err:#}")),
+            });
+        }
+        if destino.saves() {
+            storage::save_in_background(SaveTarget::from_config(&self.config), image);
+        }
         shell::set_poll_timer(true);
     }
 
@@ -258,7 +265,25 @@ impl Resident {
         let target = SaveTarget::from_config(&self.config);
         match capture::capture_fullscreen(self.config.fullscreen_scope) {
             Ok(image) => {
-                storage::save_in_background(target, image);
+                let destino = self.config.after_fullscreen;
+                if destino.copies() {
+                    // A cópia primeiro: ela é rápida e é o que o usuário está
+                    // esperando para colar. O arquivo pode demorar a codificar.
+                    let copia = image.clone();
+                    crate::jobs::spawn(move || {
+                        if let Err(err) = crate::clipboard::copy_image(&copia) {
+                            notify::toast_error("Falha ao copiar", &format!("{err:#}"));
+                        } else if !destino.saves() {
+                            notify::toast(
+                                "Copiado para a área de transferência",
+                                "A tela cheia está pronta para colar.",
+                            );
+                        }
+                    });
+                }
+                if destino.saves() {
+                    storage::save_in_background(target, image);
+                }
                 // O trim fica para depois: a codificação ainda vai percorrer a
                 // imagem inteira, e tirar essas páginas agora só geraria falta
                 // de página. Quem enxuga é o `poll_background`.

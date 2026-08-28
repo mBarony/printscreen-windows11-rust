@@ -14,13 +14,13 @@ no arquivo da feature é a fonte da verdade; esta página é o resumo.
 
 | Plataforma | Total | Falta | Parcial | Concluído | Em aberto |
 |---|---:|---:|---:|---:|---:|
-| Núcleo (vale para as três plataformas) | 26 | 9 | 0 | 17 | 0 |
+| Núcleo (vale para as três plataformas) | 26 | 8 | 0 | 18 | 0 |
 | Windows | 7 | 5 | 0 | 2 | 0 |
 | Linux (Hyprland + Wayland) | 12 | 11 | 0 | 0 | 1 |
 | macOS | 13 | 13 | 0 | 0 | 0 |
-| **Total** | **58** | **38** | **0** | **19** | **1** |
+| **Total** | **58** | **37** | **0** | **20** | **1** |
 
-Progresso: **19 de 58** (33%).
+Progresso: **20 de 58** (34%).
 
 ---
 
@@ -47,7 +47,7 @@ Progresso: **19 de 58** (33%).
 - [x] **[Régua de tela](nucleo/regua-de-tela.md)** · M
 - [ ] **[Remover objeto](nucleo/remover-objeto.md)** · G
 - [x] **[Repetir a última região](nucleo/repetir-ultima-regiao.md)** · P
-- [ ] **[Salvar e copiar automáticos](nucleo/salvar-copiar-automaticos.md)** · P
+- [x] **[Salvar e copiar automáticos](nucleo/salvar-copiar-automaticos.md)** · P
 - [x] **[Seleção quadrada](nucleo/selecao-quadrada.md)** · P
 - [x] **[Semitransparência](nucleo/semitransparencia.md)** · P
 - [x] **[Seta em arco](nucleo/seta-em-arco.md)** · M
@@ -135,3 +135,4 @@ Itens que não são bloqueados por trabalho, e sim por uma escolha:
 | 28/08/2026 | Guias de alinhamento e semitransparência na exportação |
 | 28/08/2026 | Seta em arco, com alça de dobra |
 | 28/08/2026 | Estilos de linha (tracejado e pontilhado) e régua de tela |
+| 28/08/2026 | Salvar e copiar automáticos, por fluxo de captura |

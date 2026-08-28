@@ -158,17 +158,31 @@ impl GuiApp {
                     // monitores.
                     crate::last_region::save((shot.x + x as i32, shot.y + y as i32, w, h));
                     match action {
-                        // Capturar região: copia e encerra.
+                        // Capturar região: salva e/ou copia, conforme as
+                        // Configurações, e encerra sem passar pelo editor.
                         SelectedAction::CopyToClipboard => {
-                            jobs::spawn(move || match crate::clipboard::copy_image(&cropped) {
-                                Ok(()) => notify::toast(
-                                    "Copiado para a área de transferência",
-                                    "A região selecionada está pronta para colar.",
-                                ),
-                                Err(err) => {
-                                    notify::toast_error("Falha ao copiar", &format!("{err:#}"))
-                                }
-                            });
+                            let (destino, alvo) = {
+                                let shared = self.shared.lock().unwrap();
+                                (
+                                    shared.config.after_region,
+                                    crate::storage::SaveTarget::from_config(&shared.config),
+                                )
+                            };
+                            if destino.copies() {
+                                let copia = cropped.clone();
+                                jobs::spawn(move || match crate::clipboard::copy_image(&copia) {
+                                    Ok(()) => notify::toast(
+                                        "Copiado para a área de transferência",
+                                        "A região selecionada está pronta para colar.",
+                                    ),
+                                    Err(err) => {
+                                        notify::toast_error("Falha ao copiar", &format!("{err:#}"))
+                                    }
+                                });
+                            }
+                            if destino.saves() {
+                                crate::storage::save_in_background(alvo, cropped);
+                            }
                         }
                         SelectedAction::OpenEditor => {
                             // A partir daqui há trabalho do usuário nesta

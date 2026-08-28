@@ -173,6 +173,24 @@ pub fn show(ctx: &egui::Context, state: &mut SettingsState) {
                         });
                 });
 
+                // Uma escolha por fluxo: os dois nasceram com padrões
+                // diferentes de propósito, e um seletor só teria de mudar o
+                // comportamento de um deles para existir.
+                ui.add_space(6.0);
+                after_capture_row(
+                    ui,
+                    "Depois da tela cheia:",
+                    "after_fullscreen",
+                    &mut state.draft.after_fullscreen,
+                );
+                ui.add_space(6.0);
+                after_capture_row(
+                    ui,
+                    "Depois de uma região:",
+                    "after_region",
+                    &mut state.draft.after_region,
+                );
+
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
                     ui.label("Formato do arquivo:");
@@ -345,6 +363,32 @@ pub fn show(ctx: &egui::Context, state: &mut SettingsState) {
 }
 
 /// Editor de um atalho: seletor de modificadores/tecla + modo captura.
+/// Linha "rótulo + seletor" do destino de uma captura que não passa pelo
+/// editor.
+fn after_capture_row(
+    ui: &mut egui::Ui,
+    rotulo: &str,
+    id: &'static str,
+    valor: &mut crate::config::AfterCapture,
+) {
+    use crate::config::AfterCapture;
+    ui.horizontal(|ui| {
+        ui.label(rotulo);
+        egui::ComboBox::from_id_salt(id)
+            .selected_text(valor.label())
+            .width(250.0)
+            .show_ui(ui, |ui| {
+                for opcao in [
+                    AfterCapture::Save,
+                    AfterCapture::Copy,
+                    AfterCapture::SaveAndCopy,
+                ] {
+                    ui.selectable_value(valor, opcao, opcao.label());
+                }
+            });
+    });
+}
+
 fn hotkey_editor(ui: &mut egui::Ui, state: &mut SettingsState, action: HotkeyAction) {
     let capturing = state.capturing == Some(action);
     let def = hotkey_mut(&mut state.draft, action);

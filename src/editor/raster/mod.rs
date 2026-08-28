@@ -6,15 +6,13 @@
 //!
 //! Este módulo é só o motor de amostragem e composição; as primitivas ficam
 //! em [`stroke`] (contornos) e [`fill`] (preenchimentos), reexportadas aqui
-//! para que os chamadores continuem escrevendo `raster::stroke_line(…)`.
+//! para que os chamadores continuem escrevendo `raster::stroke_polylines(…)`.
 
 pub mod fill;
 pub mod stroke;
 
 pub use fill::{fill_ellipse, fill_rect, fill_triangle};
-pub use stroke::{
-    stroke_ellipse, stroke_line, stroke_polyline, stroke_rect, stroke_round_rect,
-};
+pub use stroke::{stroke_ellipse, stroke_polylines, stroke_rect, stroke_round_rect};
 
 use crate::imgbuf::RgbaImage;
 
@@ -22,7 +20,7 @@ use crate::imgbuf::RgbaImage;
 pub(super) const SS: u32 = 4;
 
 /// Total de subamostras por pixel — cabe num `u16`, que é o que permite
-/// acumular a união exata de várias formas (ver [`stroke_polyline`]).
+/// acumular a união exata de várias formas (ver [`stroke_polylines`]).
 pub(super) const SUBSAMPLES: u32 = SS * SS;
 
 pub(super) type P = (f32, f32);

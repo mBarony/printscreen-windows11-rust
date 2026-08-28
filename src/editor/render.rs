@@ -14,10 +14,12 @@ use crate::error::{Context as _, Result};
 use crate::imgbuf::RgbaImage;
 
 use super::backdrop::{self, BackdropStyle};
+use super::dash;
 use super::raster;
-use super::shapes::{arrow_path, 
-    arrow_geometry, marker_geometry, stroke_appearance, text_pill_metrics, Layer, Point, Shape,
-    MARKER_INK, TEXT_PILL_COLOR,
+use super::ruler;
+use super::shapes::{arrow_path,
+    arrow_geometry, ellipse_path, marker_geometry, rect_path, stroke_appearance, text_pill_metrics,
+    Layer, LineStyle, Point, Shape, MARKER_INK, TEXT_PILL_COLOR,
 };
 use super::FONT_BYTES;
 
@@ -39,12 +41,53 @@ pub fn render(
         let style = &layer.style;
         match &layer.shape {
             Shape::Line { a, b } => {
-                raster::stroke_line(
+                stroke_path(
                     &mut buffer,
-                    (a.x, a.y),
-                    (b.x, b.y),
+                    &[*a, *b],
+                    style.line,
                     style.stroke_width,
                     style.color,
+                );
+            }
+            Shape::Ruler { a, b } => {
+                let geo = ruler::geometry(*a, *b, style.stroke_width);
+                stroke_path(
+                    &mut buffer,
+                    &geo.shaft,
+                    style.line,
+                    style.stroke_width,
+                    style.color,
+                );
+                for head in [geo.head_a, geo.head_b] {
+                    raster::fill_triangle(
+                        &mut buffer,
+                        (head[0].x, head[0].y),
+                        (head[1].x, head[1].y),
+                        (head[2].x, head[2].y),
+                        style.color,
+                    );
+                }
+                // Rótulo sobre uma pílula da cor do traço, como no preview.
+                let (w, h) = text_extent(&font, &geo.label, geo.font_size);
+                let (pad, radius) = text_pill_metrics(h);
+                let anchor = Point::new(
+                    geo.label_center.x - w / 2.0,
+                    geo.label_center.y - h / 2.0,
+                );
+                raster::fill_rect(
+                    &mut buffer,
+                    (anchor.x - pad, anchor.y - pad),
+                    (anchor.x + w + pad, anchor.y + h + pad),
+                    radius,
+                    style.color,
+                );
+                draw_text(
+                    &mut buffer,
+                    &font,
+                    anchor,
+                    &geo.label,
+                    ruler::label_ink(style.color),
+                    geo.font_size,
                 );
             }
             Shape::Arrow { a, b, bend } => {
@@ -53,29 +96,17 @@ pub fn render(
                 let path = arrow_path(*a, *b, *bend);
                 let penultimo = path[path.len().saturating_sub(2)];
                 let geo = arrow_geometry(penultimo, *b, style.stroke_width);
-                let mut path = path;
-                if let Some(ultimo) = path.last_mut() {
+                let mut haste = path;
+                if let Some(ultimo) = haste.last_mut() {
                     *ultimo = geo.shaft_b;
                 }
-                if path.len() > 2 {
-                    for par in path.windows(2) {
-                        raster::stroke_line(
-                            &mut buffer,
-                            (par[0].x, par[0].y),
-                            (par[1].x, par[1].y),
-                            style.stroke_width,
-                            style.color,
-                        );
-                    }
-                } else {
-                    raster::stroke_line(
-                        &mut buffer,
-                        (geo.shaft_a.x, geo.shaft_a.y),
-                        (geo.shaft_b.x, geo.shaft_b.y),
-                        style.stroke_width,
-                        style.color,
-                    );
-                }
+                stroke_path(
+                    &mut buffer,
+                    &haste,
+                    style.line,
+                    style.stroke_width,
+                    style.color,
+                );
                 raster::fill_triangle(
                     &mut buffer,
                     (geo.head[0].x, geo.head[0].y),
@@ -87,12 +118,25 @@ pub fn render(
             Shape::Rect { min, max } => {
                 let lo = (min.x, min.y);
                 let hi = (max.x.max(min.x + 0.1), max.y.max(min.y + 0.1));
-                match (style.filled, style.corner_radius > 0.0) {
+                match (style.filled, style.line, style.corner_radius > 0.0) {
                     // Cheio não leva contorno: a silhueta é a própria cor.
-                    (true, _) => {
+                    (true, ..) => {
                         raster::fill_rect(&mut buffer, lo, hi, style.corner_radius, style.color)
                     }
-                    (false, true) => raster::stroke_round_rect(
+                    // O padrão é medido ao longo do contorno, então o
+                    // contorno vira caminho — cantos arredondados inclusive.
+                    (false, line, _) if line != LineStyle::Solid => stroke_path(
+                        &mut buffer,
+                        &rect_path(
+                            Point::new(lo.0, lo.1),
+                            Point::new(hi.0, hi.1),
+                            style.corner_radius,
+                        ),
+                        line,
+                        style.stroke_width,
+                        style.color,
+                    ),
+                    (false, _, true) => raster::stroke_round_rect(
                         &mut buffer,
                         lo,
                         hi,
@@ -100,7 +144,7 @@ pub fn render(
                         style.stroke_width,
                         style.color,
                     ),
-                    (false, false) => {
+                    (false, _, false) => {
                         raster::stroke_rect(&mut buffer, lo, hi, style.stroke_width, style.color)
                     }
                 }
@@ -110,7 +154,7 @@ pub fn render(
                 let (rx, ry) = (rx.max(0.1), ry.max(0.1));
                 if style.filled {
                     raster::fill_ellipse(&mut buffer, (cx, cy), rx, ry, style.color);
-                } else {
+                } else if style.line == LineStyle::Solid {
                     raster::stroke_ellipse(
                         &mut buffer,
                         (cx, cy),
@@ -119,12 +163,19 @@ pub fn render(
                         style.stroke_width,
                         style.color,
                     );
+                } else {
+                    stroke_path(
+                        &mut buffer,
+                        &ellipse_path(Point::new(cx, cy), rx, ry),
+                        style.line,
+                        style.stroke_width,
+                        style.color,
+                    );
                 }
             }
             Shape::Freehand { points, highlight } => {
                 let (width, color) = stroke_appearance(style, *highlight);
-                let path: Vec<(f32, f32)> = points.iter().map(|p| (p.x, p.y)).collect();
-                raster::stroke_polyline(&mut buffer, &path, width, color);
+                stroke_path(&mut buffer, points, style.line, width, color);
             }
             Shape::Marker { center, number } => {
                 let geo = marker_geometry(style.stroke_width);
@@ -170,6 +221,28 @@ pub fn render(
     }
     // A moldura é a última camada: ela emoldura o resultado de tudo.
     Ok(backdrop::compose(&buffer, backdrop))
+}
+
+/// Rasteriza um caminho no padrão de traço do estilo.
+///
+/// A quebra vem do `dash`, a mesma que o preview usa: é o que garante que o
+/// tracejado do arquivo salvo seja o mesmo que estava na tela. As partes vão
+/// juntas para o rasterizador, e não uma por vez, para serem compostas de uma
+/// vez só — um rabisco de marca-texto que cruza a si mesmo ficaria com o
+/// cruzamento mais escuro se cada pedaço se compusesse sozinho.
+fn stroke_path(
+    buffer: &mut RgbaImage,
+    points: &[Point],
+    line: LineStyle,
+    width: f32,
+    color: [u8; 4],
+) {
+    let partes: Vec<Vec<(f32, f32)>> = dash::split(points, line, width)
+        .into_iter()
+        .map(|parte| parte.into_iter().map(|p| (p.x, p.y)).collect())
+        .collect();
+    let caminhos: Vec<&[(f32, f32)]> = partes.iter().map(Vec::as_slice).collect();
+    raster::stroke_polylines(buffer, &caminhos, width, color);
 }
 
 /// Largura e altura de uma linha de texto, na mesma métrica que `draw_text`
@@ -290,6 +363,7 @@ mod tests {
         Style {
             color: [255, 0, 0, 255],
             stroke_width: 3.0,
+            line: LineStyle::default(),
             font_size: 16.0,
             filled: false,
             corner_radius: 0.0,
@@ -325,6 +399,99 @@ mod tests {
         // O pixel do meio da diagonal deve ter ficado avermelhado.
         let p = out.pixel(32, 32);
         assert!(p[0] > 100, "esperava traço vermelho, obtido {p:?}");
+    }
+
+    /// Quantos pixels a anotação pintou por cima da base.
+    fn pintados(out: &RgbaImage) -> usize {
+        out.as_raw()
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .filter(|p| *p != &[10, 20, 30, 255])
+            .count()
+    }
+
+    #[test]
+    fn o_tracejado_pinta_menos_que_o_solido() {
+        let img = base();
+        let reta = |line| {
+            let mut l = dragged(Tool::Line, (4.0, 32.0), (60.0, 32.0));
+            l.style.line = line;
+            pintados(&render(&img, &[l], BackdropStyle::None).unwrap())
+        };
+        let solido = reta(LineStyle::Solid);
+        let tracejado = reta(LineStyle::Dashed);
+        let pontilhado = reta(LineStyle::Dotted);
+        assert!(tracejado < solido, "solido={solido} tracejado={tracejado}");
+        assert!(pontilhado < tracejado, "tracejado={tracejado} pontilhado={pontilhado}");
+        assert!(pontilhado > 0, "o pontilhado ainda tem de pintar algo");
+    }
+
+    #[test]
+    fn o_cruzamento_de_um_marca_texto_tracejado_nao_escurece() {
+        // As partes do padrão vão juntas para o rasterizador justamente por
+        // isto: compostas uma a uma, o ponto onde o rabisco passa por cima de
+        // si mesmo receberia a cor duas vezes.
+        let img = base();
+        // Vai e volta pela mesma reta: o padrão continua contando o caminho
+        // percorrido, então os traços da volta caem por cima dos da ida em
+        // outro compasso e a sobreposição é certa.
+        let mut sobreposto = layer(Shape::Freehand {
+            points: vec![
+                Point::new(8.0, 32.0),
+                Point::new(56.0, 32.0),
+                Point::new(8.0, 32.0),
+            ],
+            highlight: true,
+        });
+        sobreposto.style.line = LineStyle::Dashed;
+        let mut simples = sobreposto.clone();
+        simples.shape = Shape::Freehand {
+            points: vec![Point::new(8.0, 32.0), Point::new(56.0, 32.0)],
+            highlight: true,
+        };
+
+        let duplo = render(&img, &[sobreposto], BackdropStyle::None).unwrap();
+        let unico = render(&img, &[simples], BackdropStyle::None).unwrap();
+        let mais_vermelho = |img: &RgbaImage| (10..54).map(|x| img.pixel(x, 32)[0]).max().unwrap();
+        assert!(
+            mais_vermelho(&duplo) <= mais_vermelho(&unico),
+            "a sobreposição escureceu: {} contra {}",
+            mais_vermelho(&duplo),
+            mais_vermelho(&unico)
+        );
+    }
+
+    #[test]
+    fn a_regua_sai_com_as_pontas_e_o_valor() {
+        let img = base();
+        let regua = layer(Shape::Ruler {
+            a: Point::new(6.0, 32.0),
+            b: Point::new(58.0, 32.0),
+        });
+        let out = render(&img, &[regua], BackdropStyle::None).unwrap();
+        // Mesma reta, sem as pontas nem o rótulo: a régua tem de pintar mais.
+        let reta = render(
+            &img,
+            &[dragged(Tool::Line, (6.0, 32.0), (58.0, 32.0))],
+            BackdropStyle::None,
+        )
+        .unwrap();
+        assert!(
+            pintados(&out) > pintados(&reta),
+            "régua={} reta={}",
+            pintados(&out),
+            pintados(&reta)
+        );
+        // No meio fica a pílula do rótulo, com o número em cima dela: o
+        // branco do texto só existe se o rótulo foi rasterizado.
+        let branco = (24..40)
+            .flat_map(|x| (24..40).map(move |y| (x, y)))
+            .any(|(x, y)| {
+                let p = out.pixel(x, y);
+                p[1] > 180 && p[2] > 180
+            });
+        assert!(branco, "o valor medido não apareceu");
     }
 
     #[test]

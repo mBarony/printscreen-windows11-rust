@@ -6,19 +6,6 @@ use super::{
 };
 use crate::imgbuf::RgbaImage;
 
-/// Segmento com espessura `width` e pontas redondas.
-pub fn stroke_line(img: &mut RgbaImage, a: P, b: P, width: f32, color: [u8; 4]) {
-    let r = width.max(0.5) / 2.0;
-    let r_sq = r * r;
-    let bbox = (
-        a.0.min(b.0) - r - 1.0,
-        a.1.min(b.1) - r - 1.0,
-        a.0.max(b.0) + r + 1.0,
-        a.1.max(b.1) + r + 1.0,
-    );
-    rasterize(img, bbox, color, |x, y| dist_sq_to_segment((x, y), a, b) <= r_sq);
-}
-
 /// Retângulo em traço: união dos 4 lados como segmentos (juntas redondas).
 pub fn stroke_rect(img: &mut RgbaImage, min: P, max: P, width: f32, color: [u8; 4]) {
     let r = width.max(0.5) / 2.0;
@@ -70,34 +57,38 @@ pub fn stroke_ellipse(img: &mut RgbaImage, center: P, rx: f32, ry: f32, width: f
     });
 }
 
-/// Traço contínuo por uma sequência de pontos (mão livre e marca-texto).
+/// Traço contínuo por um ou mais caminhos — os pedaços de um padrão tracejado.
 ///
-/// A cobertura de todos os segmentos é acumulada num bitmask de 16 bits por
-/// pixel — um bit por subamostra — e composta **uma única vez** no fim. Sem
-/// isso, cada segmento faria sua própria composição e as junções ficariam
-/// mais escuras que o resto do traço, o que é justamente onde o marca-texto
-/// (translúcido, alfa 120) denunciaria o problema.
-pub fn stroke_polyline(img: &mut RgbaImage, points: &[P], width: f32, color: [u8; 4]) {
-    let (first, rest) = match points.split_first() {
-        Some(split) => split,
-        None => return,
-    };
-    if rest.is_empty() {
-        // Um toque sem arrasto ainda deixa a marca redonda da ponta.
-        stroke_line(img, *first, *first, width, color);
-        return;
-    }
-
+/// A cobertura de todos os segmentos **de todos os caminhos** é acumulada num
+/// bitmask de 16 bits por pixel — um bit por subamostra — e composta **uma
+/// única vez** no fim. Sem isso, cada segmento faria sua própria composição e
+/// as junções ficariam mais escuras que o resto do traço, o que é justamente
+/// onde o marca-texto (translúcido, alfa 120) denunciaria o problema. O mesmo
+/// vale entre dois pedaços do tracejado, quando o caminho cruza a si mesmo.
+pub fn stroke_polylines(img: &mut RgbaImage, paths: &[&[P]], width: f32, color: [u8; 4]) {
     let r = width.max(0.5) / 2.0;
-    let Some(area) = clip_bbox(img, polyline_bbox(points, r)) else {
+    let Some(bbox) = paths_bbox(paths, r) else {
+        return;
+    };
+    let Some(area) = clip_bbox(img, bbox) else {
         return;
     };
     let (x0, y0, x1, y1) = area;
     let stride = (x1 - x0) as usize;
     let mut mask = vec![0u16; stride * (y1 - y0) as usize];
 
-    for segment in points.windows(2) {
-        accumulate_segment(&mut mask, area, segment[0], segment[1], r);
+    for path in paths {
+        match path {
+            [] => {}
+            // Um toque sem arrasto ainda deixa a marca redonda da ponta — e é
+            // também o ponto do pontilhado.
+            [only] => accumulate_segment(&mut mask, area, *only, *only, r),
+            _ => {
+                for segment in path.windows(2) {
+                    accumulate_segment(&mut mask, area, segment[0], segment[1], r);
+                }
+            }
+        }
     }
 
     for py in y0..y1 {
@@ -110,15 +101,24 @@ pub fn stroke_polyline(img: &mut RgbaImage, points: &[P], width: f32, color: [u8
     }
 }
 
-fn polyline_bbox(points: &[P], r: f32) -> (f32, f32, f32, f32) {
+/// Caixa que contém todos os caminhos, folgada pelo raio do traço; `None`
+/// quando não há ponto nenhum.
+fn paths_bbox(paths: &[&[P]], r: f32) -> Option<(f32, f32, f32, f32)> {
     let mut bbox = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
-    for &(x, y) in points {
+    let mut vazio = true;
+    for &(x, y) in paths.iter().flat_map(|p| p.iter()) {
+        vazio = false;
         bbox.0 = bbox.0.min(x);
         bbox.1 = bbox.1.min(y);
         bbox.2 = bbox.2.max(x);
         bbox.3 = bbox.3.max(y);
     }
-    (bbox.0 - r - 1.0, bbox.1 - r - 1.0, bbox.2 + r + 1.0, bbox.3 + r + 1.0)
+    (!vazio).then_some((
+        bbox.0 - r - 1.0,
+        bbox.1 - r - 1.0,
+        bbox.2 + r + 1.0,
+        bbox.3 + r + 1.0,
+    ))
 }
 
 /// Marca na máscara as subamostras cobertas por um segmento, varrendo apenas
@@ -166,10 +166,15 @@ mod tests {
         [255, 0, 0, 255]
     }
 
+    /// Um caminho só, que é o caso da maioria dos testes daqui.
+    fn stroke_polyline(img: &mut RgbaImage, points: &[P], width: f32, color: [u8; 4]) {
+        stroke_polylines(img, &[points], width, color);
+    }
+
     #[test]
     fn line_covers_center_and_antialiases_edges() {
         let mut img = canvas();
-        stroke_line(&mut img, (8.0, 32.0), (56.0, 32.0), 4.0, red());
+        stroke_polyline(&mut img, &[(8.0, 32.0), (56.0, 32.0)], 4.0, red());
         assert_eq!(img.pixel(32, 32)[0], 255, "centro do traço");
         assert_eq!(img.pixel(32, 8), [0, 0, 0, 255], "longe do traço");
     }
@@ -255,7 +260,7 @@ mod tests {
     #[test]
     fn clipping_at_image_borders_does_not_panic() {
         let mut img = canvas();
-        stroke_line(&mut img, (-20.0, -20.0), (100.0, 100.0), 6.0, red());
+        stroke_polyline(&mut img, &[(-20.0, -20.0), (100.0, 100.0)], 6.0, red());
         stroke_ellipse(&mut img, (0.0, 0.0), 50.0, 50.0, 4.0, red());
         stroke_rect(&mut img, (-10.0, -10.0), (80.0, 80.0), 5.0, red());
         stroke_round_rect(&mut img, (-10.0, -10.0), (80.0, 80.0), 8.0, 5.0, red());

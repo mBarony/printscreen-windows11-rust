@@ -256,6 +256,7 @@ pub fn show(ctx: &egui::Context, state: &mut SettingsState) {
                             (Tool::Redact, &mut tk.redact),
                             (Tool::Spotlight, &mut tk.spotlight),
                             (Tool::Text, &mut tk.text),
+                            (Tool::Ruler, &mut tk.ruler),
                             (Tool::Crop, &mut tk.crop),
                             (Tool::Cut, &mut tk.cut),
                         ];
@@ -475,6 +476,7 @@ fn tool_key_conflicts(keys: &ToolKeysConfig) -> Vec<(Tool, Tool)> {
         (Tool::Redact, &keys.redact, &defaults.redact),
         (Tool::Spotlight, &keys.spotlight, &defaults.spotlight),
         (Tool::Text, &keys.text, &defaults.text),
+        (Tool::Ruler, &keys.ruler, &defaults.ruler),
         (Tool::Crop, &keys.crop, &defaults.crop),
         (Tool::Cut, &keys.cut, &defaults.cut),
     ];

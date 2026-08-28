@@ -6,10 +6,12 @@
 
 pub mod backdrop;
 pub mod cut;
+pub mod dash;
 pub mod document;
 pub mod icons;
 pub mod raster;
 pub mod redact;
+pub mod ruler;
 pub mod spotlight;
 pub mod render;
 pub mod session_file;
@@ -36,7 +38,7 @@ pub const WINDOW_TITLE: &str = "RustShot — Editor";
 pub const FOCUS_CLAIM_FRAMES: u8 = 12;
 
 /// Quantidade de ferramentas do editor — o tamanho da tabela de atalhos.
-pub const TOOL_COUNT: usize = 14;
+pub const TOOL_COUNT: usize = 15;
 
 /// Tolerância do hit-test ao clicar numa anotação com a ferramenta Mover,
 /// em pontos do egui (convertida para px da imagem pelo zoom).
@@ -140,6 +142,8 @@ pub struct EditorSession {
     pub tool: Tool,
     pub color: [u8; 4],
     pub stroke_width: f32,
+    /// Padrão do traço das formas de caminho.
+    pub line: shapes::LineStyle,
     pub font_size: f32,
     /// Retângulo e elipse nascem cheios.
     pub filled: bool,
@@ -239,6 +243,7 @@ impl EditorSession {
             tool: Tool::Arrow,
             color: config::parse_color(&defaults.default_color),
             stroke_width: defaults.default_stroke_width.clamp(STROKE_MIN, STROKE_MAX),
+            line: shapes::LineStyle::default(),
             font_size: defaults.default_font_size.clamp(FONT_MIN, FONT_MAX),
             filled: false,
             corner_radius: 0.0,
@@ -279,6 +284,7 @@ impl EditorSession {
         Style {
             color: self.color,
             stroke_width: self.stroke_width,
+            line: self.line,
             font_size: self.font_size,
             filled: self.filled,
             corner_radius: self.corner_radius,
@@ -317,6 +323,7 @@ pub fn resolve_tool_keys(config: &config::ToolKeysConfig) -> [(Tool, Option<egui
         (Tool::Redact, &config.redact, &defaults.redact),
         (Tool::Spotlight, &config.spotlight, &defaults.spotlight),
         (Tool::Text, &config.text, &defaults.text),
+        (Tool::Ruler, &config.ruler, &defaults.ruler),
         (Tool::Crop, &config.crop, &defaults.crop),
         (Tool::Cut, &config.cut, &defaults.cut),
     ];
@@ -359,8 +366,9 @@ mod tests {
         assert_eq!(keys[9], (Tool::Redact, Some(egui::Key::D)));
         assert_eq!(keys[10], (Tool::Spotlight, Some(egui::Key::O)));
         assert_eq!(keys[11], (Tool::Text, Some(egui::Key::T)));
-        assert_eq!(keys[12], (Tool::Crop, Some(egui::Key::C)));
-        assert_eq!(keys[13], (Tool::Cut, Some(egui::Key::X)));
+        assert_eq!(keys[12], (Tool::Ruler, Some(egui::Key::U)));
+        assert_eq!(keys[13], (Tool::Crop, Some(egui::Key::C)));
+        assert_eq!(keys[14], (Tool::Cut, Some(egui::Key::X)));
     }
 
     #[test]

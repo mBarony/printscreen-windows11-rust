@@ -25,6 +25,10 @@ pub enum Icon {
     Eyedropper,
     Redact,
     Spotlight,
+    Ruler,
+    LineSolid,
+    LineDashed,
+    LineDotted,
     Fill,
     TextPill,
     Backdrop,
@@ -56,13 +60,14 @@ impl Icon {
             Tool::Redact => Self::Redact,
             Tool::Spotlight => Self::Spotlight,
             Tool::Text => Self::Text,
+            Tool::Ruler => Self::Ruler,
             Tool::Crop => Self::Crop,
             Tool::Cut => Self::Cut,
         }
     }
 
     #[cfg(test)]
-    pub const ALL: [Icon; 25] = [
+    pub const ALL: [Icon; 29] = [
         Icon::Move,
         Icon::Line,
         Icon::Arrow,
@@ -74,6 +79,10 @@ impl Icon {
         Icon::Eyedropper,
         Icon::Redact,
         Icon::Spotlight,
+        Icon::Ruler,
+        Icon::LineSolid,
+        Icon::LineDashed,
+        Icon::LineDotted,
         Icon::Fill,
         Icon::TextPill,
         Icon::Backdrop,
@@ -104,6 +113,10 @@ impl Icon {
             Icon::Eyedropper => "eyedropper",
             Icon::Redact => "redact",
             Icon::Spotlight => "spotlight",
+            Icon::Ruler => "ruler",
+            Icon::LineSolid => "line_solid",
+            Icon::LineDashed => "line_dashed",
+            Icon::LineDotted => "line_dotted",
             Icon::Fill => "fill",
             Icon::TextPill => "text_pill",
             Icon::Backdrop => "backdrop",
@@ -239,6 +252,33 @@ pub fn geometry(icon: Icon) -> Vec<Primitive> {
             Fill(rectangle(0.54, 0.50, 0.78, 0.72)),
             Fill(rectangle(0.54, 0.28, 0.78, 0.38)),
         ],
+        // Traço com uma ponta em cada extremidade e os riscos da escala por
+        // baixo — mede, não aponta.
+        Icon::Ruler => vec![
+            Stroke(vec![(0.22, 0.38), (0.78, 0.38)]),
+            Fill(vec![(0.06, 0.38), (0.24, 0.29), (0.24, 0.47)]),
+            Fill(vec![(0.94, 0.38), (0.76, 0.29), (0.76, 0.47)]),
+            Stroke(vec![(0.20, 0.62), (0.20, 0.86)]),
+            Stroke(vec![(0.40, 0.62), (0.40, 0.78)]),
+            Stroke(vec![(0.60, 0.62), (0.60, 0.78)]),
+            Stroke(vec![(0.80, 0.62), (0.80, 0.86)]),
+            Stroke(vec![(0.20, 0.62), (0.80, 0.62)]),
+        ],
+        // Os três padrões de traço, na mesma diagonal do ícone da Linha:
+        // cheio, partido em traços, partido em pontos.
+        Icon::LineSolid => vec![Stroke(vec![(0.12, 0.72), (0.88, 0.28)])],
+        Icon::LineDashed => vec![
+            Stroke(vec![(0.12, 0.72), (0.32, 0.60)]),
+            Stroke(vec![(0.42, 0.55), (0.62, 0.43)]),
+            Stroke(vec![(0.72, 0.38), (0.88, 0.28)]),
+        ],
+        Icon::LineDotted => (0..5)
+            .map(|i| {
+                let t = i as f32 / 4.0;
+                let (cx, cy) = (0.14 + t * 0.72, 0.70 - t * 0.40);
+                Fill(ellipse(cx, cy, 0.075, 0.075))
+            })
+            .collect(),
         // Quadrado cheio dentro de um vazado — o par contorno/preenchimento.
         Icon::Fill => vec![
             Stroke(rectangle(0.10, 0.10, 0.90, 0.90)),
@@ -394,6 +434,9 @@ mod tests {
             Tool::Ellipse,
             Tool::Text,
             Tool::Crop,
+            // A régua é uma reta com pontas, como a linha e a seta: é onde a
+            // colisão de ícone teria mais chance de passar despercebida.
+            Tool::Ruler,
         ];
         let icons: Vec<Icon> = tools.iter().map(|t| Icon::of(*t)).collect();
         for (i, a) in icons.iter().enumerate() {

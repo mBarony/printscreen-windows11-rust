@@ -9,8 +9,11 @@ use egui::{
 };
 
 
-use crate::editor::shapes::{arrow_path, 
-    arrow_geometry, marker_geometry, stroke_appearance, text_pill_metrics, Layer, Point, Shape, MARKER_INK, TEXT_PILL_COLOR,
+use crate::editor::dash;
+use crate::editor::ruler;
+use crate::editor::shapes::{arrow_path,
+    arrow_geometry, ellipse_path, marker_geometry, rect_path, stroke_appearance, text_pill_metrics,
+    Layer, LineStyle, Point, Shape, MARKER_INK, TEXT_PILL_COLOR,
 };
 use crate::editor::{
     HANDLE_EDGE_ROOM_PTS, HANDLE_RADIUS_PTS,
@@ -19,12 +22,84 @@ use super::ToScreen;
 use crate::editor::cut::{Axis, Band};
 use crate::editor::DragPreview;
 
+/// Desenha um caminho no padrão de traço do estilo.
+///
+/// A quebra vem do `dash`, a mesma que a exportação usa — é o que mantém o
+/// tracejado do preview com o mesmo desenho do arquivo salvo. A parte de um
+/// ponto só é o ponto do pontilhado, e sai como o disco da ponta.
+///
+/// Cada pedaço leva um disco em cada extremidade porque o epaint termina um
+/// caminho aberto **reto**, e o rasterizador da exportação o termina
+/// **redondo**: sem os discos, cada pedaço sairia uma espessura mais curto na
+/// tela do que no arquivo salvo. Num traço sólido isso era meia espessura em
+/// cada ponta e passava despercebido; num tracejado, seria a diferença entre
+/// a folga que se vê e a que se salva.
+fn paint_path(
+    painter: &egui::Painter,
+    points: &[Point],
+    line: LineStyle,
+    width: f32,
+    color: [u8; 4],
+    ts: ToScreen,
+) {
+    let cor = color32(color);
+    let stroke = Stroke::new(ts.len(width), cor);
+    let raio = ts.len(width) / 2.0;
+    for parte in dash::split(points, line, width) {
+        let Some((primeiro, ultimo)) = parte.first().zip(parte.last()) else {
+            continue;
+        };
+        if parte.len() > 1 {
+            painter.add(egui::Shape::line(
+                parte.iter().map(|p| ts.pos(*p)).collect(),
+                stroke,
+            ));
+        }
+        painter.circle_filled(ts.pos(*primeiro), raio, cor);
+        painter.circle_filled(ts.pos(*ultimo), raio, cor);
+    }
+}
+
 pub(super) fn paint_shape(painter: &egui::Painter, layer: &Layer, ts: ToScreen) {
     let style = &layer.style;
     let stroke = Stroke::new(ts.len(style.stroke_width), color32(style.color));
     match &layer.shape {
         Shape::Line { a, b } => {
-            painter.line_segment([ts.pos(*a), ts.pos(*b)], stroke);
+            paint_path(painter, &[*a, *b], style.line, style.stroke_width, style.color, ts);
+        }
+        Shape::Ruler { a, b } => {
+            let geo = ruler::geometry(*a, *b, style.stroke_width);
+            paint_path(painter, &geo.shaft, style.line, style.stroke_width, style.color, ts);
+            for head in [geo.head_a, geo.head_b] {
+                painter.add(egui::Shape::convex_polygon(
+                    head.iter().map(|p| ts.pos(*p)).collect(),
+                    color32(style.color),
+                    Stroke::NONE,
+                ));
+            }
+            // A pílula tapa o miolo da haste de propósito: o número é o que
+            // a régua tem a dizer, e um traço passando por trás dele briga.
+            let font = FontId::new(
+                ts.len(geo.font_size),
+                egui::FontFamily::Name(crate::theme::INTER.into()),
+            );
+            let ink = color32(ruler::label_ink(style.color));
+            let galley = painter.layout_no_wrap(geo.label.clone(), font.clone(), ink);
+            let (pad, radius) = text_pill_metrics(galley.size().y);
+            let caixa =
+                Rect::from_center_size(ts.pos(geo.label_center), galley.size()).expand(pad);
+            painter.rect_filled(
+                caixa,
+                CornerRadius::same(radius.round() as u8),
+                color32(style.color),
+            );
+            painter.text(
+                ts.pos(geo.label_center),
+                Align2::CENTER_CENTER,
+                &geo.label,
+                font,
+                ink,
+            );
         }
         Shape::Arrow { a, b, bend } => {
             // A ponta é calculada na tangente do fim da curva: com a seta
@@ -33,16 +108,12 @@ pub(super) fn paint_shape(painter: &egui::Painter, layer: &Layer, ts: ToScreen) 
             let path = arrow_path(*a, *b, *bend);
             let penultimo = path[path.len().saturating_sub(2)];
             let geo = arrow_geometry(penultimo, *b, style.stroke_width);
-            if path.len() > 2 {
-                let mut pontos: Vec<_> = path.iter().map(|p| ts.pos(*p)).collect();
-                // Encurta o fim para o traço não vazar por dentro da ponta.
-                if let Some(ultimo) = pontos.last_mut() {
-                    *ultimo = ts.pos(geo.shaft_b);
-                }
-                painter.add(egui::Shape::line(pontos, stroke));
-            } else {
-                painter.line_segment([ts.pos(geo.shaft_a), ts.pos(geo.shaft_b)], stroke);
+            let mut haste = path;
+            // Encurta o fim para o traço não vazar por dentro da ponta.
+            if let Some(ultimo) = haste.last_mut() {
+                *ultimo = geo.shaft_b;
             }
+            paint_path(painter, &haste, style.line, style.stroke_width, style.color, ts);
             painter.add(egui::Shape::convex_polygon(
                 geo.head.iter().map(|p| ts.pos(*p)).collect(),
                 color32(style.color),
@@ -61,12 +132,23 @@ pub(super) fn paint_shape(painter: &egui::Painter, layer: &Layer, ts: ToScreen) 
                 .round() as u8;
             if style.filled {
                 painter.rect_filled(rect, CornerRadius::same(radius), color32(style.color));
-            } else {
+            } else if style.line == LineStyle::Solid {
                 painter.rect_stroke(
                     rect,
                     CornerRadius::same(radius),
                     stroke,
                     StrokeKind::Middle,
+                );
+            } else {
+                // O padrão é medido ao longo do contorno, então o contorno
+                // precisa virar caminho — inclusive os cantos arredondados.
+                paint_path(
+                    painter,
+                    &rect_path(*min, *max, style.corner_radius),
+                    style.line,
+                    style.stroke_width,
+                    style.color,
+                    ts,
                 );
             }
         }
@@ -78,18 +160,24 @@ pub(super) fn paint_shape(painter: &egui::Painter, layer: &Layer, ts: ToScreen) 
                     radii,
                     color32(style.color),
                 ));
-            } else {
+            } else if style.line == LineStyle::Solid {
                 painter.add(egui::Shape::ellipse_stroke(ts.pos(*center), radii, stroke));
+            } else {
+                paint_path(
+                    painter,
+                    &ellipse_path(*center, *rx, *ry),
+                    style.line,
+                    style.stroke_width,
+                    style.color,
+                    ts,
+                );
             }
         }
         Shape::Freehand { points, highlight } => {
             let (width, color) = stroke_appearance(style, *highlight);
             // Mesma lista de pontos que a exportação percorre: a suavização
             // já aconteceu quando o traço foi criado.
-            painter.add(egui::Shape::line(
-                points.iter().map(|p| ts.pos(*p)).collect(),
-                Stroke::new(ts.len(width), color32(color)),
-            ));
+            paint_path(painter, points, style.line, width, color, ts);
         }
         Shape::Marker { center, number } => {
             let geo = marker_geometry(style.stroke_width);
@@ -196,6 +284,18 @@ pub(super) fn shape_screen_bbox(ctx: &egui::Context, layer: &Layer, ts: ToScreen
         ),
         Shape::Line { a, b } | Shape::Arrow { a, b, .. } => {
             Rect::from_two_pos(ts.pos(*a), ts.pos(*b)).expand(half_stroke)
+        }
+        Shape::Ruler { a, b } => {
+            // As pontas e a pílula do rótulo saem da reta: a caixa é a união
+            // das três coisas, senão o contorno da seleção corta o número.
+            let geo = ruler::geometry(*a, *b, layer.style.stroke_width);
+            let mut rect = Rect::from_two_pos(ts.pos(*a), ts.pos(*b)).expand(half_stroke);
+            for p in geo.head_a.iter().chain(geo.head_b.iter()) {
+                rect.extend_with(ts.pos(*p));
+            }
+            let size = text_galley(ctx, &geo.label, geo.font_size, ts).size();
+            let (pad, _) = text_pill_metrics(size.y);
+            rect.union(Rect::from_center_size(ts.pos(geo.label_center), size).expand(pad))
         }
         Shape::Rect { min, max } => {
             Rect::from_min_max(ts.pos(*min), ts.pos(*max)).expand(half_stroke)

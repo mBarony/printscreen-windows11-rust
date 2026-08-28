@@ -608,6 +608,7 @@ mod tests {
         Style {
             color: [255, 0, 0, 255],
             stroke_width: 3.0,
+            line: crate::editor::shapes::LineStyle::default(),
             font_size: 24.0,
             filled: false,
             corner_radius: 0.0,
@@ -690,6 +691,27 @@ mod tests {
                 assert!((max.x - 15.0).abs() < 0.01);
             }
             _ => panic!("continua sendo retângulo"),
+        }
+    }
+
+    #[test]
+    fn a_regua_remede_depois_de_escalar() {
+        // A régua é a única anotação cujo texto vem da geometria: se ela
+        // acompanhasse a imagem sem o número acompanhar junto, a captura
+        // sairia com uma medida errada — pior que não ter medida nenhuma.
+        let mut d = doc();
+        let (a, b) = (Point::new(4.0, 10.0), Point::new(44.0, 10.0));
+        d.push(Shape::Ruler { a, b }, style());
+        assert_eq!(crate::editor::ruler::label(a, b), "40 px");
+        d.scale(0.5);
+        match d.layers()[0].shape {
+            Shape::Ruler { a, b } => assert_eq!(crate::editor::ruler::label(a, b), "20 px"),
+            _ => panic!("continua sendo régua"),
+        }
+        d.undo();
+        match d.layers()[0].shape {
+            Shape::Ruler { a, b } => assert_eq!(crate::editor::ruler::label(a, b), "40 px"),
+            _ => panic!("continua sendo régua"),
         }
     }
 

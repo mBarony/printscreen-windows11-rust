@@ -14,7 +14,7 @@ Histórico de versões do RustShot. Datas em 2026.
   fechamento por tempo continua valendo para quem não colar.
 - **A barra do editor ficou mais limpa e mais organizada.** Os botões passaram
   de 26 para 30 pontos, com o ícone proporcionalmente maior, e o realce do
-  cursor entra por uma animação curta — numa fila de quatorze, o fundo
+  cursor entra por uma animação curta — numa fila de quinze, o fundo
   surgindo de estalo a cada pixel percorrido piscava. Os controles deixaram de
   ser uma fila só com traços soltos e viraram blocos: ferramentas, opções do
   que está selecionado e imagem inteira à esquerda; saída e histórico à
@@ -25,6 +25,8 @@ Histórico de versões do RustShot. Datas em 2026.
 - Uma prévia SVG da barra montada, gerável sob demanda por teste ignorado, no
   mesmo molde da que já existia para os ícones soltos: dá para julgar
   proporção e agrupamento sem GPU e sem Windows.
+- **Traço tracejado e pontilhado**, por um botão da barra que cicla os três padrões. Vale para linha, seta, retângulo, elipse, mão livre, marca-texto e régua, e repinta o que estiver selecionado como os outros controles de estilo. O padrão é medido em múltiplos da espessura — um tracejado de medida fixa sobre um traço de 12 px sairia como uma fila de quadrados colados — e sobre a tinta, não sobre a linha de centro: as pontas do traço são redondas e avançam meia espessura além de cada extremidade, então quanto mais grosso o traço, mais o tracejado pareceria sólido. O período é esticado para caber um número inteiro de vezes no caminho, de modo que ele começa e termina com tinta e a última esquina de um retângulo fecha.
+- **Régua** (`U`): mede uma distância na captura, com uma ponta em cada extremidade e o valor no meio. A medida é em **pixels da imagem**, não em pontos de tela — a 150% de escala, ou com o editor em zoom, o número é o mesmo que o overlay mostra ao selecionar a região. `Shift` prende em 45°, as pontas são alças, e a régua se move, duplica e desfaz como qualquer outra anotação; ao redimensionar a captura ela se remede sozinha.
 - **A seta pode ser dobrada num arco.** Selecione-a e arraste a alça do meio.
   A curvatura é proporcional ao comprimento, então setas de tamanhos
   diferentes ficam com o mesmo aspecto, e a ponta acompanha a tangente do fim

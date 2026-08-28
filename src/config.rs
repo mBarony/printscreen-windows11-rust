@@ -199,6 +199,7 @@ pub struct ToolKeysConfig {
     pub redact: String,
     pub spotlight: String,
     pub text: String,
+    pub ruler: String,
     pub crop: String,
     pub cut: String,
 }
@@ -218,6 +219,7 @@ impl Default for ToolKeysConfig {
             redact: "D".into(),
             spotlight: "O".into(),
             text: "T".into(),
+            ruler: "U".into(),
             crop: "C".into(),
             cut: "X".into(),
         }
@@ -342,6 +344,7 @@ impl Config {
                 redact: tool_key("redact", &defaults.editor.tool_keys.redact),
                 spotlight: tool_key("spotlight", &defaults.editor.tool_keys.spotlight),
                 text: tool_key("text", &defaults.editor.tool_keys.text),
+                ruler: tool_key("ruler", &defaults.editor.tool_keys.ruler),
                 crop: tool_key("crop", &defaults.editor.tool_keys.crop),
                 cut: tool_key("cut", &defaults.editor.tool_keys.cut),
             },
@@ -422,6 +425,7 @@ impl Config {
                             ("redact", json::s(&self.editor.tool_keys.redact)),
                             ("spotlight", json::s(&self.editor.tool_keys.spotlight)),
                             ("text", json::s(&self.editor.tool_keys.text)),
+                            ("ruler", json::s(&self.editor.tool_keys.ruler)),
                             ("crop", json::s(&self.editor.tool_keys.crop)),
                             ("cut", json::s(&self.editor.tool_keys.cut)),
                         ]),

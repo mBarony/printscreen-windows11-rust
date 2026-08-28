@@ -11,7 +11,7 @@ use crate::storage::SaveTarget;
 use crate::editor::icons::{self, Icon};
 use crate::editor::backdrop::BackdropStyle;
 use crate::editor::shapes::{
-    RedactionStyle, Tool, CORNER_RADIUS_MAX, MAGNIFICATION_MAX, MAGNIFICATION_MIN,
+    LineStyle, RedactionStyle, Tool, CORNER_RADIUS_MAX, MAGNIFICATION_MAX, MAGNIFICATION_MIN,
 };
 use crate::editor::{
     EditorSession,
@@ -24,7 +24,7 @@ use super::{
 };
 use super::interact::{
     restyle_selection, selected_is_redaction, selected_is_spotlight, selected_is_text,
-    selected_shape_takes_fill,
+    selected_shape_takes_fill, selected_takes_line_style,
 };
 
 /// Lado do botão de ícone da toolbar, em pontos.
@@ -55,6 +55,8 @@ pub(super) fn tool_hint(tool: Tool, key: Option<Key>) -> String {
         Tool::Marker => format!("{key_name} — cada clique carimba o próximo número"),
         // Vizinha de Recortar e quase homônima, mas faz o oposto.
         Tool::Cut => format!("{key_name} — joga fora a faixa arrastada e junta o que sobrou"),
+        // O número sai da imagem, não da tela: é o que a régua mede.
+        Tool::Ruler => format!("{key_name} — mede a distância em px da imagem"),
         _ => key_name,
     }
 }
@@ -77,7 +79,7 @@ pub(super) fn icon_button(ui: &mut egui::Ui, icon: Icon, selected: bool, enabled
     let visuals = ui.visuals();
 
     // A ferramenta ativa fica marcada por um fundo discreto, não pela cor de
-    // destaque cheia: numa fila de quatorze ícones um retângulo saturado puxa
+    // destaque cheia: numa fila de quinze ícones um retângulo saturado puxa
     // o olho para si e some com o desenho que está por baixo dele.
     let background = if selected {
         visuals.selection.bg_fill.gamma_multiply(0.30)
@@ -161,6 +163,7 @@ const TOOL_GROUPS: [&[Tool]; 5] = [
         Tool::Highlighter,
         Tool::Marker,
         Tool::Text,
+        Tool::Ruler,
     ],
     &[Tool::Redact, Tool::Spotlight],
     &[Tool::Crop, Tool::Cut],
@@ -345,7 +348,7 @@ fn tool_options(ctx: &egui::Context, ui: &mut egui::Ui, session: &mut EditorSess
     separator(ui);
 
     // --- Espessura do traço: amostra + valor arrastável ---
-    stroke_preview(ui, session.stroke_width);
+    stroke_preview(ui, session.stroke_width, session.line);
     let mut stroke = session.stroke_width;
     if ui
         .add(
@@ -359,6 +362,28 @@ fn tool_options(ctx: &egui::Context, ui: &mut egui::Ui, session: &mut EditorSess
     {
         session.stroke_width = stroke.round().clamp(STROKE_MIN, STROKE_MAX);
         restyle_selection(ctx, session);
+    }
+
+    // --- Padrão do traço: só onde há um traço ao longo de um caminho ---
+    //
+    // Sem separador antes: padrão e espessura descrevem a mesma coisa — como
+    // o traço sai — e ficam de propósito no mesmo grupo visual.
+    if session.tool.takes_line_style() || selected_takes_line_style(session) {
+        let icone = match session.line {
+            LineStyle::Solid => Icon::LineSolid,
+            LineStyle::Dashed => Icon::LineDashed,
+            LineStyle::Dotted => Icon::LineDotted,
+        };
+        if icon_button(ui, icone, session.line != LineStyle::Solid, true)
+            .on_hover_text(format!(
+                "Traço: {} (clique para alternar)",
+                session.line.label()
+            ))
+            .clicked()
+        {
+            session.line = session.line.next();
+            restyle_selection(ctx, session);
+        }
     }
 
     // Daqui até a moldura, cada bloco só existe quando serve para a ferramenta
@@ -605,17 +630,29 @@ pub(super) fn separator(ui: &mut egui::Ui) {
     ui.add_space(3.0);
 }
 
-/// Amostra da espessura atual — o valor numérico ao lado dá a precisão.
-pub(super) fn stroke_preview(ui: &mut egui::Ui, width: f32) {
+/// Amostra da espessura e do padrão atuais — o valor numérico ao lado dá a
+/// precisão. A amostra passa pelo mesmo `dash::split` do canvas: uma linha
+/// sempre cheia aqui mentiria sobre o que a próxima anotação vai parecer.
+pub(super) fn stroke_preview(ui: &mut egui::Ui, width: f32, line: LineStyle) {
     let (rect, _) = ui.allocate_exact_size(Vec2::new(20.0, ICON_BUTTON), Sense::hover());
     let thickness = (width * 0.7).clamp(1.0, 7.0);
-    ui.painter().line_segment(
-        [
-            Pos2::new(rect.left() + 1.0, rect.center().y),
-            Pos2::new(rect.right() - 1.0, rect.center().y),
-        ],
-        Stroke::new(thickness, ui.visuals().text_color()),
-    );
+    let cor = ui.visuals().text_color();
+    let painter = ui.painter();
+    let em_pontos = |p: &crate::editor::shapes::Point| Pos2::new(p.x, p.y);
+    let caminho = [
+        crate::editor::shapes::Point::new(rect.left() + 1.0, rect.center().y),
+        crate::editor::shapes::Point::new(rect.right() - 1.0, rect.center().y),
+    ];
+    for parte in crate::editor::dash::split(&caminho, line, thickness) {
+        if parte.len() == 1 {
+            painter.circle_filled(em_pontos(&parte[0]), thickness / 2.0, cor);
+        } else {
+            painter.line_segment(
+                [em_pontos(&parte[0]), em_pontos(&parte[parte.len() - 1])],
+                Stroke::new(thickness, cor),
+            );
+        }
+    }
 }
 
 #[cfg(test)]

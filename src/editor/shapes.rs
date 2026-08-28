@@ -40,6 +40,8 @@ pub enum Tool {
     /// Escurece o resto e amplia o que ficou dentro.
     Spotlight,
     Text,
+    /// Mede uma distância na imagem, com o valor no meio do traço.
+    Ruler,
     /// Recorta a imagem para a região arrastada (issue #5).
     Crop,
     /// Remove uma faixa da imagem e junta o que sobrou.
@@ -61,6 +63,7 @@ impl Tool {
             Self::Redact => "Ocultar",
             Self::Spotlight => "Holofote",
             Self::Text => "Texto",
+            Self::Ruler => "Régua",
             Self::Crop => "Recortar",
             Self::Cut => "Remover faixa",
         }
@@ -71,6 +74,25 @@ impl Tool {
     pub fn is_stroke(self) -> bool {
         matches!(self, Self::Freehand | Self::Highlighter)
     }
+
+    /// Ferramentas que deixam um traço ao longo de um caminho — as únicas
+    /// para as quais tracejado e pontilhado querem dizer alguma coisa.
+    ///
+    /// A régua entra: o padrão é do `Style`, não da forma, e abrir exceção
+    /// para ela custaria um caso especial em três lugares. As pontas e o
+    /// rótulo saem sólidos de qualquer jeito.
+    pub fn takes_line_style(self) -> bool {
+        matches!(
+            self,
+            Self::Line
+                | Self::Arrow
+                | Self::Rect
+                | Self::Ellipse
+                | Self::Freehand
+                | Self::Highlighter
+                | Self::Ruler
+        )
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -79,6 +101,8 @@ pub struct Style {
     pub color: [u8; 4],
     /// Espessura do traço, em px no espaço da imagem.
     pub stroke_width: f32,
+    /// Padrão do traço: sólido, tracejado ou pontilhado.
+    pub line: LineStyle,
     /// Tamanho da fonte, em px no espaço da imagem (ferramenta Texto).
     pub font_size: f32,
     /// Retângulo e elipse saem cheios em vez de só contornados.
@@ -113,12 +137,16 @@ pub const REDACTION_MIN_SIDE: f32 = 5.0;
 /// Raio máximo dos cantos do retângulo, em px da imagem.
 pub const CORNER_RADIUS_MAX: f32 = 24.0;
 
+pub use super::dash::LineStyle;
 pub use super::redact::RedactionStyle;
 pub use super::spotlight::{SpotlightForm, MAGNIFICATION_DEFAULT, MAGNIFICATION_MAX, MAGNIFICATION_MIN};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Shape {
     Line { a: Point, b: Point },
+    /// Régua: a geometria de uma linha, com uma ponta em cada extremidade e
+    /// a distância medida escrita no meio.
+    Ruler { a: Point, b: Point },
     /// `bend` desloca o ponto de controle perpendicularmente à reta `a`–`b`,
     /// como fração do comprimento: 0 é reta, positivo curva para um lado.
     Arrow { a: Point, b: Point, bend: f32 },
@@ -208,7 +236,7 @@ impl Layer {
     pub fn hit_test(&self, p: Point, tol: f32, text_size: (f32, f32)) -> bool {
         let reach = tol + self.style.stroke_width / 2.0;
         match &self.shape {
-            Shape::Line { a, b } => dist_to_segment(p, *a, *b) <= reach,
+            Shape::Line { a, b } | Shape::Ruler { a, b } => dist_to_segment(p, *a, *b) <= reach,
             Shape::Arrow { a, b, bend } => {
                 let path = arrow_path(*a, *b, *bend);
                 let penultimo = path[path.len().saturating_sub(2)];
@@ -313,7 +341,9 @@ impl Layer {
     /// a fonte em mãos.
     pub fn bbox(&self) -> Option<(Point, Point)> {
         match &self.shape {
-            Shape::Line { a, b } | Shape::Arrow { a, b, .. } => Some(normalize(*a, *b)),
+            Shape::Line { a, b } | Shape::Ruler { a, b } | Shape::Arrow { a, b, .. } => {
+                Some(normalize(*a, *b))
+            }
             Shape::Rect { min, max } => Some((*min, *max)),
             Shape::Ellipse { center, rx, ry } => Some((
                 Point::new(center.x - rx, center.y - ry),
@@ -351,7 +381,7 @@ impl Layer {
                 (Handle::Bend, arc_apex(*a, *b, *bend)),
             ];
         }
-        if let Shape::Line { a, b } = &self.shape {
+        if let Shape::Line { a, b } | Shape::Ruler { a, b } = &self.shape {
             return vec![(Handle::Start, *a), (Handle::End, *b)];
         }
         let Some((min, max)) = self.bbox() else {
@@ -394,7 +424,9 @@ impl Layer {
     }
 
     fn move_endpoint(&mut self, handle: Handle, to: Point, constrain: bool) {
-        let (Shape::Line { a, b } | Shape::Arrow { a, b, .. }) = &mut self.shape else {
+        let (Shape::Line { a, b } | Shape::Ruler { a, b } | Shape::Arrow { a, b, .. }) =
+            &mut self.shape
+        else {
             return;
         };
         let (moving, fixed) = if handle == Handle::Start { (&mut *a, *b) } else { (&mut *b, *a) };
@@ -457,8 +489,9 @@ impl Layer {
             Shape::Marker { center, .. } => {
                 *center = Point::new((min.x + max.x) / 2.0, (min.y + max.y) / 2.0);
             }
-            // Linha e seta são redimensionadas pelas pontas; texto, pela roda.
-            Shape::Line { .. } | Shape::Arrow { .. } | Shape::Text { .. } => {}
+            // Linha, régua e seta são redimensionadas pelas pontas; texto,
+            // pela roda.
+            Shape::Line { .. } | Shape::Ruler { .. } | Shape::Arrow { .. } | Shape::Text { .. } => {}
         }
     }
 }
@@ -607,7 +640,7 @@ impl Shape {
     pub fn shift_for_cut(&mut self, band: crate::editor::cut::Band) {
         let mv = |p: &mut Point| crate::editor::cut::shift_point(p, band);
         match self {
-            Self::Line { a, b } | Self::Arrow { a, b, .. } => {
+            Self::Line { a, b } | Self::Ruler { a, b } | Self::Arrow { a, b, .. } => {
                 mv(a);
                 mv(b);
             }
@@ -629,7 +662,7 @@ impl Shape {
             p.y += dy;
         };
         match self {
-            Self::Line { a, b } | Self::Arrow { a, b, .. } => {
+            Self::Line { a, b } | Self::Ruler { a, b } | Self::Arrow { a, b, .. } => {
                 mv(a);
                 mv(b);
             }
@@ -660,7 +693,7 @@ impl Shape {
             p.y *= k;
         };
         match self {
-            Self::Line { a, b } | Self::Arrow { a, b, .. } => {
+            Self::Line { a, b } | Self::Ruler { a, b } | Self::Arrow { a, b, .. } => {
                 sc(a);
                 sc(b);
             }
@@ -802,14 +835,14 @@ pub fn shape_from_drag(
     alt: bool,
 ) -> Option<Shape> {
     match tool {
-        Tool::Line | Tool::Arrow => {
+        Tool::Line | Tool::Arrow | Tool::Ruler => {
             if shift {
                 b = snap_45(a, b);
             }
-            Some(if tool == Tool::Line {
-                Shape::Line { a, b }
-            } else {
-                Shape::Arrow { a, b, bend: 0.0 }
+            Some(match tool {
+                Tool::Line => Shape::Line { a, b },
+                Tool::Ruler => Shape::Ruler { a, b },
+                _ => Shape::Arrow { a, b, bend: 0.0 },
             })
         }
         Tool::Rect => {
@@ -965,12 +998,67 @@ pub fn normalize(a: Point, b: Point) -> (Point, Point) {
 }
 
 // ---------------------------------------------------------------------------
+// Contornos amostrados (compartilhados entre preview e exportação)
+// ---------------------------------------------------------------------------
+
+/// Contorno fechado de um retângulo, como polilinha.
+///
+/// Só o traço não sólido precisa dele: o padrão é aplicado ao comprimento
+/// percorrido, e para isso o contorno tem de ser um caminho, não um anel de
+/// pixels. Os cantos arredondados entram como arcos amostrados.
+pub fn rect_path(min: Point, max: Point, radius: f32) -> Vec<Point> {
+    let r = radius
+        .min((max.x - min.x) / 2.0)
+        .min((max.y - min.y) / 2.0)
+        .max(0.0);
+    if r <= f32::EPSILON {
+        return vec![
+            min,
+            Point::new(max.x, min.y),
+            max,
+            Point::new(min.x, max.y),
+            min,
+        ];
+    }
+    const STEPS: usize = 6;
+    // Centro de cada canto e o ângulo em que o arco dele começa, no sentido
+    // horário a partir do canto superior esquerdo.
+    let cantos = [
+        (Point::new(min.x + r, min.y + r), std::f32::consts::PI),
+        (Point::new(max.x - r, min.y + r), -std::f32::consts::FRAC_PI_2),
+        (Point::new(max.x - r, max.y - r), 0.0),
+        (Point::new(min.x + r, max.y - r), std::f32::consts::FRAC_PI_2),
+    ];
+    let mut path = Vec::with_capacity(cantos.len() * (STEPS + 1) + 1);
+    for (centro, inicio) in cantos {
+        for i in 0..=STEPS {
+            let a = inicio + std::f32::consts::FRAC_PI_2 * i as f32 / STEPS as f32;
+            path.push(Point::new(centro.x + r * a.cos(), centro.y + r * a.sin()));
+        }
+    }
+    path.push(path[0]);
+    path
+}
+
+/// Contorno fechado de uma elipse, como polilinha.
+pub fn ellipse_path(center: Point, rx: f32, ry: f32) -> Vec<Point> {
+    const STEPS: usize = 64;
+    (0..=STEPS)
+        .map(|i| {
+            let a = i as f32 / STEPS as f32 * std::f32::consts::TAU;
+            Point::new(center.x + rx * a.cos(), center.y + ry * a.sin())
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------------------
 // Geometria da seta (compartilhada entre preview e exportação)
 // ---------------------------------------------------------------------------
 
 /// Geometria derivada de uma seta: haste + triângulo preenchido da ponta.
 pub struct ArrowGeometry {
-    pub shaft_a: Point,
+    /// Fim da haste, já recuado até a base da ponta. O começo dela é o
+    /// próprio caminho da seta, que o chamador já tem.
     pub shaft_b: Point,
     /// Vértices do triângulo da ponta: [ponta, base esquerda, base direita].
     pub head: [Point; 3],
@@ -979,12 +1067,26 @@ pub struct ArrowGeometry {
 /// Ponta da seta: triângulo preenchido com comprimento `max(10, 4×espessura)`
 /// px e abertura de 30° (§8).
 pub fn arrow_geometry(a: Point, b: Point, stroke_width: f32) -> ArrowGeometry {
+    arrow_geometry_capped(a, b, stroke_width, f32::INFINITY)
+}
+
+/// Como [`arrow_geometry`], com um teto para o comprimento da ponta.
+///
+/// A seta tem uma ponta só, e para ela o teto natural é o traço inteiro. A
+/// régua tem uma em cada extremidade: sem um teto menor, num traço curto as
+/// duas se cruzariam e a haste sairia do avesso.
+pub fn arrow_geometry_capped(
+    a: Point,
+    b: Point,
+    stroke_width: f32,
+    max_head: f32,
+) -> ArrowGeometry {
     let dx = b.x - a.x;
     let dy = b.y - a.y;
     let len = (dx * dx + dy * dy).sqrt().max(f32::EPSILON);
     let (ux, uy) = (dx / len, dy / len);
 
-    let head_len = (4.0 * stroke_width).max(10.0).min(len);
+    let head_len = (4.0 * stroke_width).max(10.0).min(len).min(max_head);
     let half_angle = 15f32.to_radians(); // abertura total de 30°
     let half_width = head_len * half_angle.tan();
 
@@ -994,7 +1096,6 @@ pub fn arrow_geometry(a: Point, b: Point, stroke_width: f32) -> ArrowGeometry {
     let (px, py) = (-uy, ux);
 
     ArrowGeometry {
-        shaft_a: a,
         // Haste recuada até a base para o traço não vazar além do triângulo.
         shaft_b: base,
         head: [
@@ -1086,6 +1187,7 @@ mod tests {
         Style {
             color: [255, 0, 0, 255],
             stroke_width: 3.0,
+            line: LineStyle::default(),
             font_size: 24.0,
             filled: false,
             corner_radius: 0.0,

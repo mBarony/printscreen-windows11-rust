@@ -23,7 +23,7 @@ use super::backdrop::BackdropStyle;
 use super::cut::{Axis, Band};
 use super::document::{Document, Op};
 use super::redact::RedactionStyle;
-use super::shapes::{Layer, Point, Shape, SpotlightForm, Style};
+use super::shapes::{Layer, LineStyle, Point, Shape, SpotlightForm, Style};
 
 /// Assinatura do arquivo de imagem cru.
 const RAW_MAGIC: &[u8; 4] = b"RSRW";
@@ -80,6 +80,11 @@ pub fn load(dir: &Path) -> Option<Document> {
     if value.get("version").and_then(Value::as_f64) != Some(FORMAT_VERSION) {
         return None;
     }
+    // Uma forma que este binário não conheça derruba a sessão inteira, e não
+    // só a anotação: descartá-la deixaria ids órfãos nas operações de patch e
+    // de exclusão que vêm depois. O arquivo só existe entre um travamento e a
+    // recuperação seguinte, então o caso é o de abrir com um binário mais
+    // velho que o que gravou.
     let ops: Vec<Op> = value
         .get("ops")
         .and_then(Value::as_array)?
@@ -139,6 +144,14 @@ fn encode_style(style: &Style) -> Value {
             json::arr(style.color.iter().map(|c| json::n(*c as f64)).collect()),
         ),
         ("stroke_width", json::n(style.stroke_width as f64)),
+        (
+            "line",
+            json::s(match style.line {
+                LineStyle::Solid => "solid",
+                LineStyle::Dashed => "dashed",
+                LineStyle::Dotted => "dotted",
+            }),
+        ),
         ("font_size", json::n(style.font_size as f64)),
         ("filled", json::b(style.filled)),
         ("corner_radius", json::n(style.corner_radius as f64)),
@@ -174,6 +187,12 @@ fn decode_style(v: &Value) -> Option<Style> {
     Some(Style {
         color: rgba,
         stroke_width: number("stroke_width"),
+        // Sessão gravada antes do padrão de traço abre sólida, como era.
+        line: match text("line") {
+            "dashed" => LineStyle::Dashed,
+            "dotted" => LineStyle::Dotted,
+            _ => LineStyle::Solid,
+        },
         font_size: number("font_size"),
         filled: flag("filled"),
         corner_radius: number("corner_radius"),
@@ -195,6 +214,9 @@ fn encode_shape(shape: &Shape) -> Value {
     match shape {
         Shape::Line { a, b } => {
             json::obj(vec![("kind", json::s("line")), ("a", point(*a)), ("b", point(*b))])
+        }
+        Shape::Ruler { a, b } => {
+            json::obj(vec![("kind", json::s("ruler")), ("a", point(*a)), ("b", point(*b))])
         }
         Shape::Arrow { a, b, bend } => json::obj(vec![
             ("kind", json::s("arrow")),
@@ -247,6 +269,10 @@ fn decode_shape(v: &Value) -> Option<Shape> {
     let number = |key: &str| v.get(key).and_then(Value::as_f64).unwrap_or(0.0) as f32;
     match v.get("kind")?.as_str()? {
         "line" => Some(Shape::Line {
+            a: read_point(v.get("a"))?,
+            b: read_point(v.get("b"))?,
+        }),
+        "ruler" => Some(Shape::Ruler {
             a: read_point(v.get("a"))?,
             b: read_point(v.get("b"))?,
         }),
@@ -415,6 +441,7 @@ mod tests {
         Style {
             color: [12, 34, 56, 255],
             stroke_width: 4.0,
+            line: LineStyle::Dashed,
             font_size: 20.0,
             filled: true,
             corner_radius: 6.0,
@@ -441,6 +468,10 @@ mod tests {
             Shape::Redaction { min: p(23.0, 24.0), max: p(25.0, 26.0), seed: 4242 },
             Shape::Spotlight { center: p(27.0, 28.0), rx: 29.0, ry: 30.0 },
             Shape::Text { anchor: p(31.0, 32.0), content: "acentuação ☕".into() },
+            // Formas novas entram no fim: `a_session_round_trips_through_the_disk`
+            // escolhe duas por índice, e inserir no meio trocaria em silêncio
+            // o que aquele teste exercita.
+            Shape::Ruler { a: p(33.0, 34.0), b: p(35.0, 36.0) },
         ]
     }
 
@@ -455,6 +486,16 @@ mod tests {
     #[test]
     fn the_style_survives_the_round_trip() {
         assert_eq!(decode_style(&encode_style(&style())).unwrap(), style());
+    }
+
+    #[test]
+    fn uma_sessao_sem_padrao_de_traco_abre_solida() {
+        // Gravada antes de o estilo de linha existir: o campo não está lá, e
+        // a anotação tem de voltar reta como era.
+        let mut v = encode_style(&style());
+        let Value::Object(campos) = &mut v else { panic!("objeto") };
+        campos.remove("line");
+        assert_eq!(decode_style(&v).unwrap().line, LineStyle::Solid);
     }
 
     #[test]

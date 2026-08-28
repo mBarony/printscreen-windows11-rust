@@ -220,6 +220,25 @@ pub(super) fn selected_shape_takes_fill(session: &EditorSession) -> bool {
         })
 }
 
+/// A anotação selecionada deixa um traço ao longo de um caminho? É onde
+/// tracejado e pontilhado querem dizer alguma coisa.
+pub(super) fn selected_takes_line_style(session: &EditorSession) -> bool {
+    session
+        .selected
+        .and_then(|i| session.doc.layers().get(i))
+        .is_some_and(|layer| {
+            matches!(
+                layer.shape,
+                Shape::Line { .. }
+                    | Shape::Ruler { .. }
+                    | Shape::Arrow { .. }
+                    | Shape::Rect { .. }
+                    | Shape::Ellipse { .. }
+                    | Shape::Freehand { .. }
+            )
+        })
+}
+
 /// A anotação selecionada é uma redação?
 pub(super) fn selected_is_redaction(session: &EditorSession) -> bool {
     session

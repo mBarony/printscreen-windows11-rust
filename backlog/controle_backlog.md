@@ -1,6 +1,6 @@
 # Controle do backlog
 
-Painel de andamento. Atualizado em 27/08/2026.
+Painel de andamento. Atualizado em 28/08/2026.
 
 Marque a caixa ao concluir e mova a linha para a data no rodapé. O estado
 no arquivo da feature é a fonte da verdade; esta página é o resumo.
@@ -14,13 +14,13 @@ no arquivo da feature é a fonte da verdade; esta página é o resumo.
 
 | Plataforma | Total | Falta | Parcial | Concluído | Em aberto |
 |---|---:|---:|---:|---:|---:|
-| Núcleo (vale para as três plataformas) | 26 | 10 | 1 | 15 | 0 |
+| Núcleo (vale para as três plataformas) | 26 | 9 | 0 | 17 | 0 |
 | Windows | 7 | 5 | 0 | 2 | 0 |
 | Linux (Hyprland + Wayland) | 12 | 11 | 0 | 0 | 1 |
 | macOS | 13 | 13 | 0 | 0 | 0 |
-| **Total** | **58** | **39** | **1** | **17** | **1** |
+| **Total** | **58** | **38** | **0** | **19** | **1** |
 
-Progresso: **17 de 58** (29%).
+Progresso: **19 de 58** (33%).
 
 ---
 
@@ -34,7 +34,7 @@ Progresso: **17 de 58** (29%).
 - [x] **[Desfazer o recorte](nucleo/desfazer-recorte.md)** · P
 - [x] **[Duplicar arrastando](nucleo/duplicar-arrastando.md)** · P
 - [ ] **[Estilo desenhado à mão](nucleo/estilo-desenhado-a-mao.md)** · M
-- [~] **[Estilos de linha](nucleo/estilos-de-linha.md)** · M — _parcial_
+- [x] **[Estilos de linha](nucleo/estilos-de-linha.md)** · M
 - [x] **[Saída em PNG](nucleo/formato-png.md)** · M
 - [x] **[Outros formatos de cor](nucleo/formatos-de-cor.md)** · P
 - [ ] **[GIF antes e depois](nucleo/gif-antes-depois.md)** · M
@@ -44,7 +44,7 @@ Progresso: **17 de 58** (29%).
 - [ ] **[Ocultar só o texto](nucleo/ocultar-so-o-texto.md)** · M
 - [ ] **[Reconstruir colunas no OCR](nucleo/reconstruir-colunas.md)** · G
 - [x] **[Redimensionar a captura](nucleo/redimensionar-captura.md)** · P
-- [ ] **[Régua de tela](nucleo/regua-de-tela.md)** · M
+- [x] **[Régua de tela](nucleo/regua-de-tela.md)** · M
 - [ ] **[Remover objeto](nucleo/remover-objeto.md)** · G
 - [x] **[Repetir a última região](nucleo/repetir-ultima-regiao.md)** · P
 - [ ] **[Salvar e copiar automáticos](nucleo/salvar-copiar-automaticos.md)** · P
@@ -134,3 +134,4 @@ Itens que não são bloqueados por trabalho, e sim por uma escolha:
 | 28/08/2026 | Captura com atraso e repetir a última região |
 | 28/08/2026 | Guias de alinhamento e semitransparência na exportação |
 | 28/08/2026 | Seta em arco, com alça de dobra |
+| 28/08/2026 | Estilos de linha (tracejado e pontilhado) e régua de tela |

@@ -25,6 +25,15 @@ Histórico de versões do RustShot. Datas em 2026.
 - Uma prévia SVG da barra montada, gerável sob demanda por teste ignorado, no
   mesmo molde da que já existia para os ícones soltos: dá para julgar
   proporção e agrupamento sem GPU e sem Windows.
+- **`Shift` trava a seleção num quadrado** durante o arrasto no overlay,
+  como o editor já fazia nas formas.
+- **`Alt`+arrasto duplica a anotação** em vez de movê-la: a cópia nasce por
+  cima e é ela que segue o ponteiro, deixando o original onde estava. É o
+  `Alt+D` sem ter de reposicionar depois.
+- **`Espaço` reposiciona a forma enquanto você a desenha**, em vez de
+  esticá-la — errar o ponto de partida de um retângulo grande custava refazer
+  o gesto inteiro.
+- **`Alt+R` inverte a ponta da seta selecionada**, sem redesenhá-la.
 - **O conta-gotas ganhou duas amostragens.** Um clique continua pegando o
   pixel exato. Com `Shift`, ele pega o **tom mais escuro** num quadrado de
   20×20 px em volta do cursor — que num texto é a cor da letra, e não a do

@@ -74,6 +74,18 @@ pub(super) fn handle_layer_keys(ctx: &egui::Context, session: &mut EditorSession
             i.time,
         )
     });
+    // Inverter a seta é uma alteração de forma, não de estilo: entra pela
+    // mesma porta do movimento, para virar um passo de desfazer.
+    if ctx.input_mut(|i| i.consume_key(Modifiers::ALT, Key::R)) {
+        close_edit_run(session);
+        session.doc.begin_move();
+        if session.doc.reverse_arrow(index) {
+            session.doc.end_move();
+        } else {
+            session.doc.abort_move();
+        }
+        return;
+    }
 
     if delete {
         close_edit_run(session);
@@ -295,6 +307,17 @@ pub(super) fn begin_select_drag(
         });
     match hit {
         Some(index) => {
+            // Com `Alt`, arrastar duplica em vez de mover: a cópia nasce no
+            // lugar e é ela que segue o ponteiro, então o original fica onde
+            // estava. É o `Alt+D` sem ter de reposicionar depois.
+            let index = if ctx.input(|i| i.modifiers.alt) {
+                match session.doc.duplicate(index, 0.0, 0.0) {
+                    Some(_) => session.doc.layers().len() - 1,
+                    None => index,
+                }
+            } else {
+                index
+            };
             // Clicar numa anotação já selecionada preserva o conjunto: é
             // assim que se arrasta o bloco inteiro depois de laçá-lo.
             if !session.selection.contains(&index) {

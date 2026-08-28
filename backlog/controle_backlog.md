@@ -14,13 +14,13 @@ no arquivo da feature é a fonte da verdade; esta página é o resumo.
 
 | Plataforma | Total | Falta | Parcial | Concluído | Em aberto |
 |---|---:|---:|---:|---:|---:|
-| Núcleo (vale para as três plataformas) | 26 | 21 | 1 | 4 | 0 |
+| Núcleo (vale para as três plataformas) | 26 | 17 | 1 | 8 | 0 |
 | Windows | 7 | 5 | 0 | 2 | 0 |
 | Linux (Hyprland + Wayland) | 12 | 11 | 0 | 0 | 1 |
 | macOS | 13 | 13 | 0 | 0 | 0 |
-| **Total** | **58** | **50** | **1** | **6** | **1** |
+| **Total** | **58** | **46** | **1** | **10** | **1** |
 
-Progresso: **6 de 58** (10%).
+Progresso: **10 de 58** (17%).
 
 ---
 
@@ -32,7 +32,7 @@ Progresso: **6 de 58** (10%).
 - [x] **[Cor do texto sob o cursor](nucleo/cor-do-texto.md)** · P
 - [x] **[Cor média de uma área](nucleo/cor-media-de-area.md)** · P
 - [ ] **[Desfazer o recorte](nucleo/desfazer-recorte.md)** · P
-- [ ] **[Duplicar arrastando](nucleo/duplicar-arrastando.md)** · P
+- [x] **[Duplicar arrastando](nucleo/duplicar-arrastando.md)** · P
 - [ ] **[Estilo desenhado à mão](nucleo/estilo-desenhado-a-mao.md)** · M
 - [~] **[Estilos de linha](nucleo/estilos-de-linha.md)** · M — _parcial_
 - [x] **[Saída em PNG](nucleo/formato-png.md)** · M
@@ -40,7 +40,7 @@ Progresso: **6 de 58** (10%).
 - [ ] **[GIF antes e depois](nucleo/gif-antes-depois.md)** · M
 - [ ] **[Guias de alinhamento](nucleo/guias.md)** · P
 - [ ] **[Leitura de QR code](nucleo/leitura-de-qr-code.md)** · G
-- [ ] **[Mover o objeto durante o desenho](nucleo/mover-durante-desenho.md)** · P
+- [x] **[Mover o objeto durante o desenho](nucleo/mover-durante-desenho.md)** · P
 - [ ] **[Ocultar só o texto](nucleo/ocultar-so-o-texto.md)** · M
 - [ ] **[Reconstruir colunas no OCR](nucleo/reconstruir-colunas.md)** · G
 - [ ] **[Redimensionar a captura](nucleo/redimensionar-captura.md)** · P
@@ -48,10 +48,10 @@ Progresso: **6 de 58** (10%).
 - [ ] **[Remover objeto](nucleo/remover-objeto.md)** · G
 - [ ] **[Repetir a última região](nucleo/repetir-ultima-regiao.md)** · P
 - [ ] **[Salvar e copiar automáticos](nucleo/salvar-copiar-automaticos.md)** · P
-- [ ] **[Seleção quadrada](nucleo/selecao-quadrada.md)** · P
+- [x] **[Seleção quadrada](nucleo/selecao-quadrada.md)** · P
 - [ ] **[Semitransparência](nucleo/semitransparencia.md)** · P
 - [ ] **[Seta em arco](nucleo/seta-em-arco.md)** · M
-- [ ] **[Seta reversível](nucleo/seta-reversivel.md)** · P
+- [x] **[Seta reversível](nucleo/seta-reversivel.md)** · P
 
 ## Windows
 
@@ -129,3 +129,4 @@ Itens que não são bloqueados por trabalho, e sim por uma escolha:
 | 27/08/2026 | `nucleo/formato-png` concluído, com escolha automática de formato |
 | 27/08/2026 | Lote de cor: média de área, cor do texto e OKLCH/APCA |
 | 27/08/2026 | `nucleo/leitura-de-qr-code` reestimado de M para G (sem como testar) |
+| 28/08/2026 | Lote de manipulação: seleção quadrada, seta reversível, Alt+arrasto e Espaço |

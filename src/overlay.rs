@@ -358,7 +358,19 @@ pub fn overlay_ui(ctx: &egui::Context, session: &mut SelectSession, idx: usize) 
                 if drag.monitor == idx {
                     if primary_down {
                         if let Some(p) = pointer_px {
-                            drag.current = clamp(p);
+                            let mut p = clamp(p);
+                            // `Shift` trava a seleção num quadrado, pelo eixo
+                            // mais esticado — o editor já se comporta assim
+                            // nas formas, e a mão espera o mesmo aqui.
+                            if ctx.input(|i| i.modifiers.shift) {
+                                let lado = (p.0 - drag.start.0)
+                                    .abs()
+                                    .max((p.1 - drag.start.1).abs());
+                                p.0 = drag.start.0 + lado.copysign(p.0 - drag.start.0);
+                                p.1 = drag.start.1 + lado.copysign(p.1 - drag.start.1);
+                                p = clamp(p);
+                            }
+                            drag.current = p;
                         }
                     }
                     if primary_released {

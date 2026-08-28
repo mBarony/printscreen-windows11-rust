@@ -461,6 +461,22 @@ impl Document {
         }
     }
 
+    /// Inverte de que lado da seta fica a ponta. `false` quando a anotação
+    /// não é uma seta.
+    ///
+    /// Trocar as extremidades é toda a operação: a ponta é sempre desenhada
+    /// em `b`, e o resto da geometria é simétrico.
+    pub fn reverse_arrow(&mut self, index: usize) -> bool {
+        let Some(layer) = self.layers.get_mut(index) else {
+            return false;
+        };
+        let Shape::Arrow { a, b } = &mut layer.shape else {
+            return false;
+        };
+        std::mem::swap(a, b);
+        true
+    }
+
     /// Anotações inteiramente dentro do retângulo — o critério do marquee.
     ///
     /// Contenção e não interseção: passar o laço por cima de meia dúzia de
@@ -559,6 +575,62 @@ mod tests {
             spotlight: SpotlightForm::default(),
             magnification: MAGNIFICATION_DEFAULT,
         }
+    }
+
+    #[test]
+    fn reverter_a_seta_troca_as_pontas() {
+        let mut d = doc();
+        let a = Point::new(10.0, 10.0);
+        let b = Point::new(40.0, 30.0);
+        d.push(Shape::Arrow { a, b }, style());
+
+        d.begin_move();
+        assert!(d.reverse_arrow(0), "a anotação é uma seta");
+        d.end_move();
+
+        match d.layers()[0].shape {
+            Shape::Arrow { a: na, b: nb } => {
+                assert_eq!((na.x, na.y), (b.x, b.y));
+                assert_eq!((nb.x, nb.y), (a.x, a.y));
+            }
+            _ => panic!("continua sendo seta"),
+        }
+    }
+
+    #[test]
+    fn reverter_a_seta_e_um_passo_de_desfazer() {
+        let mut d = doc();
+        let a = Point::new(10.0, 10.0);
+        let b = Point::new(40.0, 30.0);
+        d.push(Shape::Arrow { a, b }, style());
+        d.begin_move();
+        d.reverse_arrow(0);
+        d.end_move();
+        d.undo();
+        match d.layers()[0].shape {
+            Shape::Arrow { a: na, .. } => assert_eq!((na.x, na.y), (a.x, a.y)),
+            _ => panic!("continua sendo seta"),
+        }
+    }
+
+    #[test]
+    fn reverter_ignora_o_que_nao_e_seta() {
+        let mut d = doc();
+        d.push(line(), style());
+        assert!(!d.reverse_arrow(0), "linha não é seta");
+        assert!(!d.reverse_arrow(99), "índice fora não quebra");
+    }
+
+    #[test]
+    fn duplicar_sem_deslocamento_deixa_a_copia_no_lugar() {
+        // É o que o Alt+arrasto precisa: a cópia nasce por cima e é ela que
+        // segue o ponteiro, deixando o original onde estava.
+        let mut d = doc();
+        d.push(line(), style());
+        assert!(d.duplicate(0, 0.0, 0.0).is_some());
+        assert_eq!(d.layers().len(), 2);
+        let (a, b) = (&d.layers()[0], &d.layers()[1]);
+        assert_eq!(a.bbox().map(|(p, _)| p.x), b.bbox().map(|(p, _)| p.x));
     }
 
     fn line() -> Shape {

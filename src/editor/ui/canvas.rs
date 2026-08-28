@@ -346,10 +346,26 @@ pub(super) fn draw(ctx: &egui::Context, session: &mut EditorSession) {
                                 session.crop_pending = None;
                             }
                         }
+                        // Espaço segurado reposiciona a forma em vez de
+                        // esticá-la: errar o ponto de partida de um retângulo
+                        // grande custaria refazer o gesto inteiro.
+                        let moving = ctx.input(|i| i.key_down(egui::Key::Space));
                         if let Some(drag) = &mut session.drag {
                             if let Some(pos) = latest_pos {
-                                drag.current = clamp_img(to_screen.inverse(pos));
-                                if session.tool.is_stroke() {
+                                let novo = clamp_img(to_screen.inverse(pos));
+                                if moving {
+                                    let dx = novo.x - drag.current.x;
+                                    let dy = novo.y - drag.current.y;
+                                    drag.start = clamp_img(Point::new(
+                                        drag.start.x + dx,
+                                        drag.start.y + dy,
+                                    ));
+                                    for s in &mut drag.samples {
+                                        *s = Point::new(s.x + dx, s.y + dy);
+                                    }
+                                }
+                                drag.current = novo;
+                                if session.tool.is_stroke() && !moving {
                                     push_sample(&mut drag.samples, drag.current);
                                 }
                             }

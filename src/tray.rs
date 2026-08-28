@@ -19,6 +19,7 @@ pub const MENU_QUIT: u16 = 0x1007;
 pub const MENU_RECOVER: u16 = 0x1008;
 pub const MENU_CAPTURE_DELAYED: u16 = 0x1009;
 pub const MENU_REPEAT_REGION: u16 = 0x100A;
+pub const MENU_CAPTURE_SCROLL: u16 = 0x100B;
 
 /// Ícone RGBA cru embutido (gerado do mesmo desenho do icon.ico).
 static ICON_32: &[u8] = include_bytes!("../assets/icon-32.rgba");
@@ -44,6 +45,10 @@ impl Tray {
             MenuEntry::Item {
                 id: MENU_CAPTURE_DELAYED,
                 label: "Capturar tela cheia em 3 s",
+            },
+            MenuEntry::Item {
+                id: MENU_CAPTURE_SCROLL,
+                label: "Capturar com rolagem",
             },
         ];
         // Só aparece depois da primeira região: antes dela não há o que

@@ -4,7 +4,7 @@ Precisam de API do Windows. Implementadas primeiro, por ser a plataforma atual.
 
 | Feature | Estado | Esforço |
 |---|---|---|
-| [Captura com rolagem](captura-com-rolagem.md) | falta | G |
+| [Captura com rolagem](captura-com-rolagem.md) | feito | G |
 | [Fixar a captura na tela](fixar-na-tela.md) | falta | M |
 | [Redimensionar a janela fixada](redimensionar-fixada.md) | falta | P |
 | [Seleção inteligente](selecao-inteligente.md) | feito | G |

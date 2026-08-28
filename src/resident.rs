@@ -32,6 +32,15 @@ use crate::{capture, hotkeys, notify, platform};
 /// Espera da captura com atraso. Três segundos é o bastante para abrir um
 /// menu, e pouco o suficiente para não parecer que o app travou.
 const CAPTURE_DELAY_SECS: u64 = 3;
+/// Teto de passos da captura com rolagem. Uma página que não termina não
+/// pode prender a bandeja para sempre.
+const SCROLL_MAX_PASSOS: usize = 40;
+/// Cliques de roda por passo. Poucos deixam a captura lenta; muitos passam
+/// da altura da janela e abrem um buraco que a costura não tem como emendar.
+const SCROLL_NOTCHES: i32 = 3;
+/// Espera até a página assentar, em ms. Rolagem suave leva um tempo, e
+/// capturar no meio dela devolve um quadro borrado.
+const SCROLL_SETTLE_MS: u64 = 320;
 
 /// Fila preenchida pelo `WndProc` e drenada fora dele (ver `run_message_loop`).
 mod events {
@@ -261,6 +270,80 @@ impl Resident {
         shell::set_poll_timer(true);
     }
 
+    /// Captura com rolagem: costura uma página mais alta que a tela.
+    ///
+    /// Roda **na thread da bandeja**, com pausas entre os passos. Ela fica
+    /// travada por alguns segundos, e isso é aceitável: a captura precisa da
+    /// GDI desta thread, e o programa que rola tem a fila de mensagens dele,
+    /// que continua andando. Um aviso avisa antes, e outro conta o resultado.
+    #[cfg(windows)]
+    fn capture_scrolling(&mut self) {
+        use crate::stitch::Stitcher;
+
+        let Some((x, y)) = crate::platform::scroll::cursor_pos() else {
+            notify::toast_error("Captura com rolagem", "Não foi possível ler o cursor.");
+            return;
+        };
+        let janelas = platform::window_list::visible_windows();
+        let Some(alvo) = platform::window_list::window_at(&janelas, x, y)
+            .map(|i| &janelas[i])
+            .map(|j| (j.x, j.y, j.width, j.height))
+        else {
+            notify::toast_error(
+                "Captura com rolagem",
+                "Aponte o cursor para a janela que deve rolar.",
+            );
+            return;
+        };
+
+        notify::toast(
+            "Capturando com rolagem",
+            "Não mexa no mouse nem no teclado até o aviso do fim.",
+        );
+
+        let recorte = |shots: &[capture::MonitorShot]| -> Option<crate::imgbuf::RgbaImage> {
+            // A janela pode atravessar monitores; vale o que contém o cursor.
+            let shot = shots.iter().find(|s| {
+                x >= s.x && y >= s.y && x < s.x + s.width as i32 && y < s.y + s.height as i32
+            })?;
+            let (lx, ly) = ((alvo.0 - shot.x).max(0) as u32, (alvo.1 - shot.y).max(0) as u32);
+            let w = (alvo.2.min(shot.width.saturating_sub(lx))).min(shot.width);
+            let h = (alvo.3.min(shot.height.saturating_sub(ly))).min(shot.height);
+            (w > 0 && h > 0).then(|| capture::crop(&shot.image, lx, ly, w, h))
+        };
+
+        let Some(primeiro) = capture::capture_all_monitors().ok().and_then(|s| recorte(&s)) else {
+            notify::toast_error("Captura com rolagem", "Falha ao capturar a janela.");
+            return;
+        };
+        let mut costura = Stitcher::new(primeiro);
+
+        for _ in 0..SCROLL_MAX_PASSOS {
+            if !crate::platform::scroll::wheel_at(x, y, -SCROLL_NOTCHES) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(SCROLL_SETTLE_MS));
+            let Some(quadro) = capture::capture_all_monitors().ok().and_then(|s| recorte(&s))
+            else {
+                break;
+            };
+            // Zero px novos: a página parou, ou o quadro saiu borrado no meio
+            // de uma rolagem suave. Nos dois casos não há o que emendar.
+            if costura.push(&quadro) == 0 {
+                break;
+            }
+        }
+
+        let altura = costura.height();
+        let imagem = costura.finish();
+        storage::save_in_background(SaveTarget::from_config(&self.config), imagem);
+        notify::toast("Captura com rolagem", &format!("{altura} px de altura."));
+        shell::set_poll_timer(true);
+    }
+
+    #[cfg(not(windows))]
+    fn capture_scrolling(&mut self) {}
+
     fn capture_fullscreen(&mut self) {
         let target = SaveTarget::from_config(&self.config);
         match capture::capture_fullscreen(self.config.fullscreen_scope) {
@@ -411,6 +494,7 @@ impl Resident {
     fn handle_menu(&mut self, id: u16) {
         match id {
             tray::MENU_CAPTURE_FULLSCREEN => self.trigger(HotkeyAction::Fullscreen),
+            tray::MENU_CAPTURE_SCROLL => self.capture_scrolling(),
             tray::MENU_CAPTURE_REGION => self.trigger(HotkeyAction::Region),
             tray::MENU_CAPTURE_EDIT => self.trigger(HotkeyAction::Edit),
             tray::MENU_CAPTURE_DELAYED => self.capture_after_delay(),

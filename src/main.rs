@@ -44,6 +44,7 @@ mod resident;
 mod resident_link;
 mod settings;
 mod smartpick;
+mod stitch;
 mod storage;
 mod theme;
 mod tray;

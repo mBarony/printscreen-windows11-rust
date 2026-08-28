@@ -25,6 +25,12 @@ Histórico de versões do RustShot. Datas em 2026.
 - Uma prévia SVG da barra montada, gerável sob demanda por teste ignorado, no
   mesmo molde da que já existia para os ícones soltos: dá para julgar
   proporção e agrupamento sem GPU e sem Windows.
+- **Capturar tela cheia com 3 segundos de atraso**, pelo menu da bandeja —
+  tempo de abrir um menu ou posicionar o cursor antes de a tela congelar.
+- **Repetir a última região**, também pelo menu, sem passar pelo overlay. O
+  retângulo é lembrado em coordenadas do desktop virtual, então continua
+  válido mesmo que a lista de monitores mude; se ele não couber mais em
+  nenhuma tela, um aviso explica em vez de capturar o lugar errado.
 - **Redimensionar a captura inteira**, por um campo de porcentagem na barra
   do editor. As anotações acompanham, raios inclusive — uma elipse que
   escalasse só o centro viraria outra forma. É uma operação do histórico como

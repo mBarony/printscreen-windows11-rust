@@ -14,19 +14,19 @@ no arquivo da feature é a fonte da verdade; esta página é o resumo.
 
 | Plataforma | Total | Falta | Parcial | Concluído | Em aberto |
 |---|---:|---:|---:|---:|---:|
-| Núcleo (vale para as três plataformas) | 26 | 15 | 1 | 10 | 0 |
+| Núcleo (vale para as três plataformas) | 26 | 13 | 1 | 12 | 0 |
 | Windows | 7 | 5 | 0 | 2 | 0 |
 | Linux (Hyprland + Wayland) | 12 | 11 | 0 | 0 | 1 |
 | macOS | 13 | 13 | 0 | 0 | 0 |
-| **Total** | **58** | **44** | **1** | **12** | **1** |
+| **Total** | **58** | **42** | **1** | **14** | **1** |
 
-Progresso: **12 de 58** (21%).
+Progresso: **14 de 58** (24%).
 
 ---
 
 ## Núcleo (vale para as três plataformas)
 
-- [ ] **[Captura com atraso](nucleo/captura-com-atraso.md)** · P
+- [x] **[Captura com atraso](nucleo/captura-com-atraso.md)** · P
 - [ ] **[Colar imagem sobre a captura](nucleo/colar-imagem.md)** · M
 - [ ] **[Copiar e colar anotações](nucleo/copiar-colar-anotacoes.md)** · M
 - [x] **[Cor do texto sob o cursor](nucleo/cor-do-texto.md)** · P
@@ -46,7 +46,7 @@ Progresso: **12 de 58** (21%).
 - [x] **[Redimensionar a captura](nucleo/redimensionar-captura.md)** · P
 - [ ] **[Régua de tela](nucleo/regua-de-tela.md)** · M
 - [ ] **[Remover objeto](nucleo/remover-objeto.md)** · G
-- [ ] **[Repetir a última região](nucleo/repetir-ultima-regiao.md)** · P
+- [x] **[Repetir a última região](nucleo/repetir-ultima-regiao.md)** · P
 - [ ] **[Salvar e copiar automáticos](nucleo/salvar-copiar-automaticos.md)** · P
 - [x] **[Seleção quadrada](nucleo/selecao-quadrada.md)** · P
 - [ ] **[Semitransparência](nucleo/semitransparencia.md)** · P
@@ -131,3 +131,4 @@ Itens que não são bloqueados por trabalho, e sim por uma escolha:
 | 27/08/2026 | `nucleo/leitura-de-qr-code` reestimado de M para G (sem como testar) |
 | 28/08/2026 | Lote de manipulação: seleção quadrada, seta reversível, Alt+arrasto e Espaço |
 | 28/08/2026 | Redimensionar a captura e desfazer o recorte |
+| 28/08/2026 | Captura com atraso e repetir a última região |

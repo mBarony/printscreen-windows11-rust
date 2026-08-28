@@ -17,6 +17,8 @@ pub const MENU_SETTINGS: u16 = 0x1005;
 pub const MENU_AUTOSTART: u16 = 0x1006;
 pub const MENU_QUIT: u16 = 0x1007;
 pub const MENU_RECOVER: u16 = 0x1008;
+pub const MENU_CAPTURE_DELAYED: u16 = 0x1009;
+pub const MENU_REPEAT_REGION: u16 = 0x100A;
 
 /// Ícone RGBA cru embutido (gerado do mesmo desenho do icon.ico).
 static ICON_32: &[u8] = include_bytes!("../assets/icon-32.rgba");
@@ -32,13 +34,26 @@ impl Tray {
     pub fn new(
         autostart_checked: bool,
         recoverable: bool,
+        repeatable: bool,
         handler: impl Fn(ShellEvent) + Send + Sync + 'static,
     ) -> Result<Self> {
         let mut menu = vec![
             MenuEntry::Item { id: MENU_CAPTURE_FULLSCREEN, label: "Capturar tela cheia" },
             MenuEntry::Item { id: MENU_CAPTURE_REGION, label: "Capturar região" },
             MenuEntry::Item { id: MENU_CAPTURE_EDIT, label: "Capturar e editar" },
+            MenuEntry::Item {
+                id: MENU_CAPTURE_DELAYED,
+                label: "Capturar tela cheia em 3 s",
+            },
         ];
+        // Só aparece depois da primeira região: antes dela não há o que
+        // repetir, e o item ficaria inerte.
+        if repeatable {
+            menu.push(MenuEntry::Item {
+                id: MENU_REPEAT_REGION,
+                label: "Repetir a última região",
+            });
+        }
         // Só aparece quando há de fato o que recuperar — um item permanente
         // e quase sempre inerte só ocuparia espaço.
         if recoverable {

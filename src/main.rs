@@ -31,6 +31,7 @@ mod imgbuf;
 mod imgout;
 mod jobs;
 mod jpeg;
+mod last_region;
 mod json;
 mod notify;
 mod ocr_popup;

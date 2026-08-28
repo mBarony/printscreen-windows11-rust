@@ -153,6 +153,10 @@ impl GuiApp {
                 Outcome::Selected { monitor, rect: (x, y, w, h), action } => {
                     let shot = &session.monitors[monitor].shot;
                     let cropped = capture::crop(&shot.image, x, y, w, h);
+                    // Em coordenadas do desktop virtual, para o residente
+                    // poder repetir a região mesmo com outra lista de
+                    // monitores.
+                    crate::last_region::save((shot.x + x as i32, shot.y + y as i32, w, h));
                     match action {
                         // Capturar região: copia e encerra.
                         SelectedAction::CopyToClipboard => {

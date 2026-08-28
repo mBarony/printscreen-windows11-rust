@@ -29,6 +29,10 @@ use crate::storage::{self, SaveTarget};
 use crate::tray::{self, Tray};
 use crate::{capture, hotkeys, notify, platform};
 
+/// Espera da captura com atraso. Três segundos é o bastante para abrir um
+/// menu, e pouco o suficiente para não parecer que o app travou.
+const CAPTURE_DELAY_SECS: u64 = 3;
+
 /// Fila preenchida pelo `WndProc` e drenada fora dele (ver `run_message_loop`).
 mod events {
     use super::ShellEvent;
@@ -106,7 +110,13 @@ impl Resident {
                 "Use \"Recuperar edição não salva\" no menu da bandeja.",
             );
         }
-        let tray = match Tray::new(config.start_with_windows, recoverable, events::push) {
+        let repeatable = crate::last_region::load().is_some();
+        let tray = match Tray::new(
+            config.start_with_windows,
+            recoverable,
+            repeatable,
+            events::push,
+        ) {
             Ok(tray) => Some(tray),
             Err(err) => {
                 notify::toast_error(
@@ -189,6 +199,61 @@ impl Resident {
 
     /// RF-01: nenhuma janela envolvida — captura, salva em thread de trabalho e
     /// notifica.
+    /// Captura a tela cheia depois de alguns segundos, para dar tempo de
+    /// abrir um menu ou posicionar o cursor.
+    ///
+    /// A espera roda em thread de trabalho e a captura volta para a fila de
+    /// eventos: capturar de fora da thread da bandeja mexeria em GDI de outro
+    /// contexto, e bloquear a thread de mensagens congelaria o ícone.
+    fn capture_after_delay(&mut self) {
+        notify::toast("Capturando em 3 segundos", "Prepare a tela.");
+        crate::jobs::spawn(|| {
+            std::thread::sleep(std::time::Duration::from_secs(CAPTURE_DELAY_SECS));
+            events::push(shell::ShellEvent::Menu(tray::MENU_CAPTURE_FULLSCREEN));
+        });
+    }
+
+    /// Recaptura o mesmo retângulo da última região, sem passar pelo overlay.
+    fn repeat_last_region(&mut self) {
+        let Some((x, y, w, h)) = crate::last_region::load() else {
+            notify::toast_error("Nada a repetir", "Capture uma região primeiro.");
+            return;
+        };
+        let shots = match capture::capture_all_monitors() {
+            Ok(shots) => shots,
+            Err(err) => {
+                notify::toast_error("Falha na captura", &format!("{err:#}"));
+                return;
+            }
+        };
+        // O monitor que contém o canto superior esquerdo manda: um retângulo
+        // que atravessa dois monitores já não era representável na seleção,
+        // então aqui também não precisa ser.
+        let dono = shots.iter().find(|s| {
+            x >= s.x && y >= s.y && x < s.x + s.width as i32 && y < s.y + s.height as i32
+        });
+        let Some(shot) = dono else {
+            notify::toast_error(
+                "A região não cabe mais na tela",
+                "Os monitores mudaram desde a última captura.",
+            );
+            return;
+        };
+        let local_x = (x - shot.x) as u32;
+        let local_y = (y - shot.y) as u32;
+        let w = w.min(shot.width - local_x);
+        let h = h.min(shot.height - local_y);
+        let image = capture::crop(&shot.image, local_x, local_y, w, h);
+        crate::jobs::spawn(move || match crate::clipboard::copy_image(&image) {
+            Ok(()) => notify::toast(
+                "Copiado para a área de transferência",
+                "A mesma região da vez anterior.",
+            ),
+            Err(err) => notify::toast_error("Falha ao copiar", &format!("{err:#}")),
+        });
+        shell::set_poll_timer(true);
+    }
+
     fn capture_fullscreen(&mut self) {
         let target = SaveTarget::from_config(&self.config);
         match capture::capture_fullscreen(self.config.fullscreen_scope) {
@@ -323,6 +388,8 @@ impl Resident {
             tray::MENU_CAPTURE_FULLSCREEN => self.trigger(HotkeyAction::Fullscreen),
             tray::MENU_CAPTURE_REGION => self.trigger(HotkeyAction::Region),
             tray::MENU_CAPTURE_EDIT => self.trigger(HotkeyAction::Edit),
+            tray::MENU_CAPTURE_DELAYED => self.capture_after_delay(),
+            tray::MENU_REPEAT_REGION => self.repeat_last_region(),
             tray::MENU_OPEN_FOLDER => open_folder(&self.config.effective_output_dir()),
             tray::MENU_SETTINGS => self.open_settings(),
             tray::MENU_AUTOSTART => self.toggle_autostart(),

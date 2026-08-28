@@ -4,6 +4,14 @@ Histórico de versões do RustShot. Datas em 2026.
 
 ## Não lançado
 
+## v1.9.0 — 28/08
+
+Uma leva grande de anotação e de captura. O editor ganhou padrão de traço,
+traço desenhado à mão, régua, copiar-e-colar de anotações, colagem de imagem,
+remoção de objeto e GIF antes-e-depois; o OCR passou a preservar colunas e a
+ocultar só as palavras; e a captura ganhou seleção por elemento, rolagem
+automática, escolha de destino e uma API por URL.
+
 - **O aviso do OCR some ao colar.** `Ctrl+V` em qualquer aplicativo fecha a
   janela na hora: colar é o fim natural da tarefa, e insistir no aviso depois
   disso é ruído sobre o que o usuário foi fazer. O aviso não tem foco nesse

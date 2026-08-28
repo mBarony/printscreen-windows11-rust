@@ -10,4 +10,4 @@ Precisam de API do Windows. Implementadas primeiro, por ser a plataforma atual.
 | [Seleção inteligente](selecao-inteligente.md) | falta | G |
 | [Arrastar para outro aplicativo](arrastar-para-outro-app.md) | falta | M |
 | [Upload para S3](upload-s3.md) | falta | G |
-| [API por esquema de URL](api-por-url.md) | falta | M |
+| [API por esquema de URL](api-por-url.md) | feito | M |

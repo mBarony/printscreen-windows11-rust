@@ -34,6 +34,7 @@ pub mod msgbox;
 #[cfg(feature = "ocr")]
 pub mod ocr;
 pub mod shell;
+pub mod urlscheme;
 pub mod time;
 pub mod version;
 pub mod window_list;

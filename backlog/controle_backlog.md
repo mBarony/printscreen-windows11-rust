@@ -15,12 +15,12 @@ no arquivo da feature é a fonte da verdade; esta página é o resumo.
 | Plataforma | Total | Falta | Parcial | Concluído | Em aberto |
 |---|---:|---:|---:|---:|---:|
 | Núcleo (vale para as três plataformas) | 26 | 1 | 0 | 25 | 0 |
-| Windows | 7 | 5 | 0 | 2 | 0 |
+| Windows | 7 | 4 | 0 | 3 | 0 |
 | Linux (Hyprland + Wayland) | 12 | 11 | 0 | 0 | 1 |
 | macOS | 13 | 13 | 0 | 0 | 0 |
-| **Total** | **58** | **30** | **0** | **27** | **1** |
+| **Total** | **58** | **29** | **0** | **28** | **1** |
 
-Progresso: **27 de 58** (47%).
+Progresso: **28 de 58** (48%).
 
 ---
 
@@ -55,7 +55,7 @@ Progresso: **27 de 58** (47%).
 
 ## Windows
 
-- [ ] **[API por esquema de URL](windows/api-por-url.md)** · M
+- [x] **[API por esquema de URL](windows/api-por-url.md)** · M
 - [ ] **[Arrastar para outro aplicativo](windows/arrastar-para-outro-app.md)** · M
 - [ ] **[Captura com rolagem](windows/captura-com-rolagem.md)** · G
 - [x] **[Fixar a captura na tela](windows/fixar-na-tela.md)** · M
@@ -143,3 +143,4 @@ Itens que não são bloqueados por trabalho, e sim por uma escolha:
 | 28/08/2026 | Reconstrução de colunas no texto reconhecido |
 | 28/08/2026 | GIF antes e depois, com codificador próprio |
 | 28/08/2026 | Remover objeto, por propagação da borda |
+| 28/08/2026 | API por esquema de URL (rustshot://) |

@@ -335,6 +335,34 @@ pub fn show(ctx: &egui::Context, state: &mut SettingsState) {
                         crate::theme::toggle_switch(ui, &mut state.draft.start_with_windows);
                     });
                 });
+                ui.add_space(6.0);
+                // Age fora do rascunho, de propósito: o registro é um efeito
+                // no sistema, não uma preferência do `config.json`, e quem
+                // copiar o arquivo para outra máquina não leva o registro
+                // junto. Por isso a caixa lê o registro e escreve nele na
+                // hora, sem esperar o botão Salvar.
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Registrar o esquema rustshot://").strong());
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let exe = std::env::current_exe().unwrap_or_default();
+                        let mut registrado = crate::platform::urlscheme::is_registered(&exe);
+                        if crate::theme::toggle_switch(ui, &mut registrado).changed() {
+                            if let Err(err) =
+                                crate::platform::urlscheme::set(&exe, registrado)
+                            {
+                                log::warn!("esquema rustshot:// não pôde ser alterado: {err:#}");
+                            }
+                        }
+                    });
+                });
+                ui.label(
+                    RichText::new(
+                        "Permite disparar capturas de fora, por links como \
+                         rustshot://fullscreen?copy=1 ou rustshot://ocr?file=…",
+                    )
+                    .weak()
+                    .small(),
+                );
             });
 
             ui.add_space(14.0);

@@ -40,6 +40,18 @@ rustshot --help                   # ajuda completa
 rustshot --version
 ```
 
+Com o esquema `rustshot://` registrado na janela de Configurações, os mesmos modos podem ser disparados por um link — de um atalho, de um script ou de outro programa:
+
+```powershell
+start rustshot://fullscreen?copy=1
+start rustshot://open?file=C:\Fotos\captura.png
+start rustshot://clipboard
+start rustshot://ocr?file=C:\Fotos\captura.png
+```
+
+Só entram os comandos que rodam sem janela e sem o residente: região e edição
+dependem de um overlay sobre a tela congelada.
+
 Códigos de saída: `0` sucesso, `1` falha ao capturar ou abrir a imagem, `2`
 erro de uso. Região e janela não têm modo "sem janela": as duas exigem uma
 seleção na tela.

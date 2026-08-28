@@ -478,6 +478,16 @@ Região e janela exigem a seleção na tela, e por isso vêm pelos atalhos
 globais configuráveis (por padrão Ctrl+PrtScr, Shift+PrtScr e
 Ctrl+Shift+PrtScr) ou pelo menu da bandeja.
 
+ESQUEMA DE URL:
+    rustshot://fullscreen[?copy=1][&save=1]
+    rustshot://open?file=<caminho>     abre a imagem no editor
+    rustshot://clipboard               abre a imagem da área de transferência
+    rustshot://ocr?file=<caminho>      reconhece o texto da imagem
+
+Registre o esquema na janela de Configurações. Ele faz o mesmo que as opções
+acima, e só o que roda sem janela nem residente: região e edição dependem de
+um overlay sobre a tela.
+
 CÓDIGOS DE SAÍDA:
     0  sucesso
     1  falha ao capturar ou ao abrir a imagem
@@ -511,6 +521,85 @@ CÓDIGOS DE SAÍDA:
         Recover,
     }
 
+    /// `rustshot://<comando>?<chave>=<valor>&…` → o mesmo `Mode` que a linha
+    /// de comando produziria.
+    ///
+    /// Só entram os comandos que rodam **sem janela e sem residente**: a
+    /// captura de tela cheia, o OCR de um arquivo e a abertura do editor.
+    /// Região e edição dependem de um overlay sobre a tela, que é trabalho do
+    /// residente e não de um processo disparado por um link.
+    ///
+    /// A decodificação de `%XX` é feita aqui porque o shell entrega a URL
+    /// como o autor a escreveu; um caminho com espaço chega percent-encoded.
+    fn parse_url(url: &str) -> Result<Mode, String> {
+        let resto = url
+            .strip_prefix("rustshot://")
+            .or_else(|| url.strip_prefix("rustshot:"))
+            .unwrap_or("")
+            .trim_end_matches('/');
+        let (comando, consulta) = match resto.split_once('?') {
+            Some((c, q)) => (c, q),
+            None => (resto, ""),
+        };
+        let param = |nome: &str| -> Option<String> {
+            consulta.split('&').find_map(|par| {
+                let (chave, valor) = par.split_once('=')?;
+                (chave == nome).then(|| percent_decode(valor))
+            })
+        };
+        let ligado = |nome: &str| {
+            param(nome).is_some_and(|v| matches!(v.as_str(), "1" | "true" | "sim" | ""))
+        };
+
+        match comando.trim_end_matches('/') {
+            "fullscreen" | "capture" => {
+                let copy = ligado("copy");
+                // Mesma regra da linha de comando: sem pedido explícito,
+                // salvar é o que a captura de tela cheia faz.
+                let save = ligado("save") || !copy;
+                Ok(Mode::QuickCapture { copy, save })
+            }
+            "open" | "edit" => match param("file") {
+                Some(caminho) => Ok(Mode::EditFile(std::path::PathBuf::from(caminho))),
+                None => Ok(Mode::EditClipboard),
+            },
+            "clipboard" => Ok(Mode::EditClipboard),
+            "ocr" => match param("file") {
+                Some(caminho) => Ok(Mode::OcrFile(std::path::PathBuf::from(caminho))),
+                None => Err("rustshot://ocr exige file=<caminho>".to_owned()),
+            },
+            outro => Err(format!(
+                "comando desconhecido na URL: {outro:?}. \
+                 Conhecidos: fullscreen, open, clipboard, ocr"
+            )),
+        }
+    }
+
+    /// Decodifica `%XX` e `+`, o bastante para um caminho de arquivo numa URL.
+    fn percent_decode(texto: &str) -> String {
+        let bytes = texto.replace('+', " ").into_bytes();
+        let mut out = Vec::with_capacity(bytes.len());
+        let mut i = 0;
+        while i < bytes.len() {
+            let hex = (i + 2 < bytes.len()).then(|| {
+                std::str::from_utf8(&bytes[i + 1..i + 3])
+                    .ok()
+                    .and_then(|h| u8::from_str_radix(h, 16).ok())
+            });
+            match (bytes[i], hex.flatten()) {
+                (b'%', Some(byte)) => {
+                    out.push(byte);
+                    i += 3;
+                }
+                (b, _) => {
+                    out.push(b);
+                    i += 1;
+                }
+            }
+        }
+        String::from_utf8_lossy(&out).into_owned()
+    }
+
     /// `--gui select --shots <nome> --len <bytes> --purpose region|edit
     /// --parent <hwnd>` ou `--gui settings --parent <hwnd>`.
     pub fn parse(args: impl Iterator<Item = String>) -> Result<Mode, String> {
@@ -530,6 +619,13 @@ CÓDIGOS DE SAÍDA:
         let mut args = args.peekable();
         if args.peek().is_none() {
             return Ok(Mode::Resident);
+        }
+
+        // O shell entrega a URL inteira como um argumento só. Ela é traduzida
+        // para os mesmos modos da linha de comando, e não para um caminho
+        // paralelo: o que a URL pode pedir é exatamente o que a CLI já faz.
+        if let Some(url) = args.peek().filter(|a| a.starts_with("rustshot:")).cloned() {
+            return parse_url(&url);
         }
 
         while let Some(arg) = args.next() {
@@ -708,6 +804,62 @@ mod tests {
             }
             other => panic!("esperado select, veio {}", std::any::type_name_of_val(&other)),
         }
+    }
+
+    #[test]
+    fn a_url_vira_o_mesmo_modo_da_linha_de_comando() {
+        let Mode::QuickCapture { copy, save } = parse(args("rustshot://fullscreen")).unwrap()
+        else {
+            panic!("esperava captura de tela cheia");
+        };
+        assert!(!copy && save, "sem pedido explícito, a URL salva como a CLI");
+
+        let Mode::QuickCapture { copy, save } =
+            parse(args("rustshot://fullscreen?copy=1")).unwrap()
+        else {
+            panic!("esperava captura de tela cheia");
+        };
+        assert!(copy && !save);
+
+        let Mode::QuickCapture { copy, save } =
+            parse(args("rustshot://capture?copy=1&save=1")).unwrap()
+        else {
+            panic!("esperava captura de tela cheia");
+        };
+        assert!(copy && save);
+
+        assert!(matches!(
+            parse(args("rustshot://clipboard")).unwrap(),
+            Mode::EditClipboard
+        ));
+        assert!(matches!(
+            parse(args("rustshot://open")).unwrap(),
+            Mode::EditClipboard
+        ));
+    }
+
+    #[test]
+    fn a_url_decodifica_o_caminho_do_arquivo() {
+        // O shell entrega a URL como o autor a escreveu: um caminho com
+        // espaço chega percent-encoded.
+        let Mode::EditFile(path) =
+            parse(args("rustshot://open?file=C%3A%5CFotos%5Cminha%20foto.png")).unwrap()
+        else {
+            panic!("esperava abrir um arquivo");
+        };
+        assert_eq!(path, std::path::PathBuf::from(r"C:\Fotos\minha foto.png"));
+
+        let Mode::OcrFile(path) = parse(args("rustshot://ocr?file=a+b.png")).unwrap() else {
+            panic!("esperava OCR de arquivo");
+        };
+        assert_eq!(path, std::path::PathBuf::from("a b.png"));
+    }
+
+    #[test]
+    fn uma_url_desconhecida_e_recusada() {
+        // Melhor um código de erro de uso que capturar a tela por engano.
+        assert!(parse(args("rustshot://banana")).is_err());
+        assert!(parse(args("rustshot://ocr")).is_err(), "ocr sem arquivo");
     }
 
     #[test]

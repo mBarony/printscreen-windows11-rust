@@ -32,6 +32,11 @@ use super::shapes::{
 use super::EditorSession;
 use interact::{close_edit_run, handle_layer_keys, settle_edit_run};
 
+/// Tempo de cada quadro do GIF "antes e depois", em centésimos de segundo.
+/// Um segundo é o bastante para ler o quadro e curto o bastante para a
+/// diferença saltar aos olhos.
+const GIF_DELAY_CS: u16 = 100;
+
 /// Texturas das imagens coladas, por `source`.
 ///
 /// Ficam na sessão, e não no documento: o documento é a fonte da verdade e
@@ -324,6 +329,45 @@ pub(super) fn copy_and_close(session: &mut EditorSession) {
     });
     forget_session();
     session.finished = true;
+}
+
+/// Salva um GIF de dois quadros que alterna entre a captura sem anotações e
+/// a captura anotada — o "antes e depois" do trabalho feito aqui.
+///
+/// **Não fecha o editor**: é um artefato a mais, não o fim da tarefa, e quem
+/// o pede quase sempre ainda quer salvar a imagem parada depois.
+///
+/// O quadro "antes" sai do mesmo `content_image` do "depois", que já traz as
+/// redações queimadas — os dois quadros têm o mesmo tamanho de graça, e o GIF
+/// nunca revela o que foi ocultado.
+pub(super) fn save_gif(session: &mut EditorSession, target: &SaveTarget) {
+    commit_text_input(session);
+    let base = session.doc.content_image().clone();
+    let layers = session.doc.layers().to_vec();
+    let backdrop = session.doc.backdrop();
+    let sources = session.doc.images().clone();
+    let target = target.clone();
+    crate::jobs::spawn(move || {
+        let antes = super::render::render(&base, &[], backdrop, &sources);
+        let depois = super::render::render(&base, &layers, backdrop, &sources);
+        let (antes, depois) = match (antes, depois) {
+            (Ok(a), Ok(d)) => (a, d),
+            (Err(err), _) | (_, Err(err)) => {
+                notify::toast_error("Falha ao renderizar o GIF", &format!("{err:#}"));
+                return;
+            }
+        };
+        match crate::storage::write_gif(&target, &[&antes, &depois], GIF_DELAY_CS) {
+            Ok(path) => {
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| path.display().to_string());
+                notify::toast("GIF antes e depois salvo", &name);
+            }
+            Err(err) => notify::toast_error("Falha ao salvar o GIF", &format!("{err:#}")),
+        }
+    });
 }
 
 /// Ctrl+S: renderiza, salva na pasta configurada e fecha o editor (RF-04).

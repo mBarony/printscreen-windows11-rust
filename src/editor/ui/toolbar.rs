@@ -20,6 +20,7 @@ use crate::editor::{
 };
 use super::{
     apply_crop, copy_and_close, perform_redo, perform_undo, request_close, save_and_close,
+    save_gif,
     select_tool,
 };
 use super::interact::{
@@ -210,6 +211,7 @@ pub(super) fn draw(ctx: &egui::Context, session: &mut EditorSession, target: &Sa
                 Some(RightAction::Redo) => perform_redo(session),
                 Some(RightAction::Copy) => copy_and_close(session),
                 Some(RightAction::Save) => save_and_close(session, target),
+                Some(RightAction::Gif) => save_gif(session, target),
                 // O editor não cria janelas: levanta a bandeira e o `app`,
                 // dono dos viewports, fixa e fecha esta.
                 Some(RightAction::Pin) => session.pin_requested = true,
@@ -225,6 +227,7 @@ enum RightAction {
     Redo,
     Copy,
     Save,
+    Gif,
     Pin,
     Close,
 }
@@ -257,6 +260,13 @@ fn right_side(ui: &mut egui::Ui, can_undo: bool, can_redo: bool) -> Option<Right
             .clicked()
         {
             pedido = Some(RightAction::Copy);
+        }
+        // Não fecha o editor: é um artefato a mais, não o fim da tarefa.
+        if icon_button(ui, Icon::Gif, false, true)
+            .on_hover_text("Salvar um GIF que alterna entre a captura sem anotações e a anotada")
+            .clicked()
+        {
+            pedido = Some(RightAction::Gif);
         }
         if icon_button(ui, Icon::Pin, false, true)
             .on_hover_text("Fixar na tela (Ctrl+P) — fica sempre no topo até fechar")

@@ -26,6 +26,7 @@ mod color;
 mod config;
 mod editor;
 mod error;
+mod gif;
 mod hotkeys;
 mod imgbuf;
 mod imgout;

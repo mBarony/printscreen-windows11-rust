@@ -159,6 +159,19 @@ pub fn write_image(target: &SaveTarget, image: &RgbaImage) -> Result<PathBuf> {
     Ok(path)
 }
 
+/// Grava os quadros como um GIF que alterna entre eles; devolve o caminho.
+///
+/// A extensão não passa pela escolha automática de formato: um GIF é um GIF,
+/// e o `image_format` do config diz respeito às capturas paradas.
+pub fn write_gif(target: &SaveTarget, frames: &[&RgbaImage], delay_cs: u16) -> Result<PathBuf> {
+    let dir = ensure_output_dir(target)?;
+    let (path, file) = claim_free_path(&dir, &target.filename_template, "gif")?;
+    let writer = std::io::BufWriter::new(file);
+    crate::gif::encode(writer, frames, delay_cs)
+        .with_context(|| format!("gravando {}", path.display()))?;
+    Ok(path)
+}
+
 /// Salva em thread de trabalho e notifica o resultado (toast RF-07/§14). Via
 /// `jobs`, para o processo não encerrar no meio da gravação.
 pub fn save_in_background(target: SaveTarget, image: RgbaImage) {

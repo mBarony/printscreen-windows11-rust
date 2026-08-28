@@ -31,6 +31,7 @@ pub enum Icon {
     LineDotted,
     Sketch,
     RedactText,
+    Gif,
     Fill,
     TextPill,
     Backdrop,
@@ -69,7 +70,7 @@ impl Icon {
     }
 
     #[cfg(test)]
-    pub const ALL: [Icon; 31] = [
+    pub const ALL: [Icon; 32] = [
         Icon::Move,
         Icon::Line,
         Icon::Arrow,
@@ -87,6 +88,7 @@ impl Icon {
         Icon::LineDotted,
         Icon::Sketch,
         Icon::RedactText,
+        Icon::Gif,
         Icon::Fill,
         Icon::TextPill,
         Icon::Backdrop,
@@ -123,6 +125,7 @@ impl Icon {
             Icon::LineDotted => "line_dotted",
             Icon::Sketch => "sketch",
             Icon::RedactText => "redact_text",
+            Icon::Gif => "gif",
             Icon::Fill => "fill",
             Icon::TextPill => "text_pill",
             Icon::Backdrop => "backdrop",
@@ -310,6 +313,15 @@ pub fn geometry(icon: Icon) -> Vec<Primitive> {
             Fill(rectangle(0.20, 0.32, 0.62, 0.42)),
             Fill(rectangle(0.20, 0.53, 0.80, 0.63)),
             Fill(rectangle(0.68, 0.32, 0.80, 0.42)),
+        ],
+        // Dois quadros empilhados e uma seta de vaivém entre eles — o antes
+        // e o depois alternando.
+        Icon::Gif => vec![
+            Stroke(rectangle(0.06, 0.10, 0.62, 0.52)),
+            Stroke(rectangle(0.38, 0.48, 0.94, 0.90)),
+            Stroke(vec![(0.30, 0.69), (0.70, 0.69)]),
+            Fill(vec![(0.20, 0.69), (0.34, 0.62), (0.34, 0.76)]),
+            Fill(vec![(0.80, 0.69), (0.66, 0.62), (0.66, 0.76)]),
         ],
         // Quadrado cheio dentro de um vazado — o par contorno/preenchimento.
         Icon::Fill => vec![

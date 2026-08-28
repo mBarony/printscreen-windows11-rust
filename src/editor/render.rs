@@ -184,9 +184,9 @@ pub fn render(
                     raster::fill_image(&mut buffer, (min.x, min.y), (max.x, max.y), src);
                 }
             }
-            // Já queimada na imagem de partida (ver `document::replay`), e
-            // de propósito: o que for desenhado depois fica por cima dela.
-            Shape::Redaction { .. } | Shape::Spotlight { .. } => {}
+            // Já queimadas na imagem de partida (ver `document::replay`), e de
+            // propósito: o que for desenhado depois fica por cima delas.
+            Shape::Redaction { .. } | Shape::Spotlight { .. } | Shape::Heal { .. } => {}
             Shape::Text { anchor, content } => {
                 if style.text_pill {
                     let block = text_block_extent(&font, content, style.font_size);

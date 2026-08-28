@@ -18,6 +18,7 @@ use crate::imgbuf::RgbaImage;
 
 use super::backdrop::{self, BackdropStyle};
 use super::cut::{self, Band};
+use super::heal;
 use super::redact;
 use super::spotlight::{self, Spotlight};
 use super::shapes::{Handle, Layer, Point, RedactionStyle, Shape, Style};
@@ -73,6 +74,18 @@ fn redaction_marks(layers: &[Layer]) -> Vec<RedactionMark> {
                 style: layer.style.redaction,
                 seed: *seed,
             }),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Os remendos aplicados, na forma que o replay compara para decidir se os
+/// pixels visíveis mudaram.
+fn heal_marks(layers: &[Layer]) -> Vec<(Point, Point)> {
+    layers
+        .iter()
+        .filter_map(|layer| match &layer.shape {
+            Shape::Heal { min, max } => Some((*min, *max)),
             _ => None,
         })
         .collect()
@@ -143,6 +156,8 @@ pub struct Document {
     /// Redações e holofotes aplicados no último replay.
     redactions: Vec<RedactionMark>,
     spotlights: Vec<Spotlight>,
+    /// Remendos aplicados no último replay.
+    patches: Vec<(Point, Point)>,
 
     /// Recortes aplicados no último replay, e um selo que só avança quando
     /// eles mudam. O replay reconstrói a imagem toda vez, então o `Arc` é
@@ -219,6 +234,7 @@ impl Document {
             pixels_version: 0,
             redactions: Vec::new(),
             spotlights: Vec::new(),
+            patches: Vec::new(),
             crops: Vec::new(),
             image_version: 0,
             pending: None,
@@ -348,10 +364,16 @@ impl Document {
         // Os holofotes vêm depois das redações, de propósito: a lupa nunca
         // pode ampliar o que foi censurado.
         let lights = spotlights(&layers);
-        let redacted = if marks.is_empty() && lights.is_empty() {
+        // O remendo vem antes da redação: ele reconstrói o fundo, e o que for
+        // censurado depois não pode ser reconstruído a partir dele.
+        let patches = heal_marks(&layers);
+        let redacted = if marks.is_empty() && lights.is_empty() && patches.is_empty() {
             image.clone()
         } else {
             let mut burnt = (*image).clone();
+            for (min, max) in &patches {
+                heal::apply(&mut burnt, *min, *max);
+            }
             for mark in &marks {
                 redact::apply(&mut burnt, mark.min, mark.max, mark.style, mark.seed);
             }
@@ -376,10 +398,12 @@ impl Document {
         if reframed
             || marks != self.redactions
             || lights != self.spotlights
+            || patches != self.patches
             || backdrop != self.backdrop
         {
             self.redactions = marks;
             self.spotlights = lights;
+            self.patches = patches;
             self.pixels_version += 1;
         }
         // Trocar a moldura muda o tamanho do que se vê: o editor precisa
@@ -767,6 +791,31 @@ mod tests {
             }
             _ => panic!("continua sendo retângulo"),
         }
+    }
+
+    #[test]
+    fn remover_objeto_queima_a_imagem_e_desfaz() {
+        // Como a redação: o remendo já chega queimado à tela, e desfazer o
+        // devolve porque a imagem é reconstruída do log, não remendada de
+        // volta.
+        let fundo = [200, 210, 220, 255];
+        let mut base = RgbaImage::filled(40, 40, fundo);
+        for y in 14..26u32 {
+            for x in 14..26u32 {
+                base.pixel_mut(x, y).copy_from_slice(&[255, 0, 0, 255]);
+            }
+        }
+        let mut d = Document::new(base);
+        assert_eq!(d.content_image().pixel(20, 20), [255, 0, 0, 255]);
+
+        d.push(
+            Shape::Heal { min: Point::new(13.0, 13.0), max: Point::new(27.0, 27.0) },
+            style(),
+        );
+        assert_eq!(d.content_image().pixel(20, 20), fundo, "o objeto sumiu");
+
+        d.undo();
+        assert_eq!(d.content_image().pixel(20, 20), [255, 0, 0, 255], "e voltou");
     }
 
     #[test]

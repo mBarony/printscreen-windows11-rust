@@ -9,6 +9,7 @@ pub mod clip;
 pub mod cut;
 pub mod dash;
 pub mod document;
+pub mod heal;
 pub mod icons;
 pub mod raster;
 pub mod redact;
@@ -40,7 +41,7 @@ pub const WINDOW_TITLE: &str = "RustShot — Editor";
 pub const FOCUS_CLAIM_FRAMES: u8 = 12;
 
 /// Quantidade de ferramentas do editor — o tamanho da tabela de atalhos.
-pub const TOOL_COUNT: usize = 15;
+pub const TOOL_COUNT: usize = 16;
 
 /// Tolerância do hit-test ao clicar numa anotação com a ferramenta Mover,
 /// em pontos do egui (convertida para px da imagem pelo zoom).
@@ -340,6 +341,7 @@ pub fn resolve_tool_keys(config: &config::ToolKeysConfig) -> [(Tool, Option<egui
         (Tool::Spotlight, &config.spotlight, &defaults.spotlight),
         (Tool::Text, &config.text, &defaults.text),
         (Tool::Ruler, &config.ruler, &defaults.ruler),
+        (Tool::Heal, &config.heal, &defaults.heal),
         (Tool::Crop, &config.crop, &defaults.crop),
         (Tool::Cut, &config.cut, &defaults.cut),
     ];
@@ -383,8 +385,9 @@ mod tests {
         assert_eq!(keys[10], (Tool::Spotlight, Some(egui::Key::O)));
         assert_eq!(keys[11], (Tool::Text, Some(egui::Key::T)));
         assert_eq!(keys[12], (Tool::Ruler, Some(egui::Key::U)));
-        assert_eq!(keys[13], (Tool::Crop, Some(egui::Key::C)));
-        assert_eq!(keys[14], (Tool::Cut, Some(egui::Key::X)));
+        assert_eq!(keys[13], (Tool::Heal, Some(egui::Key::K)));
+        assert_eq!(keys[14], (Tool::Crop, Some(egui::Key::C)));
+        assert_eq!(keys[15], (Tool::Cut, Some(egui::Key::X)));
     }
 
     #[test]

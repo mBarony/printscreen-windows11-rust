@@ -39,6 +39,8 @@ pub enum Tool {
     Redact,
     /// Escurece o resto e amplia o que ficou dentro.
     Spotlight,
+    /// Apaga um elemento e preenche o buraco com o que estaria atrás.
+    Heal,
     Text,
     /// Mede uma distância na imagem, com o valor no meio do traço.
     Ruler,
@@ -62,6 +64,7 @@ impl Tool {
             Self::Eyedropper => "Conta-gotas",
             Self::Redact => "Ocultar",
             Self::Spotlight => "Holofote",
+            Self::Heal => "Remover objeto",
             Self::Text => "Texto",
             Self::Ruler => "Régua",
             Self::Crop => "Recortar",
@@ -211,6 +214,9 @@ pub enum Shape {
     Redaction { min: Point, max: Point, seed: u32 },
     /// Lente que escurece o resto da imagem e amplia o próprio miolo.
     Spotlight { center: Point, rx: f32, ry: f32 },
+    /// Região reconstruída a partir da borda — como a redação, já queimada
+    /// na imagem quando chega à tela.
+    Heal { min: Point, max: Point },
     Text { anchor: Point, content: String },
     /// Imagem colada por cima da captura, esticada no retângulo.
     ///
@@ -293,8 +299,9 @@ impl Layer {
         let reach = tol + self.style.stroke_width / 2.0;
         match &self.shape {
             Shape::Line { a, b } | Shape::Ruler { a, b } => dist_to_segment(p, *a, *b) <= reach,
-            // A imagem colada é sólida: pega pelo miolo, como uma forma cheia.
-            Shape::Image { min, max, .. } => {
+            // Imagem colada e remendo são sólidos: pegam pelo miolo, como uma
+            // forma cheia.
+            Shape::Image { min, max, .. } | Shape::Heal { min, max } => {
                 p.x >= min.x - tol && p.x <= max.x + tol && p.y >= min.y - tol && p.y <= max.y + tol
             }
             Shape::Arrow { a, b, bend } => {
@@ -410,7 +417,9 @@ impl Layer {
                 Point::new(center.x + rx, center.y + ry),
             )),
             Shape::Freehand { points, .. } => points_bounds(points),
-            Shape::Redaction { min, max, .. } | Shape::Image { min, max, .. } => Some((*min, *max)),
+            Shape::Redaction { min, max, .. }
+            | Shape::Image { min, max, .. }
+            | Shape::Heal { min, max } => Some((*min, *max)),
             Shape::Spotlight { center, rx, ry } => Some((
                 Point::new(center.x - rx, center.y - ry),
                 Point::new(center.x + rx, center.y + ry),
@@ -521,7 +530,9 @@ impl Layer {
 
     fn set_bbox(&mut self, min: Point, max: Point) {
         match &mut self.shape {
-            Shape::Rect { min: lo, max: hi } | Shape::Image { min: lo, max: hi, .. } => {
+            Shape::Rect { min: lo, max: hi }
+            | Shape::Image { min: lo, max: hi, .. }
+            | Shape::Heal { min: lo, max: hi } => {
                 *lo = min;
                 *hi = max;
             }
@@ -706,7 +717,8 @@ impl Shape {
             }
             Self::Rect { min, max }
             | Self::Redaction { min, max, .. }
-            | Self::Image { min, max, .. } => {
+            | Self::Image { min, max, .. }
+            | Self::Heal { min, max } => {
                 mv(min);
                 mv(max);
             }
@@ -735,7 +747,9 @@ impl Shape {
             Self::Ellipse { center, .. } => mv(center),
             Self::Freehand { points, .. } => points.iter_mut().for_each(mv),
             Self::Marker { center, .. } => mv(center),
-            Self::Redaction { min, max, .. } | Self::Image { min, max, .. } => {
+            Self::Redaction { min, max, .. }
+            | Self::Image { min, max, .. }
+            | Self::Heal { min, max } => {
                 mv(min);
                 mv(max);
             }
@@ -770,7 +784,9 @@ impl Shape {
             }
             Self::Freehand { points, .. } => points.iter_mut().for_each(sc),
             Self::Marker { center, .. } => sc(center),
-            Self::Redaction { min, max, .. } | Self::Image { min, max, .. } => {
+            Self::Redaction { min, max, .. }
+            | Self::Image { min, max, .. }
+            | Self::Heal { min, max } => {
                 sc(min);
                 sc(max);
             }
@@ -945,6 +961,10 @@ pub fn shape_from_drag(
             let (min, max) = normalize(centered_start(a, b, alt), b);
             // A semente é preenchida por quem cria, com uma fresca.
             Some(Shape::Redaction { min, max, seed: 0 })
+        }
+        Tool::Heal => {
+            let (min, max) = normalize(centered_start(a, b, alt), b);
+            Some(Shape::Heal { min, max })
         }
         Tool::Marker | Tool::Eyedropper | Tool::Text | Tool::Select | Tool::Crop | Tool::Cut => {
             None

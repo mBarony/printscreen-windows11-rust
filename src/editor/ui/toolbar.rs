@@ -56,6 +56,11 @@ pub(super) fn tool_hint(tool: Tool, key: Option<Key>) -> String {
         Tool::Marker => format!("{key_name} — cada clique carimba o próximo número"),
         // Vizinha de Recortar e quase homônima, mas faz o oposto.
         Tool::Cut => format!("{key_name} — joga fora a faixa arrastada e junta o que sobrou"),
+        // Funciona sobre fundo liso ou degradê, que é o caso de uma captura
+        // de tela; sobre foto o remendo aparece, e o nome não avisa isso.
+        Tool::Heal => format!(
+            "{key_name} — apaga o que está na região e reconstrói o fundo a partir da borda"
+        ),
         // O número sai da imagem, não da tela: é o que a régua mede.
         Tool::Ruler => format!("{key_name} — mede a distância em px da imagem"),
         _ => key_name,
@@ -166,7 +171,7 @@ const TOOL_GROUPS: [&[Tool]; 5] = [
         Tool::Text,
         Tool::Ruler,
     ],
-    &[Tool::Redact, Tool::Spotlight],
+    &[Tool::Redact, Tool::Spotlight, Tool::Heal],
     &[Tool::Crop, Tool::Cut],
     &[Tool::Eyedropper],
 ];

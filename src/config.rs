@@ -255,6 +255,7 @@ pub struct ToolKeysConfig {
     pub spotlight: String,
     pub text: String,
     pub ruler: String,
+    pub heal: String,
     pub crop: String,
     pub cut: String,
 }
@@ -275,6 +276,7 @@ impl Default for ToolKeysConfig {
             spotlight: "O".into(),
             text: "T".into(),
             ruler: "U".into(),
+            heal: "K".into(),
             crop: "C".into(),
             cut: "X".into(),
         }
@@ -400,6 +402,7 @@ impl Config {
                 spotlight: tool_key("spotlight", &defaults.editor.tool_keys.spotlight),
                 text: tool_key("text", &defaults.editor.tool_keys.text),
                 ruler: tool_key("ruler", &defaults.editor.tool_keys.ruler),
+                heal: tool_key("heal", &defaults.editor.tool_keys.heal),
                 crop: tool_key("crop", &defaults.editor.tool_keys.crop),
                 cut: tool_key("cut", &defaults.editor.tool_keys.cut),
             },
@@ -493,6 +496,7 @@ impl Config {
                             ("spotlight", json::s(&self.editor.tool_keys.spotlight)),
                             ("text", json::s(&self.editor.tool_keys.text)),
                             ("ruler", json::s(&self.editor.tool_keys.ruler)),
+                            ("heal", json::s(&self.editor.tool_keys.heal)),
                             ("crop", json::s(&self.editor.tool_keys.crop)),
                             ("cut", json::s(&self.editor.tool_keys.cut)),
                         ]),

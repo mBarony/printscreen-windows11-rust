@@ -314,6 +314,11 @@ fn encode_shape(shape: &Shape) -> Value {
             ("max", point(*max)),
             ("seed", json::n(*seed as f64)),
         ]),
+        Shape::Heal { min, max } => json::obj(vec![
+            ("kind", json::s("heal")),
+            ("min", point(*min)),
+            ("max", point(*max)),
+        ]),
         Shape::Spotlight { center, rx, ry } => json::obj(vec![
             ("kind", json::s("spotlight")),
             ("center", point(*center)),
@@ -376,6 +381,10 @@ fn decode_shape(v: &Value) -> Option<Shape> {
             min: read_point(v.get("min"))?,
             max: read_point(v.get("max"))?,
             seed: v.get("seed").and_then(Value::as_f64).unwrap_or(1.0) as u32,
+        }),
+        "heal" => Some(Shape::Heal {
+            min: read_point(v.get("min"))?,
+            max: read_point(v.get("max"))?,
         }),
         "spotlight" => Some(Shape::Spotlight {
             center: read_point(v.get("center"))?,
@@ -559,6 +568,7 @@ mod tests {
             // o que aquele teste exercita.
             Shape::Ruler { a: p(33.0, 34.0), b: p(35.0, 36.0) },
             Shape::Image { min: p(37.0, 38.0), max: p(39.0, 40.0), source: 7 },
+            Shape::Heal { min: p(41.0, 42.0), max: p(43.0, 44.0) },
         ]
     }
 

@@ -204,8 +204,8 @@ pub(super) fn paint_shape(
                 color32(MARKER_INK),
             );
         }
-        // Redação e holofote já fazem parte da textura da imagem.
-        Shape::Redaction { .. } | Shape::Spotlight { .. } => {}
+        // Redação, holofote e remendo já fazem parte da textura da imagem.
+        Shape::Redaction { .. } | Shape::Spotlight { .. } | Shape::Heal { .. } => {}
         Shape::Text { anchor, content } => {
             let font = FontId::new(
                 ts.len(style.font_size),
@@ -282,9 +282,9 @@ pub(super) fn shape_screen_bbox(ctx: &egui::Context, layer: &Layer, ts: ToScreen
             let geo = marker_geometry(layer.style.stroke_width);
             Rect::from_center_size(ts.pos(*center), Vec2::splat(ts.len(geo.radius) * 2.0))
         }
-        Shape::Redaction { min, max, .. } | Shape::Image { min, max, .. } => {
-            Rect::from_min_max(ts.pos(*min), ts.pos(*max))
-        }
+        Shape::Redaction { min, max, .. }
+        | Shape::Image { min, max, .. }
+        | Shape::Heal { min, max } => Rect::from_min_max(ts.pos(*min), ts.pos(*max)),
         Shape::Spotlight { center, rx, ry } => Rect::from_center_size(
             ts.pos(*center),
             Vec2::new(ts.len(*rx), ts.len(*ry)) * 2.0,

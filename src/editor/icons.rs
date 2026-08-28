@@ -31,6 +31,7 @@ pub enum Icon {
     LineDotted,
     Sketch,
     RedactText,
+    Heal,
     Gif,
     Fill,
     TextPill,
@@ -62,6 +63,7 @@ impl Icon {
             Tool::Eyedropper => Self::Eyedropper,
             Tool::Redact => Self::Redact,
             Tool::Spotlight => Self::Spotlight,
+            Tool::Heal => Self::Heal,
             Tool::Text => Self::Text,
             Tool::Ruler => Self::Ruler,
             Tool::Crop => Self::Crop,
@@ -70,7 +72,7 @@ impl Icon {
     }
 
     #[cfg(test)]
-    pub const ALL: [Icon; 32] = [
+    pub const ALL: [Icon; 33] = [
         Icon::Move,
         Icon::Line,
         Icon::Arrow,
@@ -88,6 +90,7 @@ impl Icon {
         Icon::LineDotted,
         Icon::Sketch,
         Icon::RedactText,
+        Icon::Heal,
         Icon::Gif,
         Icon::Fill,
         Icon::TextPill,
@@ -125,6 +128,7 @@ impl Icon {
             Icon::LineDotted => "line_dotted",
             Icon::Sketch => "sketch",
             Icon::RedactText => "redact_text",
+            Icon::Heal => "heal",
             Icon::Gif => "gif",
             Icon::Fill => "fill",
             Icon::TextPill => "text_pill",
@@ -313,6 +317,16 @@ pub fn geometry(icon: Icon) -> Vec<Primitive> {
             Fill(rectangle(0.20, 0.32, 0.62, 0.42)),
             Fill(rectangle(0.20, 0.53, 0.80, 0.63)),
             Fill(rectangle(0.68, 0.32, 0.80, 0.42)),
+        ],
+        // Um retângulo pontilhado com a área de dentro limpa e uma faísca:
+        // o que estava ali sai e o fundo volta.
+        Icon::Heal => vec![
+            Stroke(vec![(0.10, 0.28), (0.10, 0.14), (0.24, 0.14)]),
+            Stroke(vec![(0.62, 0.14), (0.76, 0.14), (0.76, 0.28)]),
+            Stroke(vec![(0.76, 0.62), (0.76, 0.76), (0.62, 0.76)]),
+            Stroke(vec![(0.24, 0.76), (0.10, 0.76), (0.10, 0.62)]),
+            Stroke(vec![(0.60, 0.60), (0.94, 0.94)]),
+            Stroke(vec![(0.84, 0.62), (0.94, 0.72)]),
         ],
         // Dois quadros empilhados e uma seta de vaivém entre eles — o antes
         // e o depois alternando.

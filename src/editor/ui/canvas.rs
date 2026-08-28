@@ -144,6 +144,8 @@ pub(super) fn draw(ctx: &egui::Context, session: &mut EditorSession) {
                 scale: zoom / ppp,
             };
 
+            session.guide_hint = response.hover_pos().map(|p| to_screen.inverse(p));
+
             // --- Interação (botão primário) ---
             //
             // O arrasto é rastreado manualmente pelo estado do ponteiro: o

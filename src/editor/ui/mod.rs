@@ -325,9 +325,21 @@ pub(super) fn save_and_close(session: &mut EditorSession, target: &SaveTarget) {
     let base = session.doc.content_image().clone();
     let layers = session.doc.layers().to_vec();
     let backdrop = session.doc.backdrop();
-    let target = target.clone();
+    let opacity = session.opacity;
+    let mut target = target.clone();
+    // Uma imagem translúcida gravada em JPG sairia opaca: a escolha do
+    // usuário vence a preferência de formato.
+    if opacity < 1.0 {
+        target.image_format = crate::imgout::Format::Png;
+    }
     crate::jobs::spawn(move || match super::render::render(&base, &layers, backdrop) {
-        Ok(final_image) => match storage::write_image(&target, &final_image) {
+        Ok(final_image) => {
+            let final_image = if opacity < 1.0 {
+                final_image.with_opacity(opacity)
+            } else {
+                final_image
+            };
+            match storage::write_image(&target, &final_image) {
             Ok(path) => {
                 let name = path
                     .file_name()
@@ -337,7 +349,8 @@ pub(super) fn save_and_close(session: &mut EditorSession, target: &SaveTarget) {
                 notify::toast("Captura salva", &name);
             }
             Err(err) => notify::toast_error("Falha ao salvar captura", &format!("{err:#}")),
-        },
+            }
+        }
         Err(err) => notify::toast_error("Falha ao renderizar anotações", &format!("{err:#}")),
     });
     forget_session();

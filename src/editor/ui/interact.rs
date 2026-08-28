@@ -38,6 +38,26 @@ pub(super) fn handle_layer_keys(ctx: &egui::Context, session: &mut EditorSession
         return;
     }
 
+    // Guias não dependem de seleção, então vêm antes da guarda. `Alt+H` e
+    // `Alt+V` criam no cursor; `Alt+Shift+G` limpa todas.
+    if let Some(guia) = ctx.input_mut(|i| {
+        let h = i.consume_key(Modifiers::ALT, Key::H);
+        let v = i.consume_key(Modifiers::ALT, Key::V);
+        (h || v).then_some(h)
+    }) {
+        if let Some(p) = session.guide_hint {
+            session.guides.push(crate::editor::Guide {
+                horizontal: guia,
+                pos: if guia { p.y } else { p.x },
+            });
+        }
+        return;
+    }
+    if ctx.input_mut(|i| i.consume_key(Modifiers::ALT | Modifiers::SHIFT, Key::G)) {
+        session.guides.clear();
+        return;
+    }
+
     let Some(index) = session.selected else {
         return;
     };
@@ -230,6 +250,26 @@ pub(super) fn selected_is_text(session: &EditorSession) -> bool {
 /// espessura mexe na anotação a cada quadro, mas o histórico recebe um único
 /// passo quando o arrasto para.
 pub(super) fn restyle_selection(ctx: &egui::Context, session: &mut EditorSession) {
+    // Guias não dependem de seleção, então vêm antes da guarda. `Alt+H` e
+    // `Alt+V` criam no cursor; `Alt+Shift+G` limpa todas.
+    if let Some(guia) = ctx.input_mut(|i| {
+        let h = i.consume_key(Modifiers::ALT, Key::H);
+        let v = i.consume_key(Modifiers::ALT, Key::V);
+        (h || v).then_some(h)
+    }) {
+        if let Some(p) = session.guide_hint {
+            session.guides.push(crate::editor::Guide {
+                horizontal: guia,
+                pos: if guia { p.y } else { p.x },
+            });
+        }
+        return;
+    }
+    if ctx.input_mut(|i| i.consume_key(Modifiers::ALT | Modifiers::SHIFT, Key::G)) {
+        session.guides.clear();
+        return;
+    }
+
     let Some(index) = session.selected else {
         return;
     };

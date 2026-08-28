@@ -14,13 +14,13 @@ no arquivo da feature é a fonte da verdade; esta página é o resumo.
 
 | Plataforma | Total | Falta | Parcial | Concluído | Em aberto |
 |---|---:|---:|---:|---:|---:|
-| Núcleo (vale para as três plataformas) | 26 | 13 | 1 | 12 | 0 |
+| Núcleo (vale para as três plataformas) | 26 | 11 | 1 | 14 | 0 |
 | Windows | 7 | 5 | 0 | 2 | 0 |
 | Linux (Hyprland + Wayland) | 12 | 11 | 0 | 0 | 1 |
 | macOS | 13 | 13 | 0 | 0 | 0 |
-| **Total** | **58** | **42** | **1** | **14** | **1** |
+| **Total** | **58** | **40** | **1** | **16** | **1** |
 
-Progresso: **14 de 58** (24%).
+Progresso: **16 de 58** (28%).
 
 ---
 
@@ -38,7 +38,7 @@ Progresso: **14 de 58** (24%).
 - [x] **[Saída em PNG](nucleo/formato-png.md)** · M
 - [x] **[Outros formatos de cor](nucleo/formatos-de-cor.md)** · P
 - [ ] **[GIF antes e depois](nucleo/gif-antes-depois.md)** · M
-- [ ] **[Guias de alinhamento](nucleo/guias.md)** · P
+- [x] **[Guias de alinhamento](nucleo/guias.md)** · P
 - [ ] **[Leitura de QR code](nucleo/leitura-de-qr-code.md)** · G
 - [x] **[Mover o objeto durante o desenho](nucleo/mover-durante-desenho.md)** · P
 - [ ] **[Ocultar só o texto](nucleo/ocultar-so-o-texto.md)** · M
@@ -49,7 +49,7 @@ Progresso: **14 de 58** (24%).
 - [x] **[Repetir a última região](nucleo/repetir-ultima-regiao.md)** · P
 - [ ] **[Salvar e copiar automáticos](nucleo/salvar-copiar-automaticos.md)** · P
 - [x] **[Seleção quadrada](nucleo/selecao-quadrada.md)** · P
-- [ ] **[Semitransparência](nucleo/semitransparencia.md)** · P
+- [x] **[Semitransparência](nucleo/semitransparencia.md)** · P
 - [ ] **[Seta em arco](nucleo/seta-em-arco.md)** · M
 - [x] **[Seta reversível](nucleo/seta-reversivel.md)** · P
 
@@ -132,3 +132,4 @@ Itens que não são bloqueados por trabalho, e sim por uma escolha:
 | 28/08/2026 | Lote de manipulação: seleção quadrada, seta reversível, Alt+arrasto e Espaço |
 | 28/08/2026 | Redimensionar a captura e desfazer o recorte |
 | 28/08/2026 | Captura com atraso e repetir a última região |
+| 28/08/2026 | Guias de alinhamento e semitransparência na exportação |

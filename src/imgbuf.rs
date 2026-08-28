@@ -113,6 +113,19 @@ impl RgbaImage {
         RgbaImage { width: dw, height: dh, pixels: out }
     }
 
+    /// Multiplica o canal alfa pelo fator, deixando a imagem translúcida.
+    ///
+    /// Só faz sentido em formatos com alfa: gravada em JPG, uma imagem
+    /// translúcida sairia opaca do mesmo jeito.
+    pub fn with_opacity(&self, opacity: f32) -> RgbaImage {
+        let k = opacity.clamp(0.0, 1.0);
+        let mut pixels = self.pixels.clone();
+        for px in pixels.as_chunks_mut::<4>().0.iter_mut() {
+            px[3] = (px[3] as f32 * k).round().clamp(0.0, 255.0) as u8;
+        }
+        RgbaImage { width: self.width, height: self.height, pixels }
+    }
+
     /// Cola `src` com o canto superior esquerdo em `(dst_x, dst_y)`,
     /// recortando o que ficar fora (aceita offsets negativos).
     pub fn paste(&mut self, src: &RgbaImage, dst_x: i64, dst_y: i64) {
@@ -179,6 +192,43 @@ mod tests {
         let img = gradient(16, 16);
         let c = img.crop(12, 12, 100, 100);
         assert_eq!((c.width(), c.height()), (4, 4));
+    }
+
+    #[test]
+    fn opacidade_multiplica_o_alfa() {
+        let img = RgbaImage::filled(2, 2, [10, 20, 30, 200]);
+        let meio = img.with_opacity(0.5);
+        assert_eq!(meio.pixel(0, 0), [10, 20, 30, 100], "só o alfa muda");
+    }
+
+    #[test]
+    fn opacidade_cheia_nao_muda_nada() {
+        let img = RgbaImage::filled(2, 2, [10, 20, 30, 200]);
+        assert_eq!(img.with_opacity(1.0).pixel(0, 0), [10, 20, 30, 200]);
+    }
+
+    #[test]
+    fn opacidade_fora_da_faixa_e_limitada() {
+        let img = RgbaImage::filled(1, 1, [0, 0, 0, 255]);
+        assert_eq!(img.with_opacity(5.0).pixel(0, 0)[3], 255);
+        assert_eq!(img.with_opacity(-1.0).pixel(0, 0)[3], 0);
+    }
+
+    #[test]
+    fn redimensionar_mantem_a_proporcao_e_as_bordas() {
+        let img = gradient(64, 48);
+        let menor = img.resized(0.5);
+        assert_eq!((menor.width(), menor.height()), (32, 24));
+        // O alinhamento por centro de pixel preserva os cantos.
+        assert_eq!(menor.pixel(0, 0)[2], 7);
+    }
+
+    #[test]
+    fn redimensionar_por_fator_invalido_da_imagem_vazia() {
+        let img = gradient(8, 8);
+        for fator in [0.0, -2.0, f32::NAN] {
+            assert_eq!(img.resized(fator).width(), 0, "fator {fator}");
+        }
     }
 
     #[test]

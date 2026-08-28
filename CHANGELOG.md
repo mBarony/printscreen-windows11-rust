@@ -25,6 +25,13 @@ Histórico de versões do RustShot. Datas em 2026.
 - Uma prévia SVG da barra montada, gerável sob demanda por teste ignorado, no
   mesmo molde da que já existia para os ícones soltos: dá para julgar
   proporção e agrupamento sem GPU e sem Windows.
+- **Guias de alinhamento** no editor: `Alt+H` e `Alt+V` criam uma linha de
+  apoio onde o cursor está, `Alt+Shift+G` limpa todas. São só ajuda visual —
+  não entram no histórico nem na imagem exportada.
+- **Opacidade do arquivo salvo**, de 10% a 100%, por um campo na barra.
+  Abaixo de 100% a saída vai em PNG mesmo que a preferência seja outra: o JPG
+  não tem canal alfa e devolveria a imagem opaca, ignorando o pedido em
+  silêncio.
 - **Capturar tela cheia com 3 segundos de atraso**, pelo menu da bandeja —
   tempo de abrir um menu ou posicionar o cursor antes de a tela congelar.
 - **Repetir a última região**, também pelo menu, sem passar pelo overlay. O

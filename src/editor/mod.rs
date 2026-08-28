@@ -112,6 +112,15 @@ pub struct MoveDrag {
     pub travel: f32,
 }
 
+/// Linha de apoio para alinhar anotações a olho.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Guide {
+    /// `true` = atravessa a imagem na horizontal.
+    pub horizontal: bool,
+    /// Posição no eixo perpendicular, em px da imagem.
+    pub pos: f32,
+}
+
 /// Arrasto de uma alça de redimensionamento (ferramenta Mover).
 pub struct ResizeDrag {
     /// Índice da anotação em `doc.layers()`.
@@ -174,6 +183,15 @@ pub struct EditorSession {
     /// Enquanto houver evento chegando dentro da janela, o conjunto inteiro
     /// é um passo só de desfazer.
     pub edit_run_until: Option<f64>,
+    /// Guias de alinhamento, em px da imagem. São ajuda visual: não entram
+    /// no histórico nem na exportação.
+    /// Opacidade da imagem exportada, 0,1–1,0. Abaixo de 1 a saída é
+    /// forçada a PNG: o JPG não tem canal alfa.
+    pub opacity: f32,
+    pub guides: Vec<Guide>,
+    /// Último ponto do cursor sobre a imagem, em px — é onde uma guia nova
+    /// nasce. O atalho é tratado longe do canvas, que é quem sabe a posição.
+    pub guide_hint: Option<Point>,
     /// Região de recorte já desenhada, aguardando confirmação (issue #5),
     /// em px da imagem — `(canto superior-esquerdo, inferior-direito)`.
     pub crop_pending: Option<(Point, Point)>,
@@ -241,6 +259,9 @@ impl EditorSession {
             move_drag: None,
             resize_drag: None,
             edit_run_until: None,
+            opacity: 1.0,
+            guides: Vec::new(),
+            guide_hint: None,
             crop_pending: None,
             wheel_accum: 0.0,
             confirm_discard: false,

@@ -491,6 +491,25 @@ fn image_options(ui: &mut egui::Ui, session: &mut EditorSession) {
     }
     response.on_hover_text("Redimensionar a imagem inteira, com as anotações junto");
 
+    // --- Opacidade da exportação ---
+    let mut opacidade = session.opacity * 100.0;
+    if ui
+        .add(
+            egui::DragValue::new(&mut opacidade)
+                .range(10.0..=100.0)
+                .speed(1.0)
+                .suffix("% α")
+                .fixed_decimals(0),
+        )
+        .on_hover_text(
+            "Opacidade do arquivo salvo. Abaixo de 100% a saída vai em PNG, \
+             porque o JPG não tem canal alfa.",
+        )
+        .changed()
+    {
+        session.opacity = (opacidade / 100.0).clamp(0.1, 1.0);
+    }
+
     // --- Voltar ao enquadramento original ---
     if icon_button(ui, Icon::Crop, false, true)
         .on_hover_text("Desfazer os recortes e voltar ao enquadramento original")

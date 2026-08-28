@@ -245,10 +245,62 @@ pub fn set_text(text: &str) -> Result<()> {
     }
 }
 
+/// Texto da área de transferência, em UTF-8.
+///
+/// Serve para reconhecer o formato próprio das anotações copiadas; um texto
+/// qualquer também volta daqui, e é quem chama que decide se ele interessa.
+#[cfg(windows)]
+pub fn get_text() -> Result<String> {
+    use windows_sys::Win32::Foundation::GetLastError;
+    use windows_sys::Win32::System::DataExchange::{
+        CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
+    };
+    use windows_sys::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
+
+    const CF_UNICODETEXT: u32 = 13;
+
+    // SAFETY: mesma política do `get_image` — o handle continua sendo do
+    // sistema, e o clipboard fecha em qualquer caminho de saída.
+    unsafe {
+        if IsClipboardFormatAvailable(CF_UNICODETEXT) == 0 {
+            return Err(err!("não há texto na área de transferência"));
+        }
+        if OpenClipboard(std::ptr::null_mut()) == 0 {
+            return Err(err!("OpenClipboard falhou ({})", GetLastError()));
+        }
+        let result = (|| -> Result<String> {
+            let handle = GetClipboardData(CF_UNICODETEXT);
+            if handle.is_null() {
+                return Err(err!("GetClipboardData falhou ({})", GetLastError()));
+            }
+            let src = GlobalLock(handle) as *const u16;
+            if src.is_null() {
+                return Err(err!("GlobalLock falhou ({})", GetLastError()));
+            }
+            // `GlobalSize` conta bytes e inclui o terminador; a conversão
+            // para em qualquer caso ao encontrar o zero.
+            let unidades = GlobalSize(handle) / std::mem::size_of::<u16>();
+            let wide = std::slice::from_raw_parts(src, unidades);
+            let fim = wide.iter().position(|c| *c == 0).unwrap_or(wide.len());
+            let texto = String::from_utf16_lossy(&wide[..fim]);
+            GlobalUnlock(handle);
+            Ok(texto)
+        })();
+        CloseClipboard();
+        result
+    }
+}
+
 /// Fora do Windows não há área de transferência de imagem.
 #[cfg(not(windows))]
 #[allow(dead_code)]
 pub fn get_image() -> Result<RgbaImage> {
+    Err(err!("área de transferência disponível apenas no Windows"))
+}
+
+#[cfg(not(windows))]
+#[allow(dead_code)]
+pub fn get_text() -> Result<String> {
     Err(err!("área de transferência disponível apenas no Windows"))
 }
 

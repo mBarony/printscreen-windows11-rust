@@ -30,6 +30,8 @@ const MAX_OPS: usize = 100;
 pub enum Op {
     /// Cria uma anotação.
     Annotate(Layer),
+    /// Cria várias de uma vez — uma colagem é um gesto só.
+    AnnotateMany(Vec<Layer>),
     /// Substitui anotações existentes (mover, redimensionar, trocar estilo),
     /// casadas por `id`.
     Patch(Vec<Layer>),
@@ -152,6 +154,7 @@ pub struct Document {
 fn apply(op: &Op, image: &mut Arc<RgbaImage>, layers: &mut Vec<Layer>) {
     match op {
         Op::Annotate(layer) => layers.push(layer.clone()),
+        Op::AnnotateMany(novas) => layers.extend(novas.iter().cloned()),
         Op::Patch(updated) => {
             for patch in updated {
                 if let Some(slot) = layers.iter_mut().find(|l| l.id == patch.id) {
@@ -437,6 +440,35 @@ impl Document {
         Some(self.push(shape, style))
     }
 
+    /// Insere anotações vindas de fora (a área de transferência), dando a
+    /// cada uma um id novo e devolvendo-os na ordem.
+    ///
+    /// Entram como **uma operação só**: colar cinco anotações é um gesto do
+    /// usuário, e desfazer tem de devolver o gesto inteiro, não uma quinta
+    /// parte dele.
+    pub fn paste(&mut self, layers: Vec<Layer>) -> Vec<u64> {
+        if layers.is_empty() {
+            return Vec::new();
+        }
+        let novas: Vec<Layer> = layers
+            .into_iter()
+            .map(|mut layer| {
+                layer.id = self.next_id;
+                self.next_id += 1;
+                // Uma redação colada não pode repetir o mosaico da original:
+                // dois mosaicos idênticos denunciam que escondem a mesma
+                // coisa. É a mesma regra da cópia.
+                if let Shape::Redaction { seed, .. } = &mut layer.shape {
+                    *seed = redact::fresh_seed();
+                }
+                layer
+            })
+            .collect();
+        let ids = novas.iter().map(|l| l.id).collect();
+        self.commit(Op::AnnotateMany(novas));
+        ids
+    }
+
     /// Remove uma faixa da imagem e junta o que sobrou.
     pub fn cut(&mut self, band: Band) {
         self.commit(Op::Cut(band));
@@ -693,6 +725,58 @@ mod tests {
             }
             _ => panic!("continua sendo retângulo"),
         }
+    }
+
+    #[test]
+    fn colar_entra_como_um_passo_so_e_com_ids_novos() {
+        let mut d = doc();
+        let existente = d.push(rect(10.0, 10.0), style());
+        let vindas = vec![
+            Layer { id: existente, shape: rect(50.0, 50.0), style: style() },
+            Layer { id: existente, shape: rect(70.0, 70.0), style: style() },
+        ];
+        let ids = d.paste(vindas);
+
+        assert_eq!(ids.len(), 2);
+        assert_eq!(d.layers().len(), 3);
+        // Ids colidindo com o que já existe fariam o patch e o delete
+        // acertarem a anotação errada.
+        assert!(ids.iter().all(|id| *id != existente), "ids repetidos: {ids:?}");
+        assert_ne!(ids[0], ids[1]);
+
+        // Um gesto do usuário, um passo de desfazer.
+        d.undo();
+        assert_eq!(d.layers().len(), 1, "colar tem de desfazer inteiro");
+        d.redo();
+        assert_eq!(d.layers().len(), 3);
+    }
+
+    #[test]
+    fn colar_uma_redacao_renova_o_mosaico() {
+        // Dois mosaicos idênticos denunciam que escondem a mesma coisa — a
+        // mesma regra que já vale para a cópia.
+        let mut d = doc();
+        let original = Layer {
+            id: 99,
+            shape: Shape::Redaction {
+                min: Point::new(1.0, 1.0),
+                max: Point::new(20.0, 20.0),
+                seed: 4242,
+            },
+            style: style(),
+        };
+        d.paste(vec![original]);
+        match d.layers()[0].shape {
+            Shape::Redaction { seed, .. } => assert_ne!(seed, 4242),
+            _ => panic!("continua sendo redação"),
+        }
+    }
+
+    #[test]
+    fn colar_nada_nao_mexe_no_historico() {
+        let mut d = doc();
+        assert!(d.paste(Vec::new()).is_empty());
+        assert!(!d.can_undo(), "uma colagem vazia não é um passo");
     }
 
     #[test]

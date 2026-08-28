@@ -38,6 +38,22 @@ pub(super) fn handle_layer_keys(ctx: &egui::Context, session: &mut EditorSession
         return;
     }
 
+    // Colar não depende de seleção — é justamente o atalho de quem chegou
+    // numa captura nova com anotações copiadas de outra.
+    if ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::V)) {
+        paste_layers(session);
+        return;
+    }
+
+    // Copiar anotações é `Ctrl+Shift+C`, e não `Ctrl+C`: o `Ctrl+C` do editor
+    // copia a imagem inteira e fecha a janela, e trocar o significado dele
+    // conforme houvesse ou não seleção transformaria a ação de sair num
+    // sorteio.
+    if ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::C)) {
+        copy_layers(session);
+        return;
+    }
+
     // Guias não dependem de seleção, então vêm antes da guarda. `Alt+H` e
     // `Alt+V` criam no cursor; `Alt+Shift+G` limpa todas.
     if let Some(guia) = ctx.input_mut(|i| {
@@ -218,6 +234,50 @@ pub(super) fn selected_shape_takes_fill(session: &EditorSession) -> bool {
         .is_some_and(|layer| {
             matches!(layer.shape, Shape::Rect { .. } | Shape::Ellipse { .. })
         })
+}
+
+/// Põe a seleção na área de transferência, no formato próprio de anotações.
+fn copy_layers(session: &mut EditorSession) {
+    let escolhidas: Vec<_> = session
+        .selection
+        .iter()
+        .filter_map(|i| session.doc.layers().get(*i).cloned())
+        .collect();
+    if escolhidas.is_empty() {
+        return;
+    }
+    let quantas = escolhidas.len();
+    let texto = crate::editor::clip::encode(&escolhidas);
+    match crate::clipboard::copy_text(&texto) {
+        Ok(()) => log::info!("{quantas} anotações copiadas"),
+        Err(error) => log::warn!("falha ao copiar anotações: {error}"),
+    }
+}
+
+/// Cola as anotações da área de transferência, se houver alguma lá.
+///
+/// Elas entram **nas mesmas coordenadas** em que foram copiadas: o uso que
+/// justifica a feature é anotar duas capturas do mesmo lugar da tela, e um
+/// deslocamento automático estragaria justamente isso. Como saem
+/// selecionadas, arrastá-las é um gesto só quando o destino é a mesma imagem.
+fn paste_layers(session: &mut EditorSession) {
+    let Some(texto) = crate::clipboard::read_text() else {
+        return;
+    };
+    let Some(layers) = crate::editor::clip::decode(&texto) else {
+        return;
+    };
+    let quantas = layers.len();
+    let antes = session.doc.layers().len();
+    if session.doc.paste(layers).is_empty() {
+        return;
+    }
+    // A colagem vira a seleção, e a ferramenta passa a ser a de mover: é o
+    // que permite arrastá-las para o lugar sem procurar o botão antes.
+    session.tool = crate::editor::shapes::Tool::Select;
+    session.selection = (antes..antes + quantas).collect();
+    session.selected = Some(antes + quantas - 1);
+    log::info!("{quantas} anotações coladas");
 }
 
 /// A anotação selecionada deixa um traço ao longo de um caminho? É onde

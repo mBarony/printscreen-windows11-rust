@@ -14,13 +14,13 @@ no arquivo da feature é a fonte da verdade; esta página é o resumo.
 
 | Plataforma | Total | Falta | Parcial | Concluído | Em aberto |
 |---|---:|---:|---:|---:|---:|
-| Núcleo (vale para as três plataformas) | 26 | 7 | 0 | 19 | 0 |
+| Núcleo (vale para as três plataformas) | 26 | 6 | 0 | 20 | 0 |
 | Windows | 7 | 5 | 0 | 2 | 0 |
 | Linux (Hyprland + Wayland) | 12 | 11 | 0 | 0 | 1 |
 | macOS | 13 | 13 | 0 | 0 | 0 |
-| **Total** | **58** | **36** | **0** | **21** | **1** |
+| **Total** | **58** | **35** | **0** | **22** | **1** |
 
-Progresso: **21 de 58** (36%).
+Progresso: **22 de 58** (38%).
 
 ---
 
@@ -28,7 +28,7 @@ Progresso: **21 de 58** (36%).
 
 - [x] **[Captura com atraso](nucleo/captura-com-atraso.md)** · P
 - [ ] **[Colar imagem sobre a captura](nucleo/colar-imagem.md)** · M
-- [ ] **[Copiar e colar anotações](nucleo/copiar-colar-anotacoes.md)** · M
+- [x] **[Copiar e colar anotações](nucleo/copiar-colar-anotacoes.md)** · M
 - [x] **[Cor do texto sob o cursor](nucleo/cor-do-texto.md)** · P
 - [x] **[Cor média de uma área](nucleo/cor-media-de-area.md)** · P
 - [x] **[Desfazer o recorte](nucleo/desfazer-recorte.md)** · P
@@ -137,3 +137,4 @@ Itens que não são bloqueados por trabalho, e sim por uma escolha:
 | 28/08/2026 | Estilos de linha (tracejado e pontilhado) e régua de tela |
 | 28/08/2026 | Salvar e copiar automáticos, por fluxo de captura |
 | 28/08/2026 | Estilo desenhado à mão |
+| 28/08/2026 | Copiar e colar anotações entre capturas |

@@ -18,7 +18,7 @@ Portáteis: uma implementação serve às três plataformas. É onde mora a maio
 | [Colar imagem sobre a captura](colar-imagem.md) | falta | M |
 | [Duplicar arrastando](duplicar-arrastando.md) | falta | P |
 | [Mover o objeto durante o desenho](mover-durante-desenho.md) | falta | P |
-| [Copiar e colar anotações](copiar-colar-anotacoes.md) | falta | M |
+| [Copiar e colar anotações](copiar-colar-anotacoes.md) | feito | M |
 | [Seleção quadrada](selecao-quadrada.md) | falta | P |
 | [Redimensionar a captura](redimensionar-captura.md) | falta | P |
 | [Desfazer o recorte](desfazer-recorte.md) | falta | P |

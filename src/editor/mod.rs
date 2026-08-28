@@ -5,6 +5,7 @@
 //! (rasterização final para exportação).
 
 pub mod backdrop;
+pub mod clip;
 pub mod cut;
 pub mod dash;
 pub mod document;

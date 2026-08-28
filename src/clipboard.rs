@@ -42,10 +42,22 @@ pub fn copy_image(image: &RgbaImage) -> Result<()> {
     ))
 }
 
+/// Texto da área de transferência, ou `None` se não houver nenhum.
+///
+/// Sem repetição: quem lê está respondendo a uma tecla, e insistir por 300 ms
+/// travaria o quadro. Não haver texto é o caso comum, não é erro.
+pub fn read_text() -> Option<String> {
+    match platform::clipboard::get_text() {
+        Ok(texto) => Some(texto),
+        Err(error) => {
+            log::debug!("sem texto na área de transferência: {error}");
+            None
+        }
+    }
+}
+
 /// Copia texto para a área de transferência, com a mesma política de
 /// repetição da imagem — quem trava o clipboard trava para os dois formatos.
-// Só o OCR usa texto; sem a feature o programa não copia texto nenhum.
-#[cfg_attr(not(feature = "ocr"), allow(dead_code))]
 pub fn copy_text(text: &str) -> Result<()> {
     let mut last_err = None;
     for attempt in 1..=ATTEMPTS {

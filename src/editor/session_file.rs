@@ -324,7 +324,7 @@ fn decode_shape(v: &Value) -> Option<Shape> {
     }
 }
 
-fn encode_layer(layer: &Layer) -> Value {
+pub(super) fn encode_layer(layer: &Layer) -> Value {
     json::obj(vec![
         ("id", json::n(layer.id as f64)),
         ("shape", encode_shape(&layer.shape)),
@@ -332,7 +332,7 @@ fn encode_layer(layer: &Layer) -> Value {
     ])
 }
 
-fn decode_layer(v: &Value) -> Option<Layer> {
+pub(super) fn decode_layer(v: &Value) -> Option<Layer> {
     Some(Layer {
         id: v.get("id")?.as_f64()? as u64,
         shape: decode_shape(v.get("shape")?)?,
@@ -345,6 +345,10 @@ fn encode_op(op: &Op) -> Value {
         Op::Annotate(layer) => {
             json::obj(vec![("op", json::s("annotate")), ("layer", encode_layer(layer))])
         }
+        Op::AnnotateMany(layers) => json::obj(vec![
+            ("op", json::s("annotate_many")),
+            ("layers", json::arr(layers.iter().map(encode_layer).collect())),
+        ]),
         Op::Patch(layers) => json::obj(vec![
             ("op", json::s("patch")),
             ("layers", json::arr(layers.iter().map(encode_layer).collect())),
@@ -396,6 +400,13 @@ fn decode_op(v: &Value) -> Option<Op> {
     let number = |key: &str| v.get(key).and_then(Value::as_f64).unwrap_or(0.0) as u32;
     match v.get("op")?.as_str()? {
         "annotate" => Some(Op::Annotate(decode_layer(v.get("layer")?)?)),
+        "annotate_many" => Some(Op::AnnotateMany(
+            v.get("layers")?
+                .as_array()?
+                .iter()
+                .map(decode_layer)
+                .collect::<Option<Vec<Layer>>>()?,
+        )),
         "patch" => Some(Op::Patch(
             v.get("layers")?
                 .as_array()?
@@ -507,6 +518,7 @@ mod tests {
         let layer = Layer { id: 3, shape: every_shape()[0].clone(), style: style() };
         let ops = vec![
             Op::Annotate(layer.clone()),
+            Op::AnnotateMany(vec![layer.clone(), layer.clone()]),
             Op::Patch(vec![layer]),
             Op::Delete(vec![1, 2, 3]),
             Op::Crop { x: 1, y: 2, w: 3, h: 4 },

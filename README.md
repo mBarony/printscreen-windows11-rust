@@ -46,7 +46,7 @@ seleção na tela.
 
 ### Reconhecimento de texto
 
-Usa o motor do próprio Windows (`Windows.Media.Ocr`), o mesmo da Ferramenta de Captura: num Windows 11 não há nada a instalar. São três portas de entrada, e as duas primeiras copiam o texto para a área de transferência com as quebras de linha, mostrando um aviso no alto da tela para recopiá-lo emendado numa linha só:
+Usa o motor do próprio Windows (`Windows.Media.Ocr`), o mesmo da Ferramenta de Captura: num Windows 11 não há nada a instalar. São três portas de entrada, e as duas primeiras copiam o texto para a área de transferência com as quebras de linha — e com as colunas, quando o que foi reconhecido é uma tabela, mostrando um aviso no alto da tela para recopiá-lo emendado numa linha só:
 
 - **`Ctrl+Alt+PrtScr`** — arraste sobre um texto na tela; nenhuma janela se abre.
 - **Botão na barra do editor** — reconhece o texto da imagem que está aberta.

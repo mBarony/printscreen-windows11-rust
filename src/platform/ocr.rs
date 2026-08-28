@@ -24,8 +24,9 @@ use crate::error::Result;
 use crate::imgbuf::RgbaImage;
 
 /// Uma palavra reconhecida e onde ela está, em px da imagem entregue ao OCR.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TextBox {
+    pub text: String,
     pub x: f32,
     pub y: f32,
     pub w: f32,
@@ -158,7 +159,28 @@ mod imp {
 
     /// Reconhece o texto da imagem. **Bloqueia** — só chame de thread de
     /// trabalho.
+    ///
+    /// O texto sai montado por [`crate::ocr_layout`], que preserva as quebras
+    /// de linha e, quando o conteúdo é tabular, também as colunas.
+    /// `OcrResult::Text` devolveria tudo numa linha só.
     pub fn recognize(image: &RgbaImage, language: Option<&str>) -> Result<String> {
+        let lines = recognize_words(image, language)?;
+        let text = crate::ocr_layout::compose(&lines);
+        if text.trim().is_empty() {
+            return Err(err!("nenhum texto reconhecido na imagem"));
+        }
+        Ok(text)
+    }
+
+    /// As palavras reconhecidas, agrupadas nas linhas em que o motor as viu.
+    ///
+    /// As caixas voltam em px **da imagem recebida**: o motor trabalha sobre
+    /// uma cópia ampliada (ver `UPSCALE`), e a divisão acontece aqui para
+    /// quem chama pensar na imagem que entregou.
+    pub fn recognize_words(
+        image: &RgbaImage,
+        language: Option<&str>,
+    ) -> Result<Vec<Vec<TextBox>>> {
         if image.width() == 0 || image.height() == 0 {
             return Err(err!("imagem vazia"));
         }
@@ -186,73 +208,34 @@ mod imp {
             .get()
             .map_err(|e| err!("OCR não concluiu: {e}"))?;
 
-        // `OcrResult::Text` devolve tudo numa linha só. Percorrer as linhas
-        // preserva as quebras, que é o que faz o texto colado continuar
-        // legível.
         let lines = result.Lines().map_err(|e| err!("OCR sem linhas: {e}"))?;
-        let mut text = String::new();
-        for line in lines {
-            if let Ok(content) = line.Text() {
-                if !text.is_empty() {
-                    text.push('\n');
-                }
-                text.push_str(&content.to_string_lossy());
-            }
-        }
-        if text.trim().is_empty() {
-            return Err(err!("nenhum texto reconhecido na imagem"));
-        }
-        Ok(text)
-    }
-
-    /// Onde estão as palavras reconhecidas, em px **da imagem recebida**.
-    ///
-    /// O motor trabalha sobre uma cópia ampliada (ver `UPSCALE`), então as
-    /// caixas voltam divididas pela ampliação — quem chama pensa na imagem
-    /// que entregou, não na que o WinRT viu.
-    ///
-    /// **Bloqueia**, como o `recognize`: só chame de thread de trabalho.
-    pub fn recognize_boxes(image: &RgbaImage, language: Option<&str>) -> Result<Vec<TextBox>> {
-        if image.width() == 0 || image.height() == 0 {
-            return Err(err!("imagem vazia"));
-        }
-        let limit = max_dimension();
-        if image.width() > limit || image.height() > limit {
-            return Err(err!(
-                "imagem grande demais para o OCR ({}×{}; o limite é {limit} px por lado)",
-                image.width(),
-                image.height()
-            ));
-        }
-        let scale = if (image.width().max(image.height()) as f32 * UPSCALE) <= limit as f32 {
-            UPSCALE
-        } else {
-            1.0
-        };
-
-        let engine = engine(language)?;
-        let bitmap = software_bitmap(image, scale)?;
-        let result = engine
-            .RecognizeAsync(&bitmap)
-            .map_err(|e| err!("OCR falhou: {e}"))?
-            .get()
-            .map_err(|e| err!("OCR não concluiu: {e}"))?;
-
-        let lines = result.Lines().map_err(|e| err!("OCR sem linhas: {e}"))?;
-        let mut caixas = Vec::new();
+        let mut out = Vec::new();
         for line in lines {
             let Ok(words) = line.Words() else { continue };
+            let mut linha = Vec::new();
             for word in words {
                 let Ok(r) = word.BoundingRect() else { continue };
-                caixas.push(TextBox {
+                let texto = word
+                    .Text()
+                    .map(|t| t.to_string_lossy())
+                    .unwrap_or_default();
+                linha.push(TextBox {
+                    text: texto,
                     x: r.X / scale,
                     y: r.Y / scale,
                     w: r.Width / scale,
                     h: r.Height / scale,
                 });
             }
+            out.push(linha);
         }
-        Ok(caixas)
+        Ok(out)
+    }
+
+    /// Só onde estão as palavras, sem o agrupamento em linhas — é o que a
+    /// redação por palavra precisa.
+    pub fn recognize_boxes(image: &RgbaImage, language: Option<&str>) -> Result<Vec<TextBox>> {
+        Ok(recognize_words(image, language)?.into_iter().flatten().collect())
     }
 
     /// Idiomas com pacote de OCR instalado, em etiquetas BCP-47.
@@ -269,7 +252,7 @@ mod imp {
 
 #[cfg(windows)]
 #[allow(unused_imports)]
-pub use imp::{available_languages, recognize, recognize_boxes};
+pub use imp::{available_languages, recognize, recognize_boxes, recognize_words};
 
 /// Fora do Windows não há motor de OCR do sistema.
 #[cfg(not(windows))]

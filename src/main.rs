@@ -34,6 +34,7 @@ mod jpeg;
 mod last_region;
 mod json;
 mod notify;
+mod ocr_layout;
 mod ocr_popup;
 mod overlay;
 mod pinned;

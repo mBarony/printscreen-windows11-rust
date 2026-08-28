@@ -339,6 +339,10 @@ fn encode_op(op: &Op) -> Value {
             ("start", json::n(band.start as f64)),
             ("end", json::n(band.end as f64)),
         ]),
+        Op::Scale(factor) => json::obj(vec![
+            ("op", json::s("scale")),
+            ("factor", json::n(*factor as f64)),
+        ]),
         Op::Backdrop(style) => json::obj(vec![
             ("op", json::s("backdrop")),
             (
@@ -387,6 +391,7 @@ fn decode_op(v: &Value) -> Option<Op> {
             start: number("start"),
             end: number("end"),
         })),
+        "scale" => Some(Op::Scale(v.get("factor")?.as_f64()? as f32)),
         "backdrop" => Some(Op::Backdrop(match v.get("style")?.as_str()? {
             "aurora" => BackdropStyle::Aurora,
             "sunset" => BackdropStyle::Sunset,

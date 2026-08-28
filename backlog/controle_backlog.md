@@ -14,13 +14,13 @@ no arquivo da feature é a fonte da verdade; esta página é o resumo.
 
 | Plataforma | Total | Falta | Parcial | Concluído | Em aberto |
 |---|---:|---:|---:|---:|---:|
-| Núcleo (vale para as três plataformas) | 26 | 17 | 1 | 8 | 0 |
+| Núcleo (vale para as três plataformas) | 26 | 15 | 1 | 10 | 0 |
 | Windows | 7 | 5 | 0 | 2 | 0 |
 | Linux (Hyprland + Wayland) | 12 | 11 | 0 | 0 | 1 |
 | macOS | 13 | 13 | 0 | 0 | 0 |
-| **Total** | **58** | **46** | **1** | **10** | **1** |
+| **Total** | **58** | **44** | **1** | **12** | **1** |
 
-Progresso: **10 de 58** (17%).
+Progresso: **12 de 58** (21%).
 
 ---
 
@@ -31,7 +31,7 @@ Progresso: **10 de 58** (17%).
 - [ ] **[Copiar e colar anotações](nucleo/copiar-colar-anotacoes.md)** · M
 - [x] **[Cor do texto sob o cursor](nucleo/cor-do-texto.md)** · P
 - [x] **[Cor média de uma área](nucleo/cor-media-de-area.md)** · P
-- [ ] **[Desfazer o recorte](nucleo/desfazer-recorte.md)** · P
+- [x] **[Desfazer o recorte](nucleo/desfazer-recorte.md)** · P
 - [x] **[Duplicar arrastando](nucleo/duplicar-arrastando.md)** · P
 - [ ] **[Estilo desenhado à mão](nucleo/estilo-desenhado-a-mao.md)** · M
 - [~] **[Estilos de linha](nucleo/estilos-de-linha.md)** · M — _parcial_
@@ -43,7 +43,7 @@ Progresso: **10 de 58** (17%).
 - [x] **[Mover o objeto durante o desenho](nucleo/mover-durante-desenho.md)** · P
 - [ ] **[Ocultar só o texto](nucleo/ocultar-so-o-texto.md)** · M
 - [ ] **[Reconstruir colunas no OCR](nucleo/reconstruir-colunas.md)** · G
-- [ ] **[Redimensionar a captura](nucleo/redimensionar-captura.md)** · P
+- [x] **[Redimensionar a captura](nucleo/redimensionar-captura.md)** · P
 - [ ] **[Régua de tela](nucleo/regua-de-tela.md)** · M
 - [ ] **[Remover objeto](nucleo/remover-objeto.md)** · G
 - [ ] **[Repetir a última região](nucleo/repetir-ultima-regiao.md)** · P
@@ -130,3 +130,4 @@ Itens que não são bloqueados por trabalho, e sim por uma escolha:
 | 27/08/2026 | Lote de cor: média de área, cor do texto e OKLCH/APCA |
 | 27/08/2026 | `nucleo/leitura-de-qr-code` reestimado de M para G (sem como testar) |
 | 28/08/2026 | Lote de manipulação: seleção quadrada, seta reversível, Alt+arrasto e Espaço |
+| 28/08/2026 | Redimensionar a captura e desfazer o recorte |

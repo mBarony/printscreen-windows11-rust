@@ -621,6 +621,45 @@ impl Shape {
             Self::Text { anchor, .. } => mv(anchor),
         }
     }
+
+    /// Multiplica a geometria pelo fator — o par do redimensionamento da
+    /// imagem inteira.
+    ///
+    /// Os raios acompanham junto das posições: uma elipse que não escalasse
+    /// os raios viraria outra forma ao redimensionar a captura.
+    pub fn scale(&mut self, k: f32) {
+        let sc = |p: &mut Point| {
+            p.x *= k;
+            p.y *= k;
+        };
+        match self {
+            Self::Line { a, b } | Self::Arrow { a, b } => {
+                sc(a);
+                sc(b);
+            }
+            Self::Rect { min, max } => {
+                sc(min);
+                sc(max);
+            }
+            Self::Ellipse { center, rx, ry } => {
+                sc(center);
+                *rx *= k;
+                *ry *= k;
+            }
+            Self::Freehand { points, .. } => points.iter_mut().for_each(sc),
+            Self::Marker { center, .. } => sc(center),
+            Self::Redaction { min, max, .. } => {
+                sc(min);
+                sc(max);
+            }
+            Self::Spotlight { center, rx, ry } => {
+                sc(center);
+                *rx *= k;
+                *ry *= k;
+            }
+            Self::Text { anchor, .. } => sc(anchor),
+        }
+    }
 }
 
 fn dist(p: Point, q: Point) -> f32 {

@@ -41,6 +41,8 @@ pub enum Op {
     Cut(Band),
     /// Troca a moldura decorativa.
     Backdrop(BackdropStyle),
+    /// Redimensiona a imagem inteira, levando as anotações junto.
+    Scale(f32),
 }
 
 /// Uma redação aplicada, na forma que o replay compara para decidir se os
@@ -101,6 +103,7 @@ struct Baseline {
 enum Reframe {
     Crop(u32, u32, u32, u32),
     Cut(Band),
+    Scale(u32),
 }
 
 pub struct Document {
@@ -167,6 +170,12 @@ fn apply(op: &Op, image: &mut Arc<RgbaImage>, layers: &mut Vec<Layer>) {
             *image = Arc::new(cut::remove_band(image, *band));
             for layer in layers.iter_mut() {
                 layer.shape.shift_for_cut(*band);
+            }
+        }
+        Op::Scale(factor) => {
+            *image = Arc::new(image.resized(*factor));
+            for layer in layers.iter_mut() {
+                layer.shape.scale(*factor);
             }
         }
         // A moldura não mexe na imagem: é montada em volta, no fim.
@@ -290,6 +299,7 @@ impl Document {
             match op {
                 Op::Crop { x, y, w, h } => crops.push(Reframe::Crop(*x, *y, *w, *h)),
                 Op::Cut(band) => crops.push(Reframe::Cut(*band)),
+                Op::Scale(f) => crops.push(Reframe::Scale(f.to_bits())),
                 _ => {}
             }
             apply(op, &mut image, &mut layers);
@@ -366,6 +376,7 @@ impl Document {
             match oldest {
                 Op::Crop { x, y, w, h } => self.baseline.crops.push(Reframe::Crop(x, y, w, h)),
                 Op::Cut(band) => self.baseline.crops.push(Reframe::Cut(band)),
+                Op::Scale(f) => self.baseline.crops.push(Reframe::Scale(f.to_bits())),
                 _ => {}
             }
             apply(&oldest, &mut self.baseline.image, &mut self.baseline.layers);
@@ -459,6 +470,36 @@ impl Document {
         if let Some(layer) = self.layers.get_mut(index) {
             layer.resize(handle, to, constrain);
         }
+    }
+
+    /// Redimensiona a imagem inteira pelo fator dado.
+    pub fn scale(&mut self, factor: f32) {
+        if !factor.is_finite() || factor <= 0.0 || (factor - 1.0).abs() < f32::EPSILON {
+            return;
+        }
+        self.commit(Op::Scale(factor));
+    }
+
+    /// Desfaz os recortes, voltando ao enquadramento de origem.
+    ///
+    /// Devolve `false` quando não há o que desfazer — inclusive quando o
+    /// recorte já foi consolidado na imagem de partida pelo teto do
+    /// histórico, caso em que ele deixou de ser reversível.
+    pub fn reset_crop(&mut self) -> bool {
+        let tinha = self.ops[..self.index]
+            .iter()
+            .any(|op| matches!(op, Op::Crop { .. }));
+        if !tinha {
+            return false;
+        }
+        // Descarta também o "refazer" pendente: reconstruir o log sem os
+        // recortes deixaria as operações à frente apontando para um
+        // enquadramento que não existe mais.
+        self.ops.truncate(self.index);
+        self.ops.retain(|op| !matches!(op, Op::Crop { .. }));
+        self.index = self.ops.len();
+        self.replay();
+        true
     }
 
     /// Inverte de que lado da seta fica a ponta. `false` quando a anotação
@@ -631,6 +672,85 @@ mod tests {
         assert_eq!(d.layers().len(), 2);
         let (a, b) = (&d.layers()[0], &d.layers()[1]);
         assert_eq!(a.bbox().map(|(p, _)| p.x), b.bbox().map(|(p, _)| p.x));
+    }
+
+    #[test]
+    fn escalar_muda_a_imagem_e_leva_as_anotacoes() {
+        let mut d = doc(); // 64x48
+        d.push(
+            Shape::Rect { min: Point::new(10.0, 10.0), max: Point::new(30.0, 20.0) },
+            style(),
+        );
+        d.scale(0.5);
+        assert_eq!(d.content_image().width(), 32);
+        assert_eq!(d.content_image().height(), 24);
+        match d.layers()[0].shape {
+            Shape::Rect { min, max } => {
+                assert!((min.x - 5.0).abs() < 0.01);
+                assert!((max.x - 15.0).abs() < 0.01);
+            }
+            _ => panic!("continua sendo retângulo"),
+        }
+    }
+
+    #[test]
+    fn escalar_e_desfeito_pelo_historico() {
+        let mut d = doc();
+        d.scale(2.0);
+        assert_eq!(d.content_image().width(), 128);
+        d.undo();
+        assert_eq!(d.content_image().width(), 64);
+    }
+
+    #[test]
+    fn escalar_por_um_fator_invalido_nao_faz_nada() {
+        let mut d = doc();
+        for fator in [0.0, -1.0, f32::NAN, 1.0] {
+            d.scale(fator);
+        }
+        assert_eq!(d.content_image().width(), 64);
+        assert!(!d.can_undo(), "nada disso deveria entrar no histórico");
+    }
+
+    #[test]
+    fn desfazer_o_recorte_volta_ao_enquadramento_e_as_posicoes() {
+        let mut d = doc(); // 64x48
+        d.push(
+            Shape::Rect { min: Point::new(30.0, 20.0), max: Point::new(40.0, 30.0) },
+            style(),
+        );
+        d.crop(10, 10, 40, 30);
+        assert_eq!(d.content_image().width(), 40);
+
+        assert!(d.reset_crop());
+        assert_eq!(d.content_image().width(), 64);
+        assert_eq!(d.content_image().height(), 48);
+        // A anotação volta para onde estava antes do recorte.
+        match d.layers()[0].shape {
+            Shape::Rect { min, .. } => {
+                assert!((min.x - 30.0).abs() < 0.01, "veio {}", min.x);
+                assert!((min.y - 20.0).abs() < 0.01);
+            }
+            _ => panic!("continua sendo retângulo"),
+        }
+    }
+
+    #[test]
+    fn desfazer_o_recorte_sem_recorte_nao_faz_nada() {
+        let mut d = doc();
+        d.push(line(), style());
+        assert!(!d.reset_crop());
+        assert_eq!(d.layers().len(), 1, "a anotação continua lá");
+    }
+
+    #[test]
+    fn desfazer_o_recorte_preserva_as_outras_operacoes() {
+        let mut d = doc();
+        d.push(line(), style());
+        d.crop(5, 5, 40, 30);
+        d.push(line(), style());
+        assert!(d.reset_crop());
+        assert_eq!(d.layers().len(), 2, "as duas anotações sobrevivem");
     }
 
     fn line() -> Shape {

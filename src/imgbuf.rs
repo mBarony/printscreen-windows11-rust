@@ -77,6 +77,42 @@ impl RgbaImage {
         RgbaImage { width: w, height: h, pixels }
     }
 
+    /// Reamostra por interpolação bilinear pelo fator dado.
+    ///
+    /// O alinhamento é por centro de pixel (`+0.5`), e não por canto: sem
+    /// isso a imagem escorrega meio pixel para o canto superior esquerdo a
+    /// cada redimensionamento, o que aparece depois de dois ou três.
+    pub fn resized(&self, scale: f32) -> RgbaImage {
+        let (sw, sh) = (self.width, self.height);
+        if sw == 0 || sh == 0 || !scale.is_finite() || scale <= 0.0 {
+            return RgbaImage::from_raw(0, 0, Vec::new());
+        }
+        let dw = ((sw as f32 * scale).round() as u32).max(1);
+        let dh = ((sh as f32 * scale).round() as u32).max(1);
+        let mut out = Vec::with_capacity(dw as usize * dh as usize * 4);
+
+        for y in 0..dh {
+            let fy = ((y as f32 + 0.5) / scale - 0.5).clamp(0.0, (sh - 1) as f32);
+            let (y0, ty) = (fy.floor() as u32, fy - fy.floor());
+            let y1 = (y0 + 1).min(sh - 1);
+            for x in 0..dw {
+                let fx = ((x as f32 + 0.5) / scale - 0.5).clamp(0.0, (sw - 1) as f32);
+                let (x0, tx) = (fx.floor() as u32, fx - fx.floor());
+                let x1 = (x0 + 1).min(sw - 1);
+                let (p00, p10) = (self.pixel(x0, y0), self.pixel(x1, y0));
+                let (p01, p11) = (self.pixel(x0, y1), self.pixel(x1, y1));
+                let mut px = [0u8; 4];
+                for (c, slot) in px.iter_mut().enumerate() {
+                    let top = p00[c] as f32 * (1.0 - tx) + p10[c] as f32 * tx;
+                    let bottom = p01[c] as f32 * (1.0 - tx) + p11[c] as f32 * tx;
+                    *slot = (top * (1.0 - ty) + bottom * ty).round().clamp(0.0, 255.0) as u8;
+                }
+                out.extend_from_slice(&px);
+            }
+        }
+        RgbaImage { width: dw, height: dh, pixels: out }
+    }
+
     /// Cola `src` com o canto superior esquerdo em `(dst_x, dst_y)`,
     /// recortando o que ficar fora (aceita offsets negativos).
     pub fn paste(&mut self, src: &RgbaImage, dst_x: i64, dst_y: i64) {

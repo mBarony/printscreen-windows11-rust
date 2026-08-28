@@ -25,6 +25,14 @@ Histórico de versões do RustShot. Datas em 2026.
 - Uma prévia SVG da barra montada, gerável sob demanda por teste ignorado, no
   mesmo molde da que já existia para os ícones soltos: dá para julgar
   proporção e agrupamento sem GPU e sem Windows.
+- **Redimensionar a captura inteira**, por um campo de porcentagem na barra
+  do editor. As anotações acompanham, raios inclusive — uma elipse que
+  escalasse só o centro viraria outra forma. É uma operação do histórico como
+  as outras, então desfaz.
+- **Desfazer os recortes** e voltar ao enquadramento original sem perder o
+  resto do trabalho. Um recorte já consolidado pelo teto do histórico (100
+  operações) não volta: ele deixou de ser reversível quando foi assado na
+  imagem de partida.
 - **`Shift` trava a seleção num quadrado** durante o arrasto no overlay,
   como o editor já fazia nas formas.
 - **`Alt`+arrasto duplica a anotação** em vez de movê-la: a cópia nasce por

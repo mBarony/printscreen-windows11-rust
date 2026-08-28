@@ -472,6 +472,33 @@ fn tool_options(ctx: &egui::Context, ui: &mut egui::Ui, session: &mut EditorSess
 
 /// O que age sobre a imagem inteira, e não sobre uma anotação.
 fn image_options(ui: &mut egui::Ui, session: &mut EditorSession) {
+    // --- Tamanho da imagem inteira ---
+    //
+    // Em porcentagem, arrastável: escalar é uma decisão de "quanto", não de
+    // "mais um passo", e um campo diz melhor onde se está do que dois botões.
+    let mut percent = 100.0_f32;
+    let response = ui.add(
+        egui::DragValue::new(&mut percent)
+            .range(10.0..=400.0)
+            .speed(1.0)
+            .suffix("%")
+            .fixed_decimals(0),
+    );
+    if response.changed() {
+        // O campo volta sempre a 100%: o fator é relativo ao tamanho atual,
+        // e mostrar um acumulado exigiria guardar o original só para isso.
+        session.doc.scale(percent / 100.0);
+    }
+    response.on_hover_text("Redimensionar a imagem inteira, com as anotações junto");
+
+    // --- Voltar ao enquadramento original ---
+    if icon_button(ui, Icon::Crop, false, true)
+        .on_hover_text("Desfazer os recortes e voltar ao enquadramento original")
+        .clicked()
+    {
+        session.doc.reset_crop();
+    }
+
     // --- Moldura decorativa: não depende de ferramenta e fica sempre à mão ---
     let backdrop = session.doc.backdrop();
     if icon_button(ui, Icon::Backdrop, backdrop != BackdropStyle::None, true)

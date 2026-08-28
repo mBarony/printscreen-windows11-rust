@@ -6,21 +6,21 @@ Marque a caixa ao concluir e mova a linha para a data no rodapé. O estado
 no arquivo da feature é a fonte da verdade; esta página é o resumo.
 
 **Legenda:** `[ ]` falta · `[~]` em andamento ou parcial · `[x]` concluído ·
-`[?]` decisão pendente
+`[?]` decisão pendente · `[-]` cancelado
 
 ---
 
 ## Resumo
 
-| Plataforma | Total | Falta | Parcial | Concluído | Em aberto |
-|---|---:|---:|---:|---:|---:|
-| Núcleo (vale para as três plataformas) | 26 | 1 | 0 | 25 | 0 |
-| Windows | 7 | 4 | 0 | 3 | 0 |
-| Linux (Hyprland + Wayland) | 12 | 11 | 0 | 0 | 1 |
-| macOS | 13 | 13 | 0 | 0 | 0 |
-| **Total** | **58** | **29** | **0** | **28** | **1** |
+| Plataforma | Total | Falta | Parcial | Concluído | Cancelado | Em aberto |
+|---|---:|---:|---:|---:|---:|---:|
+| Núcleo (vale para as três plataformas) | 26 | 1 | 0 | 25 | 0 | 0 |
+| Windows | 7 | 3 | 0 | 3 | 1 | 0 |
+| Linux (Hyprland + Wayland) | 12 | 11 | 0 | 0 | 0 | 1 |
+| macOS | 13 | 13 | 0 | 0 | 0 | 0 |
+| **Total** | **58** | **28** | **0** | **28** | **1** | **1** |
 
-Progresso: **28 de 58** (48%).
+Progresso: **28 de 57** (49%) — o total desconta o item cancelado.
 
 ---
 
@@ -61,7 +61,7 @@ Progresso: **28 de 58** (48%).
 - [x] **[Fixar a captura na tela](windows/fixar-na-tela.md)** · M
 - [x] **[Redimensionar a janela fixada](windows/redimensionar-fixada.md)** · P
 - [ ] **[Seleção inteligente](windows/selecao-inteligente.md)** · G
-- [ ] **[Upload para S3](windows/upload-s3.md)** · G
+- [-] **[Upload para S3](windows/upload-s3.md)** · G — _cancelado_
 
 ## Linux (Hyprland + Wayland)
 
@@ -101,7 +101,7 @@ Progresso: **28 de 58** (48%).
 | Marco | Critério | Estado |
 |---|---|---|
 | Paridade de anotação | todo o `nucleo/` concluído | [ ] |
-| Paridade Windows | `nucleo/` + `windows/` concluídos | [ ] |
+| Paridade Windows | `nucleo/` + `windows/` concluídos ou cancelados | [ ] |
 | Porte habilitado | camada de plataforma extraída (ver README) | [ ] |
 | Release Linux | todo o `linux/` concluído e empacotado | [ ] |
 | Release macOS | todo o `macos/` concluído, assinado e notarizado | [ ] |
@@ -116,9 +116,16 @@ Itens que não são bloqueados por trabalho, e sim por uma escolha:
   `nucleo/reconstruir-colunas` ficam sem par nessa plataforma.
 - **Conta Apple** (`macos/empacotamento.md`) — sem Developer ID e
   notarização o app não abre em máquina alheia. Custa 99 USD/ano.
-- **Upload S3** (`windows/upload-s3.md`) — o README destaca a ausência de
-  crates de rede como característica auditável. Implementar muda essa
-  promessa, mesmo usando `WinHttp`.
+
+## Decisões tomadas
+
+- **Upload S3** (`windows/upload-s3.md`) — **cancelado** em 28/08/2026. O
+  RustShot não fala com a rede, e isso é uma propriedade verificável na árvore
+  de dependências, não um detalhe de implementação. O upload a quebraria mesmo
+  saindo por `WinHttp` e mesmo só quando pedido: a resposta a "este programa
+  manda minha tela para algum lugar?" deixaria de ser "não" e passaria a ser
+  "só se você mandar". Quem precisa subir uma captura tem a pasta de destino
+  configurável e o `rustshot://` para um script fazer o envio depois.
 
 ## Histórico
 
@@ -144,3 +151,4 @@ Itens que não são bloqueados por trabalho, e sim por uma escolha:
 | 28/08/2026 | GIF antes e depois, com codificador próprio |
 | 28/08/2026 | Remover objeto, por propagação da borda |
 | 28/08/2026 | API por esquema de URL (rustshot://) |
+| 28/08/2026 | `windows/upload-s3` cancelado: o app não fala com a rede, e isso é auditável |

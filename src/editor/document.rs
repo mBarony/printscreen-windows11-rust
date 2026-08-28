@@ -609,6 +609,7 @@ mod tests {
             color: [255, 0, 0, 255],
             stroke_width: 3.0,
             line: crate::editor::shapes::LineStyle::default(),
+            sketch: false,
             font_size: 24.0,
             filled: false,
             corner_radius: 0.0,

@@ -14,13 +14,13 @@ no arquivo da feature é a fonte da verdade; esta página é o resumo.
 
 | Plataforma | Total | Falta | Parcial | Concluído | Em aberto |
 |---|---:|---:|---:|---:|---:|
-| Núcleo (vale para as três plataformas) | 26 | 8 | 0 | 18 | 0 |
+| Núcleo (vale para as três plataformas) | 26 | 7 | 0 | 19 | 0 |
 | Windows | 7 | 5 | 0 | 2 | 0 |
 | Linux (Hyprland + Wayland) | 12 | 11 | 0 | 0 | 1 |
 | macOS | 13 | 13 | 0 | 0 | 0 |
-| **Total** | **58** | **37** | **0** | **20** | **1** |
+| **Total** | **58** | **36** | **0** | **21** | **1** |
 
-Progresso: **20 de 58** (34%).
+Progresso: **21 de 58** (36%).
 
 ---
 
@@ -33,7 +33,7 @@ Progresso: **20 de 58** (34%).
 - [x] **[Cor média de uma área](nucleo/cor-media-de-area.md)** · P
 - [x] **[Desfazer o recorte](nucleo/desfazer-recorte.md)** · P
 - [x] **[Duplicar arrastando](nucleo/duplicar-arrastando.md)** · P
-- [ ] **[Estilo desenhado à mão](nucleo/estilo-desenhado-a-mao.md)** · M
+- [x] **[Estilo desenhado à mão](nucleo/estilo-desenhado-a-mao.md)** · M
 - [x] **[Estilos de linha](nucleo/estilos-de-linha.md)** · M
 - [x] **[Saída em PNG](nucleo/formato-png.md)** · M
 - [x] **[Outros formatos de cor](nucleo/formatos-de-cor.md)** · P
@@ -136,3 +136,4 @@ Itens que não são bloqueados por trabalho, e sim por uma escolha:
 | 28/08/2026 | Seta em arco, com alça de dobra |
 | 28/08/2026 | Estilos de linha (tracejado e pontilhado) e régua de tela |
 | 28/08/2026 | Salvar e copiar automáticos, por fluxo de captura |
+| 28/08/2026 | Estilo desenhado à mão |

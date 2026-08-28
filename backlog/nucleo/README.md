@@ -6,7 +6,7 @@ Portáteis: uma implementação serve às três plataformas. É onde mora a maio
 |---|---|---|
 | [Seta em arco](seta-em-arco.md) | falta | M |
 | [Seta reversível](seta-reversivel.md) | falta | P |
-| [Estilo desenhado à mão](estilo-desenhado-a-mao.md) | falta | M |
+| [Estilo desenhado à mão](estilo-desenhado-a-mao.md) | feito | M |
 | [Estilos de linha](estilos-de-linha.md) | feito | M |
 | [Régua de tela](regua-de-tela.md) | feito | M |
 | [Cor média de uma área](cor-media-de-area.md) | falta | P |

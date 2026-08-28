@@ -384,6 +384,13 @@ fn tool_options(ctx: &egui::Context, ui: &mut egui::Ui, session: &mut EditorSess
             session.line = session.line.next();
             restyle_selection(ctx, session);
         }
+        if icon_button(ui, Icon::Sketch, session.sketch, true)
+            .on_hover_text("Traço desenhado à mão")
+            .clicked()
+        {
+            session.sketch = !session.sketch;
+            restyle_selection(ctx, session);
+        }
     }
 
     // Daqui até a moldura, cada bloco só existe quando serve para a ferramenta

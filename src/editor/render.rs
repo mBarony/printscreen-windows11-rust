@@ -14,12 +14,12 @@ use crate::error::{Context as _, Result};
 use crate::imgbuf::RgbaImage;
 
 use super::backdrop::{self, BackdropStyle};
-use super::dash;
+
 use super::raster;
 use super::ruler;
 use super::shapes::{arrow_path,
     arrow_geometry, ellipse_path, marker_geometry, rect_path, stroke_appearance, text_pill_metrics,
-    Layer, LineStyle, Point, Shape, MARKER_INK, TEXT_PILL_COLOR,
+    Layer, LineStyle, Pen, Point, Shape, MARKER_INK, TEXT_PILL_COLOR,
 };
 use super::FONT_BYTES;
 
@@ -39,25 +39,14 @@ pub fn render(
 
     for layer in layers {
         let style = &layer.style;
+        let pen = Pen::new(layer);
         match &layer.shape {
             Shape::Line { a, b } => {
-                stroke_path(
-                    &mut buffer,
-                    &[*a, *b],
-                    style.line,
-                    style.stroke_width,
-                    style.color,
-                );
+                stroke_path(&mut buffer, &[*a, *b], pen);
             }
             Shape::Ruler { a, b } => {
                 let geo = ruler::geometry(*a, *b, style.stroke_width);
-                stroke_path(
-                    &mut buffer,
-                    &geo.shaft,
-                    style.line,
-                    style.stroke_width,
-                    style.color,
-                );
+                stroke_path(&mut buffer, &geo.shaft, pen);
                 for head in [geo.head_a, geo.head_b] {
                     raster::fill_triangle(
                         &mut buffer,
@@ -100,13 +89,7 @@ pub fn render(
                 if let Some(ultimo) = haste.last_mut() {
                     *ultimo = geo.shaft_b;
                 }
-                stroke_path(
-                    &mut buffer,
-                    &haste,
-                    style.line,
-                    style.stroke_width,
-                    style.color,
-                );
+                stroke_path(&mut buffer, &haste, pen);
                 raster::fill_triangle(
                     &mut buffer,
                     (geo.head[0].x, geo.head[0].y),
@@ -118,25 +101,23 @@ pub fn render(
             Shape::Rect { min, max } => {
                 let lo = (min.x, min.y);
                 let hi = (max.x.max(min.x + 0.1), max.y.max(min.y + 0.1));
-                match (style.filled, style.line, style.corner_radius > 0.0) {
+                match (style.filled, contorno_direto(style), style.corner_radius > 0.0) {
                     // Cheio não leva contorno: a silhueta é a própria cor.
                     (true, ..) => {
                         raster::fill_rect(&mut buffer, lo, hi, style.corner_radius, style.color)
                     }
-                    // O padrão é medido ao longo do contorno, então o
-                    // contorno vira caminho — cantos arredondados inclusive.
-                    (false, line, _) if line != LineStyle::Solid => stroke_path(
+                    // Padrão e tremido são medidos ao longo do contorno,
+                    // então o contorno vira caminho — cantos inclusive.
+                    (false, false, _) => stroke_path(
                         &mut buffer,
                         &rect_path(
                             Point::new(lo.0, lo.1),
                             Point::new(hi.0, hi.1),
                             style.corner_radius,
                         ),
-                        line,
-                        style.stroke_width,
-                        style.color,
+                        pen,
                     ),
-                    (false, _, true) => raster::stroke_round_rect(
+                    (false, true, true) => raster::stroke_round_rect(
                         &mut buffer,
                         lo,
                         hi,
@@ -144,7 +125,7 @@ pub fn render(
                         style.stroke_width,
                         style.color,
                     ),
-                    (false, _, false) => {
+                    (false, true, false) => {
                         raster::stroke_rect(&mut buffer, lo, hi, style.stroke_width, style.color)
                     }
                 }
@@ -154,7 +135,7 @@ pub fn render(
                 let (rx, ry) = (rx.max(0.1), ry.max(0.1));
                 if style.filled {
                     raster::fill_ellipse(&mut buffer, (cx, cy), rx, ry, style.color);
-                } else if style.line == LineStyle::Solid {
+                } else if contorno_direto(style) {
                     raster::stroke_ellipse(
                         &mut buffer,
                         (cx, cy),
@@ -164,18 +145,12 @@ pub fn render(
                         style.color,
                     );
                 } else {
-                    stroke_path(
-                        &mut buffer,
-                        &ellipse_path(Point::new(cx, cy), rx, ry),
-                        style.line,
-                        style.stroke_width,
-                        style.color,
-                    );
+                    stroke_path(&mut buffer, &ellipse_path(Point::new(cx, cy), rx, ry), pen);
                 }
             }
             Shape::Freehand { points, highlight } => {
                 let (width, color) = stroke_appearance(style, *highlight);
-                stroke_path(&mut buffer, points, style.line, width, color);
+                stroke_path(&mut buffer, points, pen.with(width, color));
             }
             Shape::Marker { center, number } => {
                 let geo = marker_geometry(style.stroke_width);
@@ -230,19 +205,20 @@ pub fn render(
 /// juntas para o rasterizador, e não uma por vez, para serem compostas de uma
 /// vez só — um rabisco de marca-texto que cruza a si mesmo ficaria com o
 /// cruzamento mais escuro se cada pedaço se compusesse sozinho.
-fn stroke_path(
-    buffer: &mut RgbaImage,
-    points: &[Point],
-    line: LineStyle,
-    width: f32,
-    color: [u8; 4],
-) {
-    let partes: Vec<Vec<(f32, f32)>> = dash::split(points, line, width)
+fn stroke_path(buffer: &mut RgbaImage, points: &[Point], pen: Pen) {
+    let partes: Vec<Vec<(f32, f32)>> = pen
+        .subpaths(points)
         .into_iter()
         .map(|parte| parte.into_iter().map(|p| (p.x, p.y)).collect())
         .collect();
     let caminhos: Vec<&[(f32, f32)]> = partes.iter().map(Vec::as_slice).collect();
-    raster::stroke_polylines(buffer, &caminhos, width, color);
+    raster::stroke_polylines(buffer, &caminhos, pen.width, pen.color);
+}
+
+/// O contorno pode sair do anel implícito do rasterizador enquanto não
+/// houver padrão nem tremido para medir ao longo dele.
+fn contorno_direto(style: &super::shapes::Style) -> bool {
+    style.line == LineStyle::Solid && !style.sketch
 }
 
 /// Largura e altura de uma linha de texto, na mesma métrica que `draw_text`
@@ -364,6 +340,7 @@ mod tests {
             color: [255, 0, 0, 255],
             stroke_width: 3.0,
             line: LineStyle::default(),
+            sketch: false,
             font_size: 16.0,
             filled: false,
             corner_radius: 0.0,
@@ -425,6 +402,49 @@ mod tests {
         assert!(tracejado < solido, "solido={solido} tracejado={tracejado}");
         assert!(pontilhado < tracejado, "tracejado={tracejado} pontilhado={pontilhado}");
         assert!(pontilhado > 0, "o pontilhado ainda tem de pintar algo");
+    }
+
+    #[test]
+    fn o_estilo_a_mao_treme_o_traco_sem_soltar_as_pontas() {
+        let img = base();
+        let reta = |sketch| {
+            let mut l = dragged(Tool::Line, (8.0, 32.0), (56.0, 32.0));
+            l.style.sketch = sketch;
+            render(&img, &[l], BackdropStyle::None).unwrap()
+        };
+        let firme = reta(false);
+        let mao = reta(true);
+        assert_ne!(firme.as_raw(), mao.as_raw(), "o traço tem de sair diferente");
+        // Duas passadas trêmulas cobrem mais área que uma reta.
+        assert!(pintados(&mao) > pintados(&firme));
+        // Mas as pontas continuam onde foram postas: uma seta cuja ponta sai
+        // do alvo deixa de apontar para o alvo.
+        assert!(mao.pixel(8, 32)[0] > 150, "ponta esquerda no lugar");
+        assert!(mao.pixel(56, 32)[0] > 150, "ponta direita no lugar");
+    }
+
+    #[test]
+    fn o_traco_a_mao_e_estavel_e_muda_com_a_anotacao() {
+        // A semente é o id da camada: o mesmo traço redesenhado tem de sair
+        // igual (senão a anotação treme na tela), e a cópia tem de sair
+        // diferente (senão duas anotações iguais denunciam o truque).
+        let img = base();
+        let mut a = dragged(Tool::Line, (8.0, 32.0), (56.0, 32.0));
+        a.style.sketch = true;
+        a.id = 1;
+        let mut b = a.clone();
+        b.id = 2;
+        let primeira = render(&img, &[a.clone()], BackdropStyle::None).unwrap();
+        assert_eq!(
+            primeira.as_raw(),
+            render(&img, &[a], BackdropStyle::None).unwrap().as_raw(),
+            "o mesmo id tem de dar o mesmo traço"
+        );
+        assert_ne!(
+            primeira.as_raw(),
+            render(&img, &[b], BackdropStyle::None).unwrap().as_raw(),
+            "ids diferentes, traços diferentes"
+        );
     }
 
     #[test]

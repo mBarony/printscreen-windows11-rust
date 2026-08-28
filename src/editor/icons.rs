@@ -29,6 +29,7 @@ pub enum Icon {
     LineSolid,
     LineDashed,
     LineDotted,
+    Sketch,
     Fill,
     TextPill,
     Backdrop,
@@ -67,7 +68,7 @@ impl Icon {
     }
 
     #[cfg(test)]
-    pub const ALL: [Icon; 29] = [
+    pub const ALL: [Icon; 30] = [
         Icon::Move,
         Icon::Line,
         Icon::Arrow,
@@ -83,6 +84,7 @@ impl Icon {
         Icon::LineSolid,
         Icon::LineDashed,
         Icon::LineDotted,
+        Icon::Sketch,
         Icon::Fill,
         Icon::TextPill,
         Icon::Backdrop,
@@ -117,6 +119,7 @@ impl Icon {
             Icon::LineSolid => "line_solid",
             Icon::LineDashed => "line_dashed",
             Icon::LineDotted => "line_dotted",
+            Icon::Sketch => "sketch",
             Icon::Fill => "fill",
             Icon::TextPill => "text_pill",
             Icon::Backdrop => "backdrop",
@@ -279,6 +282,24 @@ pub fn geometry(icon: Icon) -> Vec<Primitive> {
                 Fill(ellipse(cx, cy, 0.075, 0.075))
             })
             .collect(),
+        // Duas passadas trêmulas por cima da mesma diagonal — que é
+        // exatamente o que o estilo faz com o traço.
+        Icon::Sketch => vec![
+            Stroke(vec![
+                (0.12, 0.74),
+                (0.30, 0.60),
+                (0.48, 0.52),
+                (0.66, 0.36),
+                (0.88, 0.26),
+            ]),
+            Stroke(vec![
+                (0.14, 0.80),
+                (0.34, 0.68),
+                (0.50, 0.58),
+                (0.70, 0.44),
+                (0.86, 0.32),
+            ]),
+        ],
         // Quadrado cheio dentro de um vazado — o par contorno/preenchimento.
         Icon::Fill => vec![
             Stroke(rectangle(0.10, 0.10, 0.90, 0.90)),

@@ -9,11 +9,11 @@ use egui::{
 };
 
 
-use crate::editor::dash;
+
 use crate::editor::ruler;
 use crate::editor::shapes::{arrow_path,
     arrow_geometry, ellipse_path, marker_geometry, rect_path, stroke_appearance, text_pill_metrics,
-    Layer, LineStyle, Point, Shape, MARKER_INK, TEXT_PILL_COLOR,
+    Layer, LineStyle, Pen, Point, Shape, MARKER_INK, TEXT_PILL_COLOR,
 };
 use crate::editor::{
     HANDLE_EDGE_ROOM_PTS, HANDLE_RADIUS_PTS,
@@ -34,18 +34,11 @@ use crate::editor::DragPreview;
 /// tela do que no arquivo salvo. Num traço sólido isso era meia espessura em
 /// cada ponta e passava despercebido; num tracejado, seria a diferença entre
 /// a folga que se vê e a que se salva.
-fn paint_path(
-    painter: &egui::Painter,
-    points: &[Point],
-    line: LineStyle,
-    width: f32,
-    color: [u8; 4],
-    ts: ToScreen,
-) {
-    let cor = color32(color);
-    let stroke = Stroke::new(ts.len(width), cor);
-    let raio = ts.len(width) / 2.0;
-    for parte in dash::split(points, line, width) {
+fn paint_path(painter: &egui::Painter, points: &[Point], pen: Pen, ts: ToScreen) {
+    let cor = color32(pen.color);
+    let stroke = Stroke::new(ts.len(pen.width), cor);
+    let raio = ts.len(pen.width) / 2.0;
+    for parte in pen.subpaths(points) {
         let Some((primeiro, ultimo)) = parte.first().zip(parte.last()) else {
             continue;
         };
@@ -60,16 +53,24 @@ fn paint_path(
     }
 }
 
+/// O contorno de retângulo e elipse pode sair do caminho rápido — o anel
+/// implícito do rasterizador, com anti-aliasing melhor — enquanto não houver
+/// padrão nem tremido para medir ao longo dele.
+fn contorno_direto(style: &crate::editor::shapes::Style) -> bool {
+    style.line == LineStyle::Solid && !style.sketch
+}
+
 pub(super) fn paint_shape(painter: &egui::Painter, layer: &Layer, ts: ToScreen) {
     let style = &layer.style;
+    let pen = Pen::new(layer);
     let stroke = Stroke::new(ts.len(style.stroke_width), color32(style.color));
     match &layer.shape {
         Shape::Line { a, b } => {
-            paint_path(painter, &[*a, *b], style.line, style.stroke_width, style.color, ts);
+            paint_path(painter, &[*a, *b], pen, ts);
         }
         Shape::Ruler { a, b } => {
             let geo = ruler::geometry(*a, *b, style.stroke_width);
-            paint_path(painter, &geo.shaft, style.line, style.stroke_width, style.color, ts);
+            paint_path(painter, &geo.shaft, pen, ts);
             for head in [geo.head_a, geo.head_b] {
                 painter.add(egui::Shape::convex_polygon(
                     head.iter().map(|p| ts.pos(*p)).collect(),
@@ -113,7 +114,7 @@ pub(super) fn paint_shape(painter: &egui::Painter, layer: &Layer, ts: ToScreen) 
             if let Some(ultimo) = haste.last_mut() {
                 *ultimo = geo.shaft_b;
             }
-            paint_path(painter, &haste, style.line, style.stroke_width, style.color, ts);
+            paint_path(painter, &haste, pen, ts);
             painter.add(egui::Shape::convex_polygon(
                 geo.head.iter().map(|p| ts.pos(*p)).collect(),
                 color32(style.color),
@@ -132,7 +133,7 @@ pub(super) fn paint_shape(painter: &egui::Painter, layer: &Layer, ts: ToScreen) 
                 .round() as u8;
             if style.filled {
                 painter.rect_filled(rect, CornerRadius::same(radius), color32(style.color));
-            } else if style.line == LineStyle::Solid {
+            } else if contorno_direto(style) {
                 painter.rect_stroke(
                     rect,
                     CornerRadius::same(radius),
@@ -140,16 +141,10 @@ pub(super) fn paint_shape(painter: &egui::Painter, layer: &Layer, ts: ToScreen) 
                     StrokeKind::Middle,
                 );
             } else {
-                // O padrão é medido ao longo do contorno, então o contorno
-                // precisa virar caminho — inclusive os cantos arredondados.
-                paint_path(
-                    painter,
-                    &rect_path(*min, *max, style.corner_radius),
-                    style.line,
-                    style.stroke_width,
-                    style.color,
-                    ts,
-                );
+                // Padrão e tremido são medidos ao longo do contorno, então o
+                // contorno precisa virar caminho — cantos arredondados
+                // inclusive.
+                paint_path(painter, &rect_path(*min, *max, style.corner_radius), pen, ts);
             }
         }
         Shape::Ellipse { center, rx, ry } => {
@@ -160,24 +155,17 @@ pub(super) fn paint_shape(painter: &egui::Painter, layer: &Layer, ts: ToScreen) 
                     radii,
                     color32(style.color),
                 ));
-            } else if style.line == LineStyle::Solid {
+            } else if contorno_direto(style) {
                 painter.add(egui::Shape::ellipse_stroke(ts.pos(*center), radii, stroke));
             } else {
-                paint_path(
-                    painter,
-                    &ellipse_path(*center, *rx, *ry),
-                    style.line,
-                    style.stroke_width,
-                    style.color,
-                    ts,
-                );
+                paint_path(painter, &ellipse_path(*center, *rx, *ry), pen, ts);
             }
         }
         Shape::Freehand { points, highlight } => {
             let (width, color) = stroke_appearance(style, *highlight);
             // Mesma lista de pontos que a exportação percorre: a suavização
             // já aconteceu quando o traço foi criado.
-            paint_path(painter, points, style.line, width, color, ts);
+            paint_path(painter, points, pen.with(width, color), ts);
         }
         Shape::Marker { center, number } => {
             let geo = marker_geometry(style.stroke_width);

@@ -103,6 +103,8 @@ pub struct Style {
     pub stroke_width: f32,
     /// Padrão do traço: sólido, tracejado ou pontilhado.
     pub line: LineStyle,
+    /// Traço irregular, em duas passadas, como desenhado à mão.
+    pub sketch: bool,
     /// Tamanho da fonte, em px no espaço da imagem (ferramenta Texto).
     pub font_size: f32,
     /// Retângulo e elipse saem cheios em vez de só contornados.
@@ -118,6 +120,53 @@ pub struct Style {
     pub spotlight: SpotlightForm,
     /// Quantas vezes o holofote amplia o próprio miolo.
     pub magnification: f32,
+}
+
+/// Como um caminho vira traço — tudo o que o preview e a exportação precisam
+/// saber para desenhá-lo igual.
+///
+/// A existência deste tipo é o que garante a paridade entre os dois: eles são
+/// duas implementações independentes do mesmo desenho, e nada no compilador
+/// as obriga a concordar. Com a geometria saindo de [`Pen::subpaths`], só o
+/// desenhista difere.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Pen {
+    /// Espessura efetiva, em px da imagem (o marca-texto tem a sua).
+    pub width: f32,
+    pub color: [u8; 4],
+    pub line: LineStyle,
+    pub sketch: bool,
+    /// Semente da perturbação: o `id` da anotação, estável entre quadros e
+    /// entre sessões, e diferente na cópia.
+    pub seed: u64,
+}
+
+impl Pen {
+    pub fn new(layer: &Layer) -> Self {
+        Self {
+            width: layer.style.stroke_width,
+            color: layer.style.color,
+            line: layer.style.line,
+            sketch: layer.style.sketch,
+            seed: layer.id,
+        }
+    }
+
+    /// Mesma caneta com outra espessura e cor — mão livre e marca-texto,
+    /// cuja aparência sai de [`stroke_appearance`].
+    pub fn with(self, width: f32, color: [u8; 4]) -> Self {
+        Self { width, color, ..self }
+    }
+
+    /// Os pedaços a desenhar, na ordem em que os dois efeitos se aplicam: a
+    /// mão treme primeiro e o padrão é medido sobre o traço já tremido, e não
+    /// o contrário — senão o tracejado esticaria a cada quadro.
+    pub fn subpaths(&self, points: &[Point]) -> Vec<Vec<Point>> {
+        super::sketch::passes(points, self.width, self.sketch, self.seed)
+            .into_iter()
+            .flat_map(|passada| super::dash::split(&passada, self.line, self.width))
+            .collect()
+    }
 }
 
 /// Cor da pílula de leitura atrás do texto.
@@ -1188,6 +1237,7 @@ mod tests {
             color: [255, 0, 0, 255],
             stroke_width: 3.0,
             line: LineStyle::default(),
+            sketch: false,
             font_size: 24.0,
             filled: false,
             corner_radius: 0.0,

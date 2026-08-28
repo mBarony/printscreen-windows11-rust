@@ -12,6 +12,7 @@ pub mod icons;
 pub mod raster;
 pub mod redact;
 pub mod ruler;
+pub mod sketch;
 pub mod spotlight;
 pub mod render;
 pub mod session_file;
@@ -144,6 +145,8 @@ pub struct EditorSession {
     pub stroke_width: f32,
     /// Padrão do traço das formas de caminho.
     pub line: shapes::LineStyle,
+    /// Traço irregular, como desenhado à mão.
+    pub sketch: bool,
     pub font_size: f32,
     /// Retângulo e elipse nascem cheios.
     pub filled: bool,
@@ -244,6 +247,7 @@ impl EditorSession {
             color: config::parse_color(&defaults.default_color),
             stroke_width: defaults.default_stroke_width.clamp(STROKE_MIN, STROKE_MAX),
             line: shapes::LineStyle::default(),
+            sketch: false,
             font_size: defaults.default_font_size.clamp(FONT_MIN, FONT_MAX),
             filled: false,
             corner_radius: 0.0,
@@ -285,6 +289,7 @@ impl EditorSession {
             color: self.color,
             stroke_width: self.stroke_width,
             line: self.line,
+            sketch: self.sketch,
             font_size: self.font_size,
             filled: self.filled,
             corner_radius: self.corner_radius,

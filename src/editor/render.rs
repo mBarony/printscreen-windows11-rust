@@ -21,6 +21,7 @@ use super::shapes::{arrow_path,
     arrow_geometry, ellipse_path, marker_geometry, rect_path, stroke_appearance, text_pill_metrics,
     Layer, LineStyle, Pen, Point, Shape, MARKER_INK, TEXT_PILL_COLOR,
 };
+use super::document::ImageSources;
 use super::FONT_BYTES;
 
 /// Rasteriza `captura + anotações`, monta a moldura em volta e devolve a
@@ -29,6 +30,7 @@ pub fn render(
     base: &RgbaImage,
     layers: &[Layer],
     backdrop: BackdropStyle,
+    sources: &ImageSources,
 ) -> Result<RgbaImage> {
     let mut buffer = base.clone();
     if layers.is_empty() {
@@ -174,6 +176,13 @@ pub fn render(
                 // Centrado no disco: a caixa medida do número decide a âncora.
                 let anchor = Point::new(center.x - w / 2.0, center.y - h / 2.0);
                 draw_text(&mut buffer, &font, anchor, &label, MARKER_INK, geo.font_size);
+            }
+            Shape::Image { min, max, source } => {
+                // Um `source` desconhecido é sessão recuperada sem o arquivo
+                // dos pixels: melhor um buraco do que uma exportação abortada.
+                if let Some(src) = sources.get(source) {
+                    raster::fill_image(&mut buffer, (min.x, min.y), (max.x, max.y), src);
+                }
             }
             // Já queimada na imagem de partida (ver `document::replay`), e
             // de propósito: o que for desenhado depois fica por cima dela.
@@ -364,14 +373,14 @@ mod tests {
     #[test]
     fn render_without_shapes_is_identity() {
         let img = base();
-        let out = render(&img, &[], BackdropStyle::None).unwrap();
+        let out = render(&img, &[], BackdropStyle::None, &ImageSources::new()).unwrap();
         assert_eq!(img.as_raw(), out.as_raw());
     }
 
     #[test]
     fn render_line_touches_pixels() {
         let img = base();
-        let out = render(&img, &[dragged(Tool::Line, (4.0, 4.0), (60.0, 60.0))], BackdropStyle::None).unwrap();
+        let out = render(&img, &[dragged(Tool::Line, (4.0, 4.0), (60.0, 60.0))], BackdropStyle::None, &ImageSources::new()).unwrap();
         assert_ne!(img.as_raw(), out.as_raw());
         // O pixel do meio da diagonal deve ter ficado avermelhado.
         let p = out.pixel(32, 32);
@@ -394,7 +403,7 @@ mod tests {
         let reta = |line| {
             let mut l = dragged(Tool::Line, (4.0, 32.0), (60.0, 32.0));
             l.style.line = line;
-            pintados(&render(&img, &[l], BackdropStyle::None).unwrap())
+            pintados(&render(&img, &[l], BackdropStyle::None, &ImageSources::new()).unwrap())
         };
         let solido = reta(LineStyle::Solid);
         let tracejado = reta(LineStyle::Dashed);
@@ -405,12 +414,47 @@ mod tests {
     }
 
     #[test]
+    fn a_imagem_colada_sai_esticada_no_retangulo() {
+        let img = base();
+        let mut colada = RgbaImage::filled(2, 2, [0, 0, 255, 255]);
+        colada.pixel_mut(0, 0).copy_from_slice(&[255, 255, 0, 255]);
+        let mut sources = ImageSources::new();
+        sources.insert(9, std::sync::Arc::new(colada));
+
+        let layer = layer(Shape::Image {
+            min: Point::new(16.0, 16.0),
+            max: Point::new(48.0, 48.0),
+            source: 9,
+        });
+        let out = render(&img, &[layer], BackdropStyle::None, &sources).unwrap();
+        // O quadrante superior esquerdo veio do pixel amarelo; o resto, azul.
+        let amarelo = out.pixel(20, 20);
+        assert!(amarelo[0] > 180 && amarelo[1] > 180, "canto amarelo: {amarelo:?}");
+        assert!(out.pixel(44, 44)[2] > 180, "resto azul");
+        assert_eq!(out.pixel(4, 4), [10, 20, 30, 255], "fora do retângulo, a base");
+    }
+
+    #[test]
+    fn uma_imagem_sem_pixels_nao_derruba_a_exportacao() {
+        // Sessão recuperada sem o arquivo dos pixels: melhor um buraco do que
+        // uma exportação abortada.
+        let img = base();
+        let layer = layer(Shape::Image {
+            min: Point::new(4.0, 4.0),
+            max: Point::new(40.0, 40.0),
+            source: 404,
+        });
+        let out = render(&img, &[layer], BackdropStyle::None, &ImageSources::new()).unwrap();
+        assert_eq!(out.as_raw(), img.as_raw());
+    }
+
+    #[test]
     fn o_estilo_a_mao_treme_o_traco_sem_soltar_as_pontas() {
         let img = base();
         let reta = |sketch| {
             let mut l = dragged(Tool::Line, (8.0, 32.0), (56.0, 32.0));
             l.style.sketch = sketch;
-            render(&img, &[l], BackdropStyle::None).unwrap()
+            render(&img, &[l], BackdropStyle::None, &ImageSources::new()).unwrap()
         };
         let firme = reta(false);
         let mao = reta(true);
@@ -434,15 +478,15 @@ mod tests {
         a.id = 1;
         let mut b = a.clone();
         b.id = 2;
-        let primeira = render(&img, &[a.clone()], BackdropStyle::None).unwrap();
+        let primeira = render(&img, &[a.clone()], BackdropStyle::None, &ImageSources::new()).unwrap();
         assert_eq!(
             primeira.as_raw(),
-            render(&img, &[a], BackdropStyle::None).unwrap().as_raw(),
+            render(&img, &[a], BackdropStyle::None, &ImageSources::new()).unwrap().as_raw(),
             "o mesmo id tem de dar o mesmo traço"
         );
         assert_ne!(
             primeira.as_raw(),
-            render(&img, &[b], BackdropStyle::None).unwrap().as_raw(),
+            render(&img, &[b], BackdropStyle::None, &ImageSources::new()).unwrap().as_raw(),
             "ids diferentes, traços diferentes"
         );
     }
@@ -471,8 +515,8 @@ mod tests {
             highlight: true,
         };
 
-        let duplo = render(&img, &[sobreposto], BackdropStyle::None).unwrap();
-        let unico = render(&img, &[simples], BackdropStyle::None).unwrap();
+        let duplo = render(&img, &[sobreposto], BackdropStyle::None, &ImageSources::new()).unwrap();
+        let unico = render(&img, &[simples], BackdropStyle::None, &ImageSources::new()).unwrap();
         let mais_vermelho = |img: &RgbaImage| (10..54).map(|x| img.pixel(x, 32)[0]).max().unwrap();
         assert!(
             mais_vermelho(&duplo) <= mais_vermelho(&unico),
@@ -489,12 +533,13 @@ mod tests {
             a: Point::new(6.0, 32.0),
             b: Point::new(58.0, 32.0),
         });
-        let out = render(&img, &[regua], BackdropStyle::None).unwrap();
+        let out = render(&img, &[regua], BackdropStyle::None, &ImageSources::new()).unwrap();
         // Mesma reta, sem as pontas nem o rótulo: a régua tem de pintar mais.
         let reta = render(
             &img,
             &[dragged(Tool::Line, (6.0, 32.0), (58.0, 32.0))],
             BackdropStyle::None,
+            &ImageSources::new(),
         )
         .unwrap();
         assert!(
@@ -518,21 +563,21 @@ mod tests {
     fn render_text_touches_pixels() {
         let img = base();
         let text = layer(Shape::Text { anchor: Point::new(2.0, 2.0), content: "Ok".into() });
-        let out = render(&img, &[text], BackdropStyle::None).unwrap();
+        let out = render(&img, &[text], BackdropStyle::None, &ImageSources::new()).unwrap();
         assert_ne!(img.as_raw(), out.as_raw());
     }
 
     #[test]
     fn dimensions_preserved() {
         let img = base();
-        let out = render(&img, &[dragged(Tool::Rect, (1.0, 1.0), (50.0, 40.0))], BackdropStyle::None).unwrap();
+        let out = render(&img, &[dragged(Tool::Rect, (1.0, 1.0), (50.0, 40.0))], BackdropStyle::None, &ImageSources::new()).unwrap();
         assert_eq!((out.width(), out.height()), (64, 64));
     }
 
     #[test]
     fn arrow_head_is_filled() {
         let img = base();
-        let out = render(&img, &[dragged(Tool::Arrow, (8.0, 32.0), (56.0, 32.0))], BackdropStyle::None).unwrap();
+        let out = render(&img, &[dragged(Tool::Arrow, (8.0, 32.0), (56.0, 32.0))], BackdropStyle::None, &ImageSources::new()).unwrap();
         // Perto da ponta (x=54, y=32) deve haver vermelho.
         assert!(out.pixel(53, 32)[0] > 150);
     }
@@ -541,7 +586,7 @@ mod tests {
     fn freehand_stroke_is_exported() {
         let img = base();
         let points: Vec<Point> = (0..6).map(|i| Point::new(8.0 + i as f32 * 9.0, 32.0)).collect();
-        let out = render(&img, &[layer(Shape::Freehand { points, highlight: false })], BackdropStyle::None).unwrap();
+        let out = render(&img, &[layer(Shape::Freehand { points, highlight: false })], BackdropStyle::None, &ImageSources::new()).unwrap();
         assert!(out.pixel(30, 32)[0] > 150, "traço no meio do caminho");
         assert_eq!(out.pixel(30, 8), [10, 20, 30, 255], "fora do traço");
     }
@@ -555,8 +600,8 @@ mod tests {
         let plain = layer(Shape::Freehand { points: points.clone(), highlight: false });
         let mark = layer(Shape::Freehand { points, highlight: true });
 
-        let opaque = render(&img, &[plain], BackdropStyle::None).unwrap().pixel(32, 32);
-        let translucent = render(&img, &[mark], BackdropStyle::None).unwrap().pixel(32, 32);
+        let opaque = render(&img, &[plain], BackdropStyle::None, &ImageSources::new()).unwrap().pixel(32, 32);
+        let translucent = render(&img, &[mark], BackdropStyle::None, &ImageSources::new()).unwrap().pixel(32, 32);
         assert_eq!(opaque[0], 255, "mão livre cobre");
         assert!(translucent[0] < opaque[0], "marca-texto não cobre");
         assert!(translucent[2] > opaque[2], "o azul do fundo sobrevive");
@@ -570,10 +615,10 @@ mod tests {
     fn a_filled_rect_paints_its_interior() {
         let img = base();
         let shape = Shape::Rect { min: Point::new(16.0, 16.0), max: Point::new(48.0, 48.0) };
-        let hollow = render(&img, &[layer(shape.clone())], BackdropStyle::None).unwrap();
+        let hollow = render(&img, &[layer(shape.clone())], BackdropStyle::None, &ImageSources::new()).unwrap();
         let solid = render(
             &img,
-            &[styled(shape, Style { filled: true, ..style() })], BackdropStyle::None)
+            &[styled(shape, Style { filled: true, ..style() })], BackdropStyle::None, &ImageSources::new())
         .unwrap();
         assert_eq!(hollow.pixel(32, 32), [10, 20, 30, 255], "vazado deixa o miolo");
         assert_eq!(solid.pixel(32, 32)[0], 255, "cheio pinta o miolo");
@@ -585,7 +630,7 @@ mod tests {
         let shape = Shape::Rect { min: Point::new(16.0, 16.0), max: Point::new(48.0, 48.0) };
         let out = render(
             &img,
-            &[styled(shape, Style { filled: true, corner_radius: 12.0, ..style() })], BackdropStyle::None)
+            &[styled(shape, Style { filled: true, corner_radius: 12.0, ..style() })], BackdropStyle::None, &ImageSources::new())
         .unwrap();
         assert_eq!(out.pixel(32, 32)[0], 255, "miolo cheio");
         assert_eq!(out.pixel(17, 17), [10, 20, 30, 255], "canto recuado pelo raio");
@@ -596,7 +641,7 @@ mod tests {
     fn a_filled_ellipse_paints_its_interior() {
         let img = base();
         let shape = Shape::Ellipse { center: Point::new(32.0, 32.0), rx: 16.0, ry: 10.0 };
-        let out = render(&img, &[styled(shape, Style { filled: true, ..style() })], BackdropStyle::None).unwrap();
+        let out = render(&img, &[styled(shape, Style { filled: true, ..style() })], BackdropStyle::None, &ImageSources::new()).unwrap();
         assert_eq!(out.pixel(32, 32)[0], 255, "centro cheio");
         assert_eq!(out.pixel(32, 4), [10, 20, 30, 255], "fora da elipse");
     }
@@ -605,7 +650,7 @@ mod tests {
     fn a_marker_draws_a_disc_with_a_light_ring() {
         let img = base();
         let shape = Shape::Marker { center: Point::new(32.0, 32.0), number: 7 };
-        let out = render(&img, &[layer(shape)], BackdropStyle::None).unwrap();
+        let out = render(&img, &[layer(shape)], BackdropStyle::None, &ImageSources::new()).unwrap();
         // Traço 3 → diâmetro mínimo 24, raio 12.
         assert_eq!(out.pixel(32, 44 - 1)[0], 255, "borda do disco na cor ativa");
         assert_eq!(out.pixel(32, 8), [10, 20, 30, 255], "fora do disco");
@@ -620,8 +665,8 @@ mod tests {
         // só — é o que a medida do texto na exportação garante.
         let img = base();
         let at = Point::new(32.0, 32.0);
-        let one = render(&img, &[layer(Shape::Marker { center: at, number: 1 })], BackdropStyle::None).unwrap();
-        let twelve = render(&img, &[layer(Shape::Marker { center: at, number: 12 })], BackdropStyle::None).unwrap();
+        let one = render(&img, &[layer(Shape::Marker { center: at, number: 1 })], BackdropStyle::None, &ImageSources::new()).unwrap();
+        let twelve = render(&img, &[layer(Shape::Marker { center: at, number: 12 })], BackdropStyle::None, &ImageSources::new()).unwrap();
 
         let ink_bounds = |img: &RgbaImage| {
             let (mut lo, mut hi) = (u32::MAX, 0);
@@ -642,10 +687,10 @@ mod tests {
     fn the_reading_pill_sits_behind_the_text() {
         let img = base();
         let shape = Shape::Text { anchor: Point::new(20.0, 20.0), content: "Ok".into() };
-        let plain = render(&img, &[layer(shape.clone())], BackdropStyle::None).unwrap();
+        let plain = render(&img, &[layer(shape.clone())], BackdropStyle::None, &ImageSources::new()).unwrap();
         let on_pill = render(
             &img,
-            &[styled(shape, Style { text_pill: true, ..style() })], BackdropStyle::None)
+            &[styled(shape, Style { text_pill: true, ..style() })], BackdropStyle::None, &ImageSources::new())
         .unwrap();
         // Logo acima e à esquerda da âncora cai o recuo da pílula.
         assert_eq!(plain.pixel(18, 18), [10, 20, 30, 255], "sem pílula, o fundo aparece");
@@ -662,8 +707,8 @@ mod tests {
         let lowest_ink = |img: &RgbaImage| {
             (0..120).rev().find(|&y| (0..120).any(|x| img.pixel(x, y)[0] > 100))
         };
-        let a = lowest_ink(&render(&img, &[layer(one)], BackdropStyle::None).unwrap()).unwrap();
-        let b = lowest_ink(&render(&img, &[layer(two)], BackdropStyle::None).unwrap()).unwrap();
+        let a = lowest_ink(&render(&img, &[layer(one)], BackdropStyle::None, &ImageSources::new()).unwrap()).unwrap();
+        let b = lowest_ink(&render(&img, &[layer(two)], BackdropStyle::None, &ImageSources::new()).unwrap()).unwrap();
         assert!(b > a, "a segunda linha desce ({a} → {b})");
     }
 
@@ -679,8 +724,8 @@ mod tests {
             shape,
             style: Style { color: [0, 255, 0, 255], ..style() },
         };
-        let a = render(&img, &[red], BackdropStyle::None).unwrap();
-        let b = render(&img, &[green], BackdropStyle::None).unwrap();
+        let a = render(&img, &[red], BackdropStyle::None, &ImageSources::new()).unwrap();
+        let b = render(&img, &[green], BackdropStyle::None, &ImageSources::new()).unwrap();
         assert!(a.pixel(8, 32)[0] > 150, "primeira camada vermelha");
         assert!(b.pixel(8, 32)[1] > 150, "segunda camada verde");
     }

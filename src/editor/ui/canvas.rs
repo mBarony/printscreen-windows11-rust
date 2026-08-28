@@ -58,6 +58,23 @@ pub(super) fn draw(ctx: &egui::Context, session: &mut EditorSession) {
             };
             let tex_id = texture.id();
 
+            // Uma textura por imagem colada, montada na primeira vez que ela
+            // aparece. Fica na sessão porque o documento não conhece GPU.
+            for (source, pixels) in session.doc.images() {
+                if !session.image_textures.contains_key(source) {
+                    let color = ColorImage::from_rgba_unmultiplied(
+                        [pixels.width() as usize, pixels.height() as usize],
+                        pixels.as_raw(),
+                    );
+                    let handle = ui.ctx().load_texture(
+                        format!("editor_pasted_{source}"),
+                        color,
+                        TextureOptions::LINEAR,
+                    );
+                    session.image_textures.insert(*source, handle);
+                }
+            }
+
             // A textura pode incluir a moldura decorativa; as anotações
             // vivem no espaço do conteúdo, deslocado dela pela margem.
             let frame_w = session.doc.visible_image().width() as f32;
@@ -455,7 +472,7 @@ pub(super) fn draw(ctx: &egui::Context, session: &mut EditorSession) {
             // recorte ou de arrastar uma anotação para fora.
             let shape_painter = ui.painter_at(image_rect.intersect(canvas_rect));
             for layer in session.doc.layers() {
-                paint_shape(&shape_painter, layer, to_screen);
+                paint_shape(&shape_painter, layer, to_screen, &session.image_textures);
             }
             if session.tool == Tool::Cut {
                 if let Some(drag) = &session.drag {
@@ -498,7 +515,7 @@ pub(super) fn draw(ctx: &egui::Context, session: &mut EditorSession) {
                         // documento: recebe um id provisório só para reusar o
                         // mesmo desenho da forma já criada.
                         let preview = Layer { id: 0, shape, style: session.style() };
-                        paint_shape(&shape_painter, &preview, to_screen);
+                        paint_shape(&shape_painter, &preview, to_screen, &session.image_textures);
                     }
                 }
             }

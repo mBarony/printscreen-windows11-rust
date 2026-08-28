@@ -14,20 +14,20 @@ no arquivo da feature é a fonte da verdade; esta página é o resumo.
 
 | Plataforma | Total | Falta | Parcial | Concluído | Em aberto |
 |---|---:|---:|---:|---:|---:|
-| Núcleo (vale para as três plataformas) | 26 | 6 | 0 | 20 | 0 |
+| Núcleo (vale para as três plataformas) | 26 | 5 | 0 | 21 | 0 |
 | Windows | 7 | 5 | 0 | 2 | 0 |
 | Linux (Hyprland + Wayland) | 12 | 11 | 0 | 0 | 1 |
 | macOS | 13 | 13 | 0 | 0 | 0 |
-| **Total** | **58** | **35** | **0** | **22** | **1** |
+| **Total** | **58** | **34** | **0** | **23** | **1** |
 
-Progresso: **22 de 58** (38%).
+Progresso: **23 de 58** (40%).
 
 ---
 
 ## Núcleo (vale para as três plataformas)
 
 - [x] **[Captura com atraso](nucleo/captura-com-atraso.md)** · P
-- [ ] **[Colar imagem sobre a captura](nucleo/colar-imagem.md)** · M
+- [x] **[Colar imagem sobre a captura](nucleo/colar-imagem.md)** · M
 - [x] **[Copiar e colar anotações](nucleo/copiar-colar-anotacoes.md)** · M
 - [x] **[Cor do texto sob o cursor](nucleo/cor-do-texto.md)** · P
 - [x] **[Cor média de uma área](nucleo/cor-media-de-area.md)** · P
@@ -138,3 +138,4 @@ Itens que não são bloqueados por trabalho, e sim por uma escolha:
 | 28/08/2026 | Salvar e copiar automáticos, por fluxo de captura |
 | 28/08/2026 | Estilo desenhado à mão |
 | 28/08/2026 | Copiar e colar anotações entre capturas |
+| 28/08/2026 | Colar imagem sobre a captura |

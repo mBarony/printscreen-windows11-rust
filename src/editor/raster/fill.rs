@@ -1,7 +1,44 @@
 //! Primitivas de preenchimento do rasterizador.
 
-use super::{inside_ellipse, inside_round_rect, rasterize, P};
+use super::{blend, clip_bbox, inside_ellipse, inside_round_rect, rasterize, P};
 use crate::imgbuf::RgbaImage;
+
+/// Desenha `src` esticada no retângulo `min..max`, compondo src-over.
+///
+/// A amostragem é bilinear, a mesma do `RgbaImage::resized`: uma imagem
+/// colada e depois esticada é justamente o caso em que o vizinho mais próximo
+/// denunciaria a escada. Cada pixel do destino é composto uma vez só, então
+/// uma imagem translúcida não escurece por sobreposição.
+pub fn fill_image(img: &mut RgbaImage, min: P, max: P, src: &RgbaImage) {
+    let (sw, sh) = (src.width(), src.height());
+    let (dw, dh) = (max.0 - min.0, max.1 - min.1);
+    if sw == 0 || sh == 0 || dw <= 0.0 || dh <= 0.0 {
+        return;
+    }
+    let Some((x0, y0, x1, y1)) = clip_bbox(img, (min.0, min.1, max.0, max.1)) else {
+        return;
+    };
+    for py in y0..y1 {
+        // Centro do pixel de destino → coordenada na origem.
+        let fy = ((py as f32 + 0.5 - min.1) / dh * sh as f32 - 0.5).clamp(0.0, (sh - 1) as f32);
+        let (sy0, ty) = (fy.floor() as u32, fy - fy.floor());
+        let sy1 = (sy0 + 1).min(sh - 1);
+        for px in x0..x1 {
+            let fx = ((px as f32 + 0.5 - min.0) / dw * sw as f32 - 0.5).clamp(0.0, (sw - 1) as f32);
+            let (sx0, tx) = (fx.floor() as u32, fx - fx.floor());
+            let sx1 = (sx0 + 1).min(sw - 1);
+            let (p00, p10) = (src.pixel(sx0, sy0), src.pixel(sx1, sy0));
+            let (p01, p11) = (src.pixel(sx0, sy1), src.pixel(sx1, sy1));
+            let mut amostra = [0u8; 4];
+            for (c, slot) in amostra.iter_mut().enumerate() {
+                let topo = p00[c] as f32 * (1.0 - tx) + p10[c] as f32 * tx;
+                let base = p01[c] as f32 * (1.0 - tx) + p11[c] as f32 * tx;
+                *slot = (topo * (1.0 - ty) + base * ty).round().clamp(0.0, 255.0) as u8;
+            }
+            blend(img.pixel_mut(px, py), amostra, 1.0);
+        }
+    }
+}
 
 /// Triângulo preenchido (ponta da seta).
 pub fn fill_triangle(img: &mut RgbaImage, p0: P, p1: P, p2: P, color: [u8; 4]) {

@@ -261,10 +261,12 @@ fn copy_layers(session: &mut EditorSession) {
 /// deslocamento automático estragaria justamente isso. Como saem
 /// selecionadas, arrastá-las é um gesto só quando o destino é a mesma imagem.
 fn paste_layers(session: &mut EditorSession) {
-    let Some(texto) = crate::clipboard::read_text() else {
-        return;
-    };
-    let Some(layers) = crate::editor::clip::decode(&texto) else {
+    let Some(layers) = crate::clipboard::read_text()
+        .as_deref()
+        .and_then(crate::editor::clip::decode)
+    else {
+        // Sem anotações no texto, a mesma tecla cola uma imagem, se houver.
+        paste_image(session);
         return;
     };
     let quantas = layers.len();
@@ -278,6 +280,41 @@ fn paste_layers(session: &mut EditorSession) {
     session.selection = (antes..antes + quantas).collect();
     session.selected = Some(antes + quantas - 1);
     log::info!("{quantas} anotações coladas");
+}
+
+/// Cola a imagem da área de transferência como uma camada movível.
+///
+/// Ela nasce **centrada e cabendo na captura**: uma imagem maior que a
+/// captura, colada em tamanho natural, apareceria como uma parede de pixels
+/// sem cantos visíveis para arrastar.
+fn paste_image(session: &mut EditorSession) {
+    let Ok(imagem) = crate::platform::clipboard::get_image() else {
+        return;
+    };
+    let (iw, ih) = (imagem.width() as f32, imagem.height() as f32);
+    if iw <= 0.0 || ih <= 0.0 {
+        return;
+    }
+    let conteudo = session.doc.content_image();
+    let (cw, ch) = (conteudo.width() as f32, conteudo.height() as f32);
+    let escala = (cw / iw).min(ch / ih).min(1.0);
+    let (w, h) = (iw * escala, ih * escala);
+    let min = Point::new((cw - w) / 2.0, (ch - h) / 2.0);
+
+    let source = session.doc.store_image(imagem);
+    let id = session.doc.push(
+        Shape::Image {
+            min,
+            max: Point::new(min.x + w, min.y + h),
+            source,
+        },
+        session.style(),
+    );
+    session.tool = crate::editor::shapes::Tool::Select;
+    let indice = session.doc.layers().len() - 1;
+    session.selection = vec![indice];
+    session.selected = Some(indice);
+    log::info!("imagem colada como anotação {id} ({w}x{h})");
 }
 
 /// A anotação selecionada deixa um traço ao longo de um caminho? É onde

@@ -25,6 +25,12 @@ use super::shapes::{Handle, Layer, Point, RedactionStyle, Shape, Style};
 /// Teto do histórico, em operações.
 const MAX_OPS: usize = 100;
 
+/// Depósito dos pixels das imagens coladas, por `source`.
+///
+/// Clonar isto é clonar `Arc`s, não pixels — é o que permite mandá-lo para a
+/// thread que renderiza sem copiar megabytes.
+pub type ImageSources = std::collections::HashMap<u32, Arc<RgbaImage>>;
+
 /// Uma edição registrada no log.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Op {
@@ -115,6 +121,11 @@ pub struct Document {
     index: usize,
     next_id: u64,
 
+    /// Pixels das imagens coladas, referenciados por `Shape::Image`. Ficam
+    /// fora do log porque ele é JSON e clona camadas a cada edição.
+    images: ImageSources,
+    next_image: u32,
+
     // Estado derivado, reconstruído por `replay`.
     image: Arc<RgbaImage>,
     /// A mesma imagem com as redações e os holofotes já queimados. É dela
@@ -198,6 +209,8 @@ impl Document {
             ops: Vec::new(),
             index: 0,
             next_id: 1,
+            images: ImageSources::new(),
+            next_image: 1,
             image: image.clone(),
             redacted: image.clone(),
             framed: image,
@@ -266,11 +279,25 @@ impl Document {
     }
 
     /// Recria um documento a partir da imagem de origem e de um log gravado.
-    pub fn restore(image: RgbaImage, ops: Vec<Op>, index: usize, next_id: u64) -> Self {
+    pub fn restore(
+        image: RgbaImage,
+        ops: Vec<Op>,
+        index: usize,
+        next_id: u64,
+        images: Vec<(u32, RgbaImage)>,
+    ) -> Self {
         let mut doc = Self::new(image);
         doc.index = index.min(ops.len());
         doc.ops = ops;
         doc.next_id = next_id.max(1);
+        // O próximo `source` tem de vir depois de todos os recuperados: um id
+        // reaproveitado faria a próxima colagem trocar os pixels de uma
+        // imagem que já estava na tela.
+        doc.next_image = images.iter().map(|(id, _)| *id + 1).max().unwrap_or(1);
+        doc.images = images
+            .into_iter()
+            .map(|(id, img)| (id, Arc::new(img)))
+            .collect();
         doc.replay();
         doc
     }
@@ -438,6 +465,21 @@ impl Document {
             *seed = redact::fresh_seed();
         }
         Some(self.push(shape, style))
+    }
+
+    /// Guarda os pixels de uma imagem colada e devolve o `source` que a
+    /// referencia. Fica fora do log de propósito — ver [`Shape::Image`].
+    pub fn store_image(&mut self, image: RgbaImage) -> u32 {
+        let source = self.next_image;
+        self.next_image += 1;
+        self.images.insert(source, Arc::new(image));
+        source
+    }
+
+    /// O depósito inteiro. Clonar devolve `Arc`s, não pixels — é assim que
+    /// ele viaja para a thread que renderiza e para a gravação da sessão.
+    pub fn images(&self) -> &ImageSources {
+        &self.images
     }
 
     /// Insere anotações vindas de fora (a área de transferência), dando a

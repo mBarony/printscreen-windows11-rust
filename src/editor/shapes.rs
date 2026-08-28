@@ -212,6 +212,13 @@ pub enum Shape {
     /// Lente que escurece o resto da imagem e amplia o próprio miolo.
     Spotlight { center: Point, rx: f32, ry: f32 },
     Text { anchor: Point, content: String },
+    /// Imagem colada por cima da captura, esticada no retângulo.
+    ///
+    /// Os pixels **não** vivem aqui: ficam num depósito do documento,
+    /// referenciados por `source`. O log de operações é JSON e clona camadas
+    /// a cada edição — uma imagem embutida cresceria o arquivo em megabytes e
+    /// seria copiada a cada arrasto.
+    Image { min: Point, max: Point, source: u32 },
 }
 
 /// Geometria do contador numerado, derivada da espessura do traço.
@@ -286,6 +293,10 @@ impl Layer {
         let reach = tol + self.style.stroke_width / 2.0;
         match &self.shape {
             Shape::Line { a, b } | Shape::Ruler { a, b } => dist_to_segment(p, *a, *b) <= reach,
+            // A imagem colada é sólida: pega pelo miolo, como uma forma cheia.
+            Shape::Image { min, max, .. } => {
+                p.x >= min.x - tol && p.x <= max.x + tol && p.y >= min.y - tol && p.y <= max.y + tol
+            }
             Shape::Arrow { a, b, bend } => {
                 let path = arrow_path(*a, *b, *bend);
                 let penultimo = path[path.len().saturating_sub(2)];
@@ -399,7 +410,7 @@ impl Layer {
                 Point::new(center.x + rx, center.y + ry),
             )),
             Shape::Freehand { points, .. } => points_bounds(points),
-            Shape::Redaction { min, max, .. } => Some((*min, *max)),
+            Shape::Redaction { min, max, .. } | Shape::Image { min, max, .. } => Some((*min, *max)),
             Shape::Spotlight { center, rx, ry } => Some((
                 Point::new(center.x - rx, center.y - ry),
                 Point::new(center.x + rx, center.y + ry),
@@ -510,7 +521,7 @@ impl Layer {
 
     fn set_bbox(&mut self, min: Point, max: Point) {
         match &mut self.shape {
-            Shape::Rect { min: lo, max: hi } => {
+            Shape::Rect { min: lo, max: hi } | Shape::Image { min: lo, max: hi, .. } => {
                 *lo = min;
                 *hi = max;
             }
@@ -693,7 +704,9 @@ impl Shape {
                 mv(a);
                 mv(b);
             }
-            Self::Rect { min, max } | Self::Redaction { min, max, .. } => {
+            Self::Rect { min, max }
+            | Self::Redaction { min, max, .. }
+            | Self::Image { min, max, .. } => {
                 mv(min);
                 mv(max);
             }
@@ -722,7 +735,7 @@ impl Shape {
             Self::Ellipse { center, .. } => mv(center),
             Self::Freehand { points, .. } => points.iter_mut().for_each(mv),
             Self::Marker { center, .. } => mv(center),
-            Self::Redaction { min, max, .. } => {
+            Self::Redaction { min, max, .. } | Self::Image { min, max, .. } => {
                 mv(min);
                 mv(max);
             }
@@ -757,7 +770,7 @@ impl Shape {
             }
             Self::Freehand { points, .. } => points.iter_mut().for_each(sc),
             Self::Marker { center, .. } => sc(center),
-            Self::Redaction { min, max, .. } => {
+            Self::Redaction { min, max, .. } | Self::Image { min, max, .. } => {
                 sc(min);
                 sc(max);
             }

@@ -32,6 +32,12 @@ use super::shapes::{
 use super::EditorSession;
 use interact::{close_edit_run, handle_layer_keys, settle_edit_run};
 
+/// Texturas das imagens coladas, por `source`.
+///
+/// Ficam na sessão, e não no documento: o documento é a fonte da verdade e
+/// não conhece GPU nenhuma. São montadas sob demanda pelo canvas.
+pub(super) type ImageTextures = std::collections::HashMap<u32, egui::TextureHandle>;
+
 /// Transformação imagem → tela (pontos do egui).
 #[derive(Clone, Copy)]
 struct ToScreen {
@@ -305,7 +311,8 @@ pub(super) fn copy_and_close(session: &mut EditorSession) {
     let base = session.doc.content_image().clone();
     let layers = session.doc.layers().to_vec();
     let backdrop = session.doc.backdrop();
-    crate::jobs::spawn(move || match super::render::render(&base, &layers, backdrop) {
+    let sources = session.doc.images().clone();
+    crate::jobs::spawn(move || match super::render::render(&base, &layers, backdrop, &sources) {
         Ok(final_image) => match clipboard::copy_image(&final_image) {
             Ok(()) => notify::toast(
                 "Copiado para a área de transferência",
@@ -325,6 +332,7 @@ pub(super) fn save_and_close(session: &mut EditorSession, target: &SaveTarget) {
     let base = session.doc.content_image().clone();
     let layers = session.doc.layers().to_vec();
     let backdrop = session.doc.backdrop();
+    let sources = session.doc.images().clone();
     let opacity = session.opacity;
     let mut target = target.clone();
     // Uma imagem translúcida gravada em JPG sairia opaca: a escolha do
@@ -332,7 +340,7 @@ pub(super) fn save_and_close(session: &mut EditorSession, target: &SaveTarget) {
     if opacity < 1.0 {
         target.image_format = crate::imgout::Format::Png;
     }
-    crate::jobs::spawn(move || match super::render::render(&base, &layers, backdrop) {
+    crate::jobs::spawn(move || match super::render::render(&base, &layers, backdrop, &sources) {
         Ok(final_image) => {
             let final_image = if opacity < 1.0 {
                 final_image.with_opacity(opacity)
@@ -436,6 +444,11 @@ fn persist_session(session: &mut EditorSession) {
             return;
         }
         session.source_saved = true;
+    }
+    // As imagens coladas vão antes do log: recuperar uma sessão cujo log
+    // aponta para pixels que não estão no disco deixaria buracos na tela.
+    if let Err(err) = super::session_file::save_pasted(&session.doc, &dir) {
+        log::warn!("imagens coladas não puderam ser gravadas: {err:#}");
     }
     if let Err(err) = super::session_file::save_log(&session.doc, &dir) {
         log::warn!("log da sessão não pôde ser gravado: {err:#}");

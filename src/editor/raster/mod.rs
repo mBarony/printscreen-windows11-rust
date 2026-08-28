@@ -11,7 +11,7 @@
 pub mod fill;
 pub mod stroke;
 
-pub use fill::{fill_ellipse, fill_rect, fill_triangle};
+pub use fill::{fill_ellipse, fill_image, fill_rect, fill_triangle};
 pub use stroke::{stroke_ellipse, stroke_polylines, stroke_rect, stroke_round_rect};
 
 use crate::imgbuf::RgbaImage;

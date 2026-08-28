@@ -18,7 +18,7 @@ use crate::editor::shapes::{arrow_path,
 use crate::editor::{
     HANDLE_EDGE_ROOM_PTS, HANDLE_RADIUS_PTS,
 };
-use super::ToScreen;
+use super::{ImageTextures, ToScreen};
 use crate::editor::cut::{Axis, Band};
 use crate::editor::DragPreview;
 
@@ -60,7 +60,12 @@ fn contorno_direto(style: &crate::editor::shapes::Style) -> bool {
     style.line == LineStyle::Solid && !style.sketch
 }
 
-pub(super) fn paint_shape(painter: &egui::Painter, layer: &Layer, ts: ToScreen) {
+pub(super) fn paint_shape(
+    painter: &egui::Painter,
+    layer: &Layer,
+    ts: ToScreen,
+    textures: &ImageTextures,
+) {
     let style = &layer.style;
     let pen = Pen::new(layer);
     let stroke = Stroke::new(ts.len(style.stroke_width), color32(style.color));
@@ -159,6 +164,18 @@ pub(super) fn paint_shape(painter: &egui::Painter, layer: &Layer, ts: ToScreen) 
                 painter.add(egui::Shape::ellipse_stroke(ts.pos(*center), radii, stroke));
             } else {
                 paint_path(painter, &ellipse_path(*center, *rx, *ry), pen, ts);
+            }
+        }
+        // Os pixels vêm de uma textura montada pelo canvas, que é quem tem o
+        // depósito em mãos; aqui só resta o retângulo onde ela é esticada.
+        Shape::Image { min, max, source } => {
+            if let Some(texture) = textures.get(source) {
+                painter.image(
+                    texture.id(),
+                    Rect::from_min_max(ts.pos(*min), ts.pos(*max)),
+                    Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+                    Color32::WHITE,
+                );
             }
         }
         Shape::Freehand { points, highlight } => {
@@ -265,7 +282,9 @@ pub(super) fn shape_screen_bbox(ctx: &egui::Context, layer: &Layer, ts: ToScreen
             let geo = marker_geometry(layer.style.stroke_width);
             Rect::from_center_size(ts.pos(*center), Vec2::splat(ts.len(geo.radius) * 2.0))
         }
-        Shape::Redaction { min, max, .. } => Rect::from_min_max(ts.pos(*min), ts.pos(*max)),
+        Shape::Redaction { min, max, .. } | Shape::Image { min, max, .. } => {
+            Rect::from_min_max(ts.pos(*min), ts.pos(*max))
+        }
         Shape::Spotlight { center, rx, ry } => Rect::from_center_size(
             ts.pos(*center),
             Vec2::new(ts.len(*rx), ts.len(*ry)) * 2.0,

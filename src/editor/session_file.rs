@@ -41,12 +41,63 @@ fn log_path(dir: &Path) -> PathBuf {
 /// não muda, e reescrever dezenas de MB a cada anotação seria absurdo.
 pub fn save_source(doc: &Document, dir: &Path) -> Result<()> {
     let image = doc.source_image();
+    std::fs::write(image_path(dir), encode_raw(image)).context("gravando a imagem da sessão")
+}
+
+/// Grava os pixels das imagens coladas, um arquivo por `source`.
+///
+/// Vão ao lado do log, e não dentro dele, pelo mesmo motivo que os pixels não
+/// vivem na `Shape`: o log é JSON e é reescrito a cada anotação. Só entram os
+/// que ainda não estão no disco — uma imagem colada não muda depois.
+pub fn save_pasted(doc: &Document, dir: &Path) -> Result<()> {
+    for (source, pixels) in doc.images() {
+        let caminho = pasted_path(dir, *source);
+        if caminho.exists() {
+            continue;
+        }
+        std::fs::write(&caminho, encode_raw(pixels))
+            .with_context(|| format!("gravando a imagem colada {source}"))?;
+    }
+    Ok(())
+}
+
+fn encode_raw(image: &RgbaImage) -> Vec<u8> {
     let mut raw = Vec::with_capacity(12 + image.as_raw().len());
     raw.extend_from_slice(RAW_MAGIC);
     raw.extend_from_slice(&image.width().to_le_bytes());
     raw.extend_from_slice(&image.height().to_le_bytes());
     raw.extend_from_slice(image.as_raw());
-    std::fs::write(image_path(dir), raw).context("gravando a imagem da sessão")
+    raw
+}
+
+fn pasted_path(dir: &Path, source: u32) -> PathBuf {
+    dir.join(format!("pasted-{source}.rsraw"))
+}
+
+/// Lê de volta as imagens coladas. Um arquivo faltando não derruba a sessão:
+/// a anotação daquela imagem fica sem pixels e o resto do trabalho volta.
+fn load_pasted(dir: &Path) -> Vec<(u32, RgbaImage)> {
+    let Ok(entradas) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for entrada in entradas.flatten() {
+        let nome = entrada.file_name();
+        let Some(nome) = nome.to_str() else { continue };
+        let Some(id) = nome
+            .strip_prefix("pasted-")
+            .and_then(|resto| resto.strip_suffix(".rsraw"))
+            .and_then(|id| id.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        if let Ok(raw) = std::fs::read(entrada.path()) {
+            if let Ok(image) = decode_image(&raw) {
+                out.push((id, image));
+            }
+        }
+    }
+    out
 }
 
 /// Grava o log de operações — barato, e é o que muda a cada edição.
@@ -66,6 +117,7 @@ pub fn save_log(doc: &Document, dir: &Path) -> Result<()> {
 #[cfg(test)]
 pub fn save(doc: &Document, dir: &Path) -> Result<()> {
     save_source(doc, dir)?;
+    save_pasted(doc, dir)?;
     save_log(doc, dir)
 }
 
@@ -93,7 +145,7 @@ pub fn load(dir: &Path) -> Option<Document> {
         .collect::<Option<Vec<Op>>>()?;
     let applied = value.get("applied").and_then(Value::as_f64).unwrap_or(0.0) as usize;
     let next_id = value.get("next_id").and_then(Value::as_f64).unwrap_or(1.0) as u64;
-    Some(Document::restore(image, ops, applied, next_id))
+    Some(Document::restore(image, ops, applied, next_id, load_pasted(dir)))
 }
 
 /// Há uma sessão gravada esperando?
@@ -106,6 +158,14 @@ pub fn exists(dir: &Path) -> bool {
 pub fn clear(dir: &Path) {
     let _ = std::fs::remove_file(image_path(dir));
     let _ = std::fs::remove_file(log_path(dir));
+    // As imagens coladas vão junto: sem o log elas não têm quem as referencie.
+    if let Ok(entradas) = std::fs::read_dir(dir) {
+        for entrada in entradas.flatten() {
+            if entrada.file_name().to_string_lossy().starts_with("pasted-") {
+                let _ = std::fs::remove_file(entrada.path());
+            }
+        }
+    }
 }
 
 fn decode_image(raw: &[u8]) -> Result<RgbaImage> {
@@ -265,6 +325,12 @@ fn encode_shape(shape: &Shape) -> Value {
             ("anchor", point(*anchor)),
             ("content", json::s(content)),
         ]),
+        Shape::Image { min, max, source } => json::obj(vec![
+            ("kind", json::s("image")),
+            ("min", point(*min)),
+            ("max", point(*max)),
+            ("source", json::n(*source as f64)),
+        ]),
     }
 }
 
@@ -315,6 +381,11 @@ fn decode_shape(v: &Value) -> Option<Shape> {
             center: read_point(v.get("center"))?,
             rx: number("rx"),
             ry: number("ry"),
+        }),
+        "image" => Some(Shape::Image {
+            min: read_point(v.get("min"))?,
+            max: read_point(v.get("max"))?,
+            source: v.get("source")?.as_f64()? as u32,
         }),
         "text" => Some(Shape::Text {
             anchor: read_point(v.get("anchor"))?,
@@ -487,6 +558,7 @@ mod tests {
             // escolhe duas por índice, e inserir no meio trocaria em silêncio
             // o que aquele teste exercita.
             Shape::Ruler { a: p(33.0, 34.0), b: p(35.0, 36.0) },
+            Shape::Image { min: p(37.0, 38.0), max: p(39.0, 40.0), source: 7 },
         ]
     }
 
@@ -555,6 +627,41 @@ mod tests {
 
         clear(&dir);
         assert!(load(&dir).is_none(), "limpar apaga a sessão");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn as_imagens_coladas_voltam_com_a_sessao() {
+        let dir = std::env::temp_dir().join(format!(
+            "rustshot-session-pasted-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let mut doc = Document::new(RgbaImage::filled(20, 20, [10, 20, 30, 255]));
+        let colada = RgbaImage::filled(4, 3, [200, 100, 50, 255]);
+        let source = doc.store_image(colada);
+        doc.push(
+            Shape::Image { min: p(1.0, 1.0), max: p(9.0, 7.0), source },
+            style(),
+        );
+        save(&doc, &dir).unwrap();
+
+        let restaurado = load(&dir).expect("sessão recuperada");
+        let pixels = restaurado.images().get(&source).expect("pixels de volta");
+        assert_eq!((pixels.width(), pixels.height()), (4, 3));
+        assert_eq!(pixels.pixel(0, 0), [200, 100, 50, 255]);
+        // Um `source` reaproveitado trocaria os pixels de uma imagem que já
+        // está na tela pela próxima que for colada.
+        let mut restaurado = restaurado;
+        assert!(restaurado.store_image(RgbaImage::filled(1, 1, [0; 4])) > source);
+
+        clear(&dir);
+        assert!(
+            !dir.join(format!("pasted-{source}.rsraw")).exists(),
+            "sem o log, os pixels não têm quem os referencie"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

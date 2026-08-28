@@ -139,6 +139,8 @@ pub struct EditorSession {
     /// Imagem base + anotações + histórico (o recorte muda a imagem).
     pub doc: Document,
     pub texture: Option<egui::TextureHandle>,
+    /// Texturas das imagens coladas, montadas sob demanda pelo canvas.
+    pub image_textures: std::collections::HashMap<u32, egui::TextureHandle>,
     /// Versão dos pixels que a textura carrega, para saber quando refazê-la.
     pub texture_version: u64,
     pub tool: Tool,
@@ -243,6 +245,7 @@ impl EditorSession {
             serial,
             doc,
             texture: None,
+            image_textures: std::collections::HashMap::new(),
             texture_version: 0,
             tool: Tool::Arrow,
             color: config::parse_color(&defaults.default_color),

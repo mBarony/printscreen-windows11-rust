@@ -19,8 +19,8 @@ use crate::editor::{
     STROKE_MIN,
 };
 use super::{
-    apply_crop, copy_and_close, perform_redo, perform_undo, request_close, save_and_close,
-    save_gif,
+    apply_crop, copy_and_close, drag_out, perform_redo, perform_undo, request_close,
+    save_and_close, save_gif,
     select_tool,
 };
 use super::interact::{
@@ -104,6 +104,28 @@ pub(super) fn icon_button(ui: &mut egui::Ui, icon: Icon, selected: bool, enabled
         ui.painter()
             .rect_filled(rect, CornerRadius::same(ROUND), background);
     }
+    icons::paint(ui.painter(), rect.shrink(ICON_BUTTON * 0.28), icon, color);
+    response
+}
+
+/// Botão de ícone que também responde a arrasto.
+///
+/// Separado do `icon_button` de propósito: `Sense::click_and_drag()` em toda
+/// a barra faria cada botão competir com o arrasto do usuário sem precisar.
+pub(super) fn icon_drag_button(ui: &mut egui::Ui, icon: Icon) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(Vec2::splat(ICON_BUTTON), Sense::click_and_drag());
+    let warmth = ui.ctx().animate_bool(response.id, response.hovered());
+    let visuals = ui.visuals();
+    let background = visuals.widgets.hovered.bg_fill.gamma_multiply(warmth * 0.8);
+    if background.a() > 0 {
+        ui.painter()
+            .rect_filled(rect, CornerRadius::same(ROUND), background);
+    }
+    let color = if response.hovered() {
+        visuals.strong_text_color()
+    } else {
+        visuals.text_color()
+    };
     icons::paint(ui.painter(), rect.shrink(ICON_BUTTON * 0.28), icon, color);
     response
 }
@@ -217,6 +239,7 @@ pub(super) fn draw(ctx: &egui::Context, session: &mut EditorSession, target: &Sa
                 Some(RightAction::Copy) => copy_and_close(session),
                 Some(RightAction::Save) => save_and_close(session, target),
                 Some(RightAction::Gif) => save_gif(session, target),
+                Some(RightAction::DragOut) => drag_out(session, target),
                 // O editor não cria janelas: levanta a bandeira e o `app`,
                 // dono dos viewports, fixa e fecha esta.
                 Some(RightAction::Pin) => session.pin_requested = true,
@@ -233,6 +256,7 @@ enum RightAction {
     Copy,
     Save,
     Gif,
+    DragOut,
     Pin,
     Close,
 }
@@ -265,6 +289,15 @@ fn right_side(ui: &mut egui::Ui, can_undo: bool, can_redo: bool) -> Option<Right
             .clicked()
         {
             pedido = Some(RightAction::Copy);
+        }
+        // Arrastar daqui para outro programa. Precisa de `drag_started`, e
+        // não de `clicked`: o `DoDragDrop` só rastreia se o botão do mouse
+        // já estiver pressionado quando ele começa.
+        if icon_drag_button(ui, Icon::DragOut)
+            .on_hover_text("Arraste daqui para outro programa (solta um PNG)")
+            .drag_started()
+        {
+            pedido = Some(RightAction::DragOut);
         }
         // Não fecha o editor: é um artefato a mais, não o fim da tarefa.
         if icon_button(ui, Icon::Gif, false, true)

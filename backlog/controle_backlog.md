@@ -1,6 +1,6 @@
 # Controle do backlog
 
-Painel de andamento. Atualizado em 28/08/2026.
+Painel de andamento. Atualizado em 30/08/2026.
 
 Marque a caixa ao concluir e mova a linha para a data no rodapé. O estado
 no arquivo da feature é a fonte da verdade; esta página é o resumo.
@@ -15,12 +15,12 @@ no arquivo da feature é a fonte da verdade; esta página é o resumo.
 | Plataforma | Total | Falta | Parcial | Concluído | Cancelado | Em aberto |
 |---|---:|---:|---:|---:|---:|---:|
 | Núcleo (vale para as três plataformas) | 26 | 1 | 0 | 25 | 0 | 0 |
-| Windows | 7 | 1 | 0 | 5 | 1 | 0 |
+| Windows | 7 | 0 | 0 | 6 | 1 | 0 |
 | Linux (Hyprland + Wayland) | 12 | 11 | 0 | 0 | 0 | 1 |
 | macOS | 13 | 13 | 0 | 0 | 0 | 0 |
-| **Total** | **58** | **26** | **0** | **30** | **1** | **1** |
+| **Total** | **58** | **25** | **0** | **31** | **1** | **1** |
 
-Progresso: **30 de 57** (53%) — o total desconta o item cancelado.
+Progresso: **31 de 57** (54%) — o total desconta o item cancelado.
 
 ---
 
@@ -56,7 +56,7 @@ Progresso: **30 de 57** (53%) — o total desconta o item cancelado.
 ## Windows
 
 - [x] **[API por esquema de URL](windows/api-por-url.md)** · M
-- [ ] **[Arrastar para outro aplicativo](windows/arrastar-para-outro-app.md)** · M
+- [x] **[Arrastar para outro aplicativo](windows/arrastar-para-outro-app.md)** · M
 - [x] **[Captura com rolagem](windows/captura-com-rolagem.md)** · G
 - [x] **[Fixar a captura na tela](windows/fixar-na-tela.md)** · M
 - [x] **[Redimensionar a janela fixada](windows/redimensionar-fixada.md)** · P
@@ -154,3 +154,4 @@ Itens que não são bloqueados por trabalho, e sim por uma escolha:
 | 28/08/2026 | Seleção inteligente: o elemento sob o cursor, pelos pixels |
 | 28/08/2026 | Captura com rolagem, com a costura por correlação de faixa |
 | 28/08/2026 | `windows/upload-s3` cancelado: o app não fala com a rede, e isso é auditável |
+| 30/08/2026 | Arrastar a captura do editor para outro programa, por OLE drag & drop |

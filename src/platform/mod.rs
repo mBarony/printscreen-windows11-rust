@@ -21,6 +21,7 @@ pub mod autostart;
 pub mod capture;
 pub mod clipboard;
 pub mod dialog;
+pub mod dragdrop;
 pub mod folders;
 pub mod imagefile;
 pub mod instance;
@@ -33,8 +34,8 @@ pub mod memory;
 pub mod msgbox;
 #[cfg(feature = "ocr")]
 pub mod ocr;
-pub mod shell;
 pub mod scroll;
+pub mod shell;
 pub mod urlscheme;
 pub mod time;
 pub mod version;

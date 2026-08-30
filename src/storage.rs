@@ -159,6 +159,19 @@ pub fn write_image(target: &SaveTarget, image: &RgbaImage) -> Result<PathBuf> {
     Ok(path)
 }
 
+/// Grava a imagem como PNG num diretório qualquer, com o nome do template.
+///
+/// Existe para o arrasto para outro programa, que precisa de um arquivo em
+/// disco **antes** de o gesto começar, e numa pasta que não é a de capturas —
+/// arrastar não é salvar, e não pode encher a pasta do usuário.
+pub fn write_png_into(dir: &Path, template: &str, image: &RgbaImage) -> Result<PathBuf> {
+    let (path, file) = claim_free_path(dir, template, "png")?;
+    let writer = std::io::BufWriter::new(file);
+    crate::imgout::encode(writer, image, crate::imgout::Format::Png)
+        .with_context(|| format!("gravando {}", path.display()))?;
+    Ok(path)
+}
+
 /// Grava os quadros como um GIF que alterna entre eles; devolve o caminho.
 ///
 /// A extensão não passa pela escolha automática de formato: um GIF é um GIF,

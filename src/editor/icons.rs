@@ -33,6 +33,7 @@ pub enum Icon {
     RedactText,
     Heal,
     Gif,
+    DragOut,
     Fill,
     TextPill,
     Backdrop,
@@ -72,7 +73,7 @@ impl Icon {
     }
 
     #[cfg(test)]
-    pub const ALL: [Icon; 33] = [
+    pub const ALL: [Icon; 34] = [
         Icon::Move,
         Icon::Line,
         Icon::Arrow,
@@ -92,6 +93,7 @@ impl Icon {
         Icon::RedactText,
         Icon::Heal,
         Icon::Gif,
+        Icon::DragOut,
         Icon::Fill,
         Icon::TextPill,
         Icon::Backdrop,
@@ -130,6 +132,7 @@ impl Icon {
             Icon::RedactText => "redact_text",
             Icon::Heal => "heal",
             Icon::Gif => "gif",
+            Icon::DragOut => "drag_out",
             Icon::Fill => "fill",
             Icon::TextPill => "text_pill",
             Icon::Backdrop => "backdrop",
@@ -327,6 +330,13 @@ pub fn geometry(icon: Icon) -> Vec<Primitive> {
             Stroke(vec![(0.24, 0.76), (0.10, 0.76), (0.10, 0.62)]),
             Stroke(vec![(0.60, 0.60), (0.94, 0.94)]),
             Stroke(vec![(0.84, 0.62), (0.94, 0.72)]),
+        ],
+        // Uma folha saindo por uma seta para fora — o arquivo indo embora
+        // daqui para outro lugar.
+        Icon::DragOut => vec![
+            Stroke(vec![(0.44, 0.10), (0.10, 0.10), (0.10, 0.90), (0.60, 0.90), (0.60, 0.56)]),
+            Stroke(vec![(0.50, 0.44), (0.92, 0.44)]),
+            Fill(vec![(0.96, 0.44), (0.76, 0.33), (0.76, 0.55)]),
         ],
         // Dois quadros empilhados e uma seta de vaivém entre eles — o antes
         // e o depois alternando.

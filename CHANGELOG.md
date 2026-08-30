@@ -4,6 +4,8 @@ Histórico de versões do RustShot. Datas em 2026.
 
 ## Não lançado
 
+- **Arrastar a captura para outro programa**, por um botão da barra do editor: segure nele e arraste para o Explorer, para um campo de anexo ou para uma área de mensagem, e o que chega lá é a captura anotada como arquivo. O que viaja é um arquivo (`CF_HDROP`), e não a imagem em memória — é o formato que os destinos aceitam, e um bitmap serviria a menos programas por mais código. O PNG é gravado antes na pasta temporária, com o nome do template configurado, porque é esse nome que aparece no destino. O botão responde ao início do arrasto e não ao clique: o `DoDragDrop` só rastreia o gesto se o botão do mouse já estiver pressionado quando ele começa. É a única parte do programa que monta vtables COM à mão, para não amarrar arrastar-e-soltar à feature do reconhecimento de texto.
+
 ## v1.9.0 — 28/08
 
 Uma leva grande de anotação e de captura. O editor ganhou padrão de traço,

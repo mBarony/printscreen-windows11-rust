@@ -370,6 +370,46 @@ pub(super) fn save_gif(session: &mut EditorSession, target: &SaveTarget) {
     });
 }
 
+/// Arrasta a captura anotada para outro programa, como um arquivo.
+///
+/// **Bloqueia** enquanto o arrasto dura: `DoDragDrop` roda um laço modal
+/// próprio, e ele exige a thread que é dona da janela. O editor fica parado
+/// nesse intervalo, que é o mesmo que acontece em qualquer aplicativo nativo
+/// durante um arrasto.
+///
+/// O PNG vai para a pasta temporária com o nome do template configurado: é o
+/// nome que aparece no destino, e `captura.png` diria menos que a data.
+pub(super) fn drag_out(session: &mut EditorSession, target: &SaveTarget) {
+    commit_text_input(session);
+    let base = session.doc.content_image().clone();
+    let layers = session.doc.layers().to_vec();
+    let backdrop = session.doc.backdrop();
+    let sources = session.doc.images().clone();
+
+    let imagem = match super::render::render(&base, &layers, backdrop, &sources) {
+        Ok(imagem) => imagem,
+        Err(err) => {
+            notify::toast_error("Falha ao renderizar", &format!("{err:#}"));
+            return;
+        }
+    };
+    let destino = match crate::storage::write_png_into(
+        &std::env::temp_dir(),
+        &target.filename_template,
+        &imagem,
+    ) {
+        Ok(caminho) => caminho,
+        Err(err) => {
+            notify::toast_error("Falha ao preparar o arquivo", &format!("{err:#}"));
+            return;
+        }
+    };
+    // O arquivo temporário não é apagado depois: um destino que só o lê
+    // quando o usuário confirma encontraria o vazio. Quem limpa é o Windows.
+    let soltou = crate::platform::dragdrop::drag_file(&destino);
+    log::info!("arrasto de {} terminou (solto: {soltou})", destino.display());
+}
+
 /// Ctrl+S: renderiza, salva na pasta configurada e fecha o editor (RF-04).
 pub(super) fn save_and_close(session: &mut EditorSession, target: &SaveTarget) {
     commit_text_input(session);

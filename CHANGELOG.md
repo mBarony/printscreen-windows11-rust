@@ -4,6 +4,10 @@ Histórico de versões do RustShot. Datas em 2026.
 
 ## Não lançado
 
+## v1.11.3 — 31/08
+
+O resto da revisão de código: quatro otimizações medidas, os dois achados que faltava verificar, e as duplicações que sobravam.
+
 - **O editor ficou sensivelmente mais rápido de compor.** Quatro otimizações medidas, todas com teste que prende a saída idêntica: `blend` deixou de chamar `f32::round()` quatro vezes por pixel — no alvo x86-64 padrão cada uma é chamada de biblioteca, e `+ 0.5` dá o mesmo byte porque o valor é sempre combinação convexa de bytes; `fill_rect` parou de superamostrar 16 vezes o miolo do retângulo, onde a cobertura é sempre 1; e o replay parou de refazer redação, holofote, remendo e moldura decorativa a cada edição quando nada disso mudou — desenhar uma seta numa captura 1080p com moldura refazia um `backdrop::compose` inteiro sobre 2048×1208.
 
 - **O leitor de QR não trava mais numa captura de textura regular.** O agrupamento dos candidatos a localizador comparava cada um com todos os grupos já abertos — quadrático. Uma folha de etiquetas ou um quadriculado abre um grupo por quadradinho: numa imagem de 2400×2400 eram 212 mil candidatos e mais de dez segundos travados, e isso acontece em toda seleção do comando de reconhecer. Agora os grupos ficam indexados por célula espacial, e um teste compara bit a bit o resultado com o do laço antigo.

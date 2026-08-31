@@ -194,14 +194,14 @@ pub struct EditorSession {
     /// Enquanto houver evento chegando dentro da janela, o conjunto inteiro
     /// é um passo só de desfazer.
     pub edit_run_until: Option<f64>,
-    /// Guias de alinhamento, em px da imagem. São ajuda visual: não entram
-    /// no histórico nem na exportação.
     /// Opacidade da imagem exportada, 0,1–1,0. Abaixo de 1 a saída é
     /// forçada a PNG: o JPG não tem canal alfa.
     pub opacity: f32,
     /// Valor do campo de redimensionar, em %, enquanto ele está sendo
     /// arrastado ou digitado. Volta a 100 assim que o fator é aplicado.
     pub scale_percent: f32,
+    /// Guias de alinhamento, em px da imagem. São ajuda visual: não entram
+    /// no histórico nem na exportação.
     pub guides: Vec<Guide>,
     /// Último ponto do cursor sobre a imagem, em px — é onde uma guia nova
     /// nasce. O atalho é tratado longe do canvas, que é quem sabe a posição.

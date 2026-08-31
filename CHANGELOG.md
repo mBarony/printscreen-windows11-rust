@@ -4,6 +4,14 @@ Histórico de versões do RustShot. Datas em 2026.
 
 ## Não lançado
 
+- **O editor ficou sensivelmente mais rápido de compor.** Quatro otimizações medidas, todas com teste que prende a saída idêntica: `blend` deixou de chamar `f32::round()` quatro vezes por pixel — no alvo x86-64 padrão cada uma é chamada de biblioteca, e `+ 0.5` dá o mesmo byte porque o valor é sempre combinação convexa de bytes; `fill_rect` parou de superamostrar 16 vezes o miolo do retângulo, onde a cobertura é sempre 1; e o replay parou de refazer redação, holofote, remendo e moldura decorativa a cada edição quando nada disso mudou — desenhar uma seta numa captura 1080p com moldura refazia um `backdrop::compose` inteiro sobre 2048×1208.
+
+- **O leitor de QR não trava mais numa captura de textura regular.** O agrupamento dos candidatos a localizador comparava cada um com todos os grupos já abertos — quadrático. Uma folha de etiquetas ou um quadriculado abre um grupo por quadradinho: numa imagem de 2400×2400 eram 212 mil candidatos e mais de dez segundos travados, e isso acontece em toda seleção do comando de reconhecer. Agora os grupos ficam indexados por célula espacial, e um teste compara bit a bit o resultado com o do laço antigo.
+
+- **Uma cor com acento no `config.json` derrubava o programa.** `parse_color` cortava a string por índice de byte depois de medir o comprimento em bytes: `añbcd` tem seis bytes e o corte caía no meio do `ñ`. Aqui de todos os lugares — a leitura do config existe justamente para tolerar arquivo estragado. Junto foi verificado o outro achado pendente, sobre a amostragem que escolhe entre PNG e JPG: o defeito relatado não existe (o pior caso real visita 128 colunas, não 1–4), mas o comentário prometia um passo coprimo com a largura e nada garantia isso. Agora garante.
+
+- **A captura publica direto na memória compartilhada**, sem montar o bloco num `Vec` antes. Era uma cópia a mais da captura inteira — ~66 MB em dois monitores 4K — exatamente entre apertar o atalho e o overlay aparecer.
+
 ## v1.11.2 — 31/08
 
 As nove correções confirmadas na revisão de código, e mais três que só apareceram ao corrigi-las.

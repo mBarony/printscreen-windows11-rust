@@ -15,6 +15,7 @@
 
 use super::grade::Grade;
 use crate::imgbuf::RgbaImage;
+use std::collections::HashMap;
 
 /// Um padrão localizador candidato: onde está e de que tamanho é o módulo.
 #[derive(Clone, Copy, Debug)]
@@ -244,26 +245,46 @@ fn confirma_vertical(
 
 /// Junta candidatos que descrevem o mesmo localizador — cada linha que
 /// atravessa um deles gera um.
+///
+/// Os grupos ficam indexados por célula espacial. Comparar cada candidato com
+/// todos os grupos já abertos é quadrático, e uma textura regular — uma folha
+/// de etiquetas, um quadriculado — abre um grupo por quadradinho: numa imagem
+/// de 2400×2400 eram 212 mil candidatos contra 70 mil grupos, 12,8 s dentro
+/// desta função. Como `decode` roda em toda seleção do comando de reconhecer,
+/// isso travava o editor.
 fn agrupa(brutos: Vec<Canto>) -> Vec<Canto> {
+    // O lado da célula é 2× o maior módulo, que é o alcance máximo do teste de
+    // proximidade (o módulo de um grupo é média dos módulos dos membros, logo
+    // nunca passa do maior). Com isso, um grupo só alcança candidatos da
+    // própria célula ou das oito vizinhas — o resto nem precisa ser olhado. O
+    // `max(1,0)` é só para `brutos` vazio: `proporcao` já garante módulo ≥ 1.
+    let lado = 2.0 * brutos.iter().fold(1.0f32, |m, c| m.max(c.modulo));
+    let celula = |c: &Canto| ((c.x / lado).floor() as i32, (c.y / lado).floor() as i32);
+
     let mut grupos: Vec<(Canto, usize)> = Vec::new();
+    let mut indice: HashMap<(i32, i32), Vec<usize>> = HashMap::new();
 
     for c in brutos {
-        let mut juntou = false;
-        for (centro, n) in grupos.iter_mut() {
-            let perto = (centro.x - c.x).abs() < centro.modulo * 2.0
-                && (centro.y - c.y).abs() < centro.modulo * 2.0;
-            if perto {
-                let peso = *n as f32;
-                centro.x = (centro.x * peso + c.x) / (peso + 1.0);
-                centro.y = (centro.y * peso + c.y) / (peso + 1.0);
-                centro.modulo = (centro.modulo * peso + c.modulo) / (peso + 1.0);
-                *n += 1;
-                juntou = true;
-                break;
-            }
-        }
-        if !juntou {
+        let cel = celula(&c);
+        let Some(i) = mais_antigo_perto(&grupos, &indice, &c, cel) else {
             grupos.push((c, 1));
+            indice.entry(cel).or_default().push(grupos.len() - 1);
+            continue;
+        };
+
+        let (centro, n) = &mut grupos[i];
+        let antes = celula(centro);
+        let peso = *n as f32;
+        centro.x = (centro.x * peso + c.x) / (peso + 1.0);
+        centro.y = (centro.y * peso + c.y) / (peso + 1.0);
+        centro.modulo = (centro.modulo * peso + c.modulo) / (peso + 1.0);
+        *n += 1;
+        // A média move o centro, e ele pode cruzar a fronteira da célula. O
+        // grupo passa a ser procurado também pela nova; a entrada antiga fica
+        // para trás sem estragar nada, porque a proximidade é reconferida.
+        let agora = celula(centro);
+        if agora != antes {
+            indice.entry(agora).or_default().push(i);
         }
     }
 
@@ -273,6 +294,39 @@ fn agrupa(brutos: Vec<Canto>) -> Vec<Canto> {
     grupos.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
     grupos.truncate(8);
     grupos.into_iter().map(|(c, _)| c).collect()
+}
+
+/// Entre os grupos das nove células ao redor de `cel`, o de menor índice que
+/// aceita o candidato.
+///
+/// Menor índice é o que preserva a escolha do laço linear que existia aqui: ele
+/// parava no primeiro grupo compatível, e os grupos nascem em ordem de índice.
+fn mais_antigo_perto(
+    grupos: &[(Canto, usize)],
+    indice: &HashMap<(i32, i32), Vec<usize>>,
+    c: &Canto,
+    cel: (i32, i32),
+) -> Option<usize> {
+    let mut achado: Option<usize> = None;
+    for gx in (cel.0 - 1)..=(cel.0 + 1) {
+        for gy in (cel.1 - 1)..=(cel.1 + 1) {
+            let Some(vizinhos) = indice.get(&(gx, gy)) else {
+                continue;
+            };
+            for &i in vizinhos {
+                if achado.is_some_and(|a| a <= i) {
+                    continue;
+                }
+                let centro = &grupos[i].0;
+                if (centro.x - c.x).abs() < centro.modulo * 2.0
+                    && (centro.y - c.y).abs() < centro.modulo * 2.0
+                {
+                    achado = Some(i);
+                }
+            }
+        }
+    }
+    achado
 }
 
 /// Escolhe os três que formam o triângulo retângulo isósceles do símbolo e os
@@ -458,6 +512,69 @@ mod tests {
                 assert!(!achada.escuro(7, 7));
             }
         }
+    }
+
+    /// O agrupamento linear que o índice espacial substituiu, mantido aqui como
+    /// especificação: o índice só pode ser aceito se der exatamente isto.
+    fn agrupa_linear(brutos: Vec<Canto>) -> Vec<Canto> {
+        let mut grupos: Vec<(Canto, usize)> = Vec::new();
+        for c in brutos {
+            let mut juntou = false;
+            for (centro, n) in grupos.iter_mut() {
+                let perto = (centro.x - c.x).abs() < centro.modulo * 2.0
+                    && (centro.y - c.y).abs() < centro.modulo * 2.0;
+                if perto {
+                    let peso = *n as f32;
+                    centro.x = (centro.x * peso + c.x) / (peso + 1.0);
+                    centro.y = (centro.y * peso + c.y) / (peso + 1.0);
+                    centro.modulo = (centro.modulo * peso + c.modulo) / (peso + 1.0);
+                    *n += 1;
+                    juntou = true;
+                    break;
+                }
+            }
+            if !juntou {
+                grupos.push((c, 1));
+            }
+        }
+        grupos.retain(|(_, n)| *n >= 2);
+        grupos.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
+        grupos.truncate(8);
+        grupos.into_iter().map(|(c, _)| c).collect()
+    }
+
+    fn bits(cantos: &[Canto]) -> Vec<(u32, u32, u32)> {
+        cantos.iter().map(|c| (c.x.to_bits(), c.y.to_bits(), c.modulo.to_bits())).collect()
+    }
+
+    /// Mesmos candidatos, mesmo resultado — bit a bit, porque a ordem das
+    /// médias tem de ser a mesma para os floats baterem.
+    #[test]
+    fn o_indice_espacial_agrupa_igual_ao_laco_linear() {
+        // Candidatos como a varredura os produz: várias linhas por localizador,
+        // em ordem de y. Duas escalas de módulo na mesma imagem, que é o caso
+        // que a célula única do índice tem de aguentar.
+        let mut brutos = Vec::new();
+        let mut semente = 0x5eed_1234u32;
+        let mut aleatorio = move || {
+            semente = semente.wrapping_mul(1664525).wrapping_add(1013904223);
+            (semente >> 16) as f32 / 65536.0
+        };
+        for y in 0..200usize {
+            for coluna in 0..12usize {
+                let modulo = if coluna % 4 == 0 { 6.0 } else { 1.0 };
+                let jitter = aleatorio() - 0.5;
+                brutos.push(Canto {
+                    x: coluna as f32 * 19.0 + jitter,
+                    y: y as f32 + jitter,
+                    modulo: modulo + jitter * 0.1,
+                });
+            }
+        }
+
+        let esperado = agrupa_linear(brutos.clone());
+        assert!(!esperado.is_empty(), "o caso de teste tem de formar grupos");
+        assert_eq!(bits(&agrupa(brutos)), bits(&esperado));
     }
 
     #[test]

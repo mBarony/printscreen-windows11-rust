@@ -77,15 +77,22 @@ pub fn resolve(format: Format, image: &RgbaImage) -> Format {
 
 /// `true` quando a imagem tem cores demais para ser interface ou texto.
 ///
-/// A amostragem percorre a imagem com um passo primo em relação à largura,
-/// para não cair sempre na mesma coluna — numa captura de janela, amostrar só
-/// a coluna da barra lateral diria que a tela inteira tem duas cores.
+/// A amostragem percorre a imagem com um passo **coprimo com a largura**, para
+/// varrer todas as colunas em vez de voltar sempre às mesmas — numa captura de
+/// janela, amostrar só a coluna da barra lateral diria que a tela inteira tem
+/// duas cores.
+///
+/// A coprimalidade era prometida no comentário e não existia no código: o passo
+/// saía de uma divisão e a largura fazia o que quisesse com ele. Não chegava a
+/// ser o desastre que o nome sugere — a pior resolução comum, 2560×1440, ainda
+/// visitava 128 colunas —, mas 128 de 2560 é 5% da imagem decidindo o formato
+/// de saída.
 fn parece_fotografica(image: &RgbaImage) -> bool {
     let total = (image.width() as usize) * (image.height() as usize);
     if total == 0 {
         return false;
     }
-    let passo = (total / AMOSTRA).max(1);
+    let passo = passo_coprimo((total / AMOSTRA).max(1), image.width() as usize);
     let mut cores = std::collections::HashSet::new();
     let mut vistos = 0usize;
 
@@ -100,6 +107,23 @@ fn parece_fotografica(image: &RgbaImage) -> bool {
     }
 
     vistos > 0 && (cores.len() as f32 / vistos as f32) > LIMIAR_FOTOGRAFICO
+}
+
+/// O primeiro passo a partir de `inicial` que não compartilha divisor com a
+/// largura — é o que faz a varredura passar por todas as colunas.
+///
+/// A busca acaba: entre `inicial` e `inicial + largura` há sempre um coprimo,
+/// porque basta cair num valor congruente a 1 módulo a largura.
+fn passo_coprimo(inicial: usize, largura: usize) -> usize {
+    fn mdc(a: usize, b: usize) -> usize {
+        if b == 0 { a } else { mdc(b, a % b) }
+    }
+    if largura <= 1 {
+        return inicial.max(1);
+    }
+    (inicial..inicial + largura)
+        .find(|p| mdc(*p, largura) == 1)
+        .unwrap_or(inicial)
 }
 
 /// Codifica a imagem, devolvendo a extensão usada.
@@ -137,6 +161,34 @@ fn encode_png<W: Write>(writer: W, image: &RgbaImage) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Nas resoluções reais o passo tem de varrer TODAS as colunas. Antes ele
+    /// saía de uma divisão e a largura decidia: a 2560×1440 a varredura via 128
+    /// colunas das 2560, e a 1280×720 via 256 das 1280.
+    #[test]
+    fn o_passo_varre_todas_as_colunas() {
+        fn mdc(a: usize, b: usize) -> usize {
+            if b == 0 { a } else { mdc(b, a % b) }
+        }
+        for (w, h) in [
+            (1920usize, 1080usize),
+            (2560, 1440),
+            (3840, 2160),
+            (1366, 768),
+            (1280, 720),
+            (3440, 1440),
+            (800, 600),
+        ] {
+            let passo = passo_coprimo((w * h / AMOSTRA).max(1), w);
+            assert_eq!(mdc(passo, w), 1, "{w}x{h}: passo {passo} não é coprimo com {w}");
+        }
+    }
+
+    #[test]
+    fn o_passo_coprimo_aguenta_largura_degenerada() {
+        assert_eq!(passo_coprimo(1, 0), 1);
+        assert_eq!(passo_coprimo(7, 1), 7);
+    }
 
     /// Imagem com poucas cores em áreas grandes — o perfil de uma interface.
     fn interface() -> RgbaImage {

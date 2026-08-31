@@ -273,39 +273,25 @@ fn run_gui(request: cli::GuiRequest) {
 
     log::info!("RustShot {} iniciando (GUI)", env!("CARGO_PKG_VERSION"));
 
-    // O viewport-raiz precisa ficar VISÍVEL para o SO (janela oculta não recebe
-    // WM_PAINT e o `update` nunca roda), mas imperceptível para o usuário: 1×1
-    // px, sem decoração, fora da área da tela, sem ativação e sem
-    // redimensionar/maximizar. `visible(false)` era a causa do retângulo preto:
-    // em máquinas onde a flag não segurava a janela, ela surgia no canto do
-    // monitor. O App ainda a remove do Alt-Tab (WS_EX_TOOLWINDOW).
-    let options = eframe::NativeOptions {
-        // wgpu (D3D12/DXGI): apresentação composta pelo DWM como qualquer
-        // app moderno — o glow/OpenGL sofria unredirection em tela cheia.
-        renderer: eframe::Renderer::Wgpu,
-        viewport: egui::ViewportBuilder::default()
-            .with_title(app::ROOT_TITLE)
-            .with_decorations(false)
-            .with_taskbar(false)
-            .with_active(false)
-            .with_resizable(false)
-            .with_maximize_button(false)
-            .with_minimize_button(false)
-            .with_position(egui::Pos2::new(-32000.0, -32000.0))
-            .with_inner_size(egui::Vec2::new(1.0, 1.0))
-            .with_icon(std::sync::Arc::new(app::app_icon_data())),
-        persist_window: false,
-        centered: false,
-        wgpu_options: wgpu_options(),
-        ..Default::default()
-    };
-
-    run_event_loop_with(config, task, options);
+    run_event_loop(config, task);
 }
 
-/// Sobe o eframe com a janela-raiz padrão deste processo.
+/// Sobe o eframe com a janela-raiz deste processo.
+///
+/// O viewport-raiz precisa ficar VISÍVEL para o SO (janela oculta não recebe
+/// WM_PAINT e o `update` nunca roda), mas imperceptível para o usuário: 1×1 px,
+/// sem decoração, fora da área da tela, sem ativação e sem
+/// redimensionar/maximizar. `visible(false)` era a causa do retângulo preto: em
+/// máquinas onde a flag não segurava a janela, ela surgia no canto do monitor.
+/// O App ainda a remove do Alt-Tab (WS_EX_TOOLWINDOW).
+///
+/// É o único dono desta descrição: os dois caminhos que sobem a GUI — o
+/// `--gui …` e a abertura de imagem do disco — montavam as mesmas vinte linhas
+/// cada um, e um esquecimento num deles produziria janelas diferentes.
 fn run_event_loop(config: config::Config, task: app::Task) {
     let options = eframe::NativeOptions {
+        // wgpu (D3D12/DXGI): apresentação composta pelo DWM como qualquer app
+        // moderno — o glow/OpenGL sofria unredirection em tela cheia.
         renderer: eframe::Renderer::Wgpu,
         viewport: egui::ViewportBuilder::default()
             .with_title(app::ROOT_TITLE)
@@ -323,14 +309,7 @@ fn run_event_loop(config: config::Config, task: app::Task) {
         wgpu_options: wgpu_options(),
         ..Default::default()
     };
-    run_event_loop_with(config, task, options);
-}
 
-fn run_event_loop_with(
-    config: config::Config,
-    task: app::Task,
-    options: eframe::NativeOptions,
-) {
     let result = eframe::run_native(
         APP_NAME,
         options,

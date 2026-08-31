@@ -53,45 +53,80 @@ impl ShotEntry {
 /// instante** da captura: se o processo de GUI as enumerasse ao subir, uns
 /// 300 ms depois, uma janela movida nesse intervalo apareceria no lugar
 /// errado sobre os pixels congelados.
+/// O bloco como `Vec`. Só os testes de ida-e-volta usam: em produção o
+/// `publish` escreve direto na memória mapeada, para não copiar tudo duas vezes.
+#[cfg(test)]
 pub fn encode(shots: &[MonitorShot], windows: &[WindowTarget]) -> Vec<u8> {
-    let pixels_start = HEADER_BYTES + shots.len() * ENTRY_BYTES + windows.len() * WINDOW_BYTES;
-    let titles_start =
-        pixels_start + shots.iter().map(|s| s.image.as_raw().len()).sum::<usize>();
-    let total: usize =
-        titles_start + windows.iter().map(|w| w.title.len()).sum::<usize>();
+    let mut buf = vec![0u8; tamanho(shots, windows).2];
+    escreve(shots, windows, &mut buf);
+    buf
+}
 
-    let mut buf = Vec::with_capacity(total);
-    buf.extend_from_slice(&MAGIC.to_le_bytes());
-    buf.extend_from_slice(&(shots.len() as u32).to_le_bytes());
-    buf.extend_from_slice(&(windows.len() as u32).to_le_bytes());
+/// Onde começam os pixels, onde começam os títulos, e o total — as três somas
+/// que o bloco precisa antes de existir.
+///
+/// Separado de `escreve` para o `publish` poder criar o mapeamento do tamanho
+/// certo e escrever direto dentro dele: montar um `Vec` antes custaria uma
+/// segunda cópia de tudo, e em dois monitores 4K "tudo" são ~66 MB — bem no
+/// meio da latência entre apertar o atalho e o overlay aparecer.
+fn tamanho(shots: &[MonitorShot], windows: &[WindowTarget]) -> (usize, usize, usize) {
+    let pixels_start = HEADER_BYTES + shots.len() * ENTRY_BYTES + windows.len() * WINDOW_BYTES;
+    let titles_start = pixels_start + shots.iter().map(|s| s.image.as_raw().len()).sum::<usize>();
+    let total = titles_start + windows.iter().map(|w| w.title.len()).sum::<usize>();
+    (pixels_start, titles_start, total)
+}
+
+/// Escreve o bloco em `dst`, que tem de ter exatamente o tamanho que `tamanho`
+/// devolve. Menos que isso entra em pânico no primeiro `copy_from_slice` — o
+/// que é a resposta certa: um bloco curto seria lido do outro lado como pixels.
+fn escreve(shots: &[MonitorShot], windows: &[WindowTarget], dst: &mut [u8]) {
+    let (pixels_start, titles_start, total) = tamanho(shots, windows);
+    debug_assert_eq!(dst.len(), total);
+
+    let mut escritor = Escritor { dst, at: 0 };
+    escritor.put(&MAGIC.to_le_bytes());
+    escritor.put(&(shots.len() as u32).to_le_bytes());
+    escritor.put(&(windows.len() as u32).to_le_bytes());
 
     let mut offset = pixels_start as u64;
     for shot in shots {
-        buf.extend_from_slice(&shot.x.to_le_bytes());
-        buf.extend_from_slice(&shot.y.to_le_bytes());
-        buf.extend_from_slice(&shot.width.to_le_bytes());
-        buf.extend_from_slice(&shot.height.to_le_bytes());
-        buf.extend_from_slice(&shot.scale.to_le_bytes());
-        buf.extend_from_slice(&offset.to_le_bytes());
+        escritor.put(&shot.x.to_le_bytes());
+        escritor.put(&shot.y.to_le_bytes());
+        escritor.put(&shot.width.to_le_bytes());
+        escritor.put(&shot.height.to_le_bytes());
+        escritor.put(&shot.scale.to_le_bytes());
+        escritor.put(&offset.to_le_bytes());
         offset += shot.image.as_raw().len() as u64;
     }
     let mut title_at = titles_start as u64;
     for window in windows {
-        buf.extend_from_slice(&window.x.to_le_bytes());
-        buf.extend_from_slice(&window.y.to_le_bytes());
-        buf.extend_from_slice(&window.width.to_le_bytes());
-        buf.extend_from_slice(&window.height.to_le_bytes());
-        buf.extend_from_slice(&title_at.to_le_bytes());
-        buf.extend_from_slice(&(window.title.len() as u32).to_le_bytes());
+        escritor.put(&window.x.to_le_bytes());
+        escritor.put(&window.y.to_le_bytes());
+        escritor.put(&window.width.to_le_bytes());
+        escritor.put(&window.height.to_le_bytes());
+        escritor.put(&title_at.to_le_bytes());
+        escritor.put(&(window.title.len() as u32).to_le_bytes());
         title_at += window.title.len() as u64;
     }
     for shot in shots {
-        buf.extend_from_slice(shot.image.as_raw());
+        escritor.put(shot.image.as_raw());
     }
     for window in windows {
-        buf.extend_from_slice(window.title.as_bytes());
+        escritor.put(window.title.as_bytes());
     }
-    buf
+}
+
+/// Cursor de escrita sequencial sobre um buffer de tamanho já conhecido.
+struct Escritor<'a> {
+    dst: &'a mut [u8],
+    at: usize,
+}
+
+impl Escritor<'_> {
+    fn put(&mut self, bytes: &[u8]) {
+        self.dst[self.at..self.at + bytes.len()].copy_from_slice(bytes);
+        self.at += bytes.len();
+    }
 }
 
 /// Lê a lista de janelas. Um bloco com lista inválida devolve lista vazia —
@@ -236,16 +271,23 @@ mod imp {
         }
     }
 
-    /// Cria o mapeamento e copia as capturas para dentro dele.
+    /// Cria o mapeamento e escreve as capturas dentro dele.
+    ///
+    /// A escrita vai **direto na view**, sem `Vec` intermediário: montar o
+    /// bloco antes custaria uma cópia a mais da captura inteira, e é neste
+    /// ponto — entre o BitBlt e o processo de GUI nascer — que o usuário está
+    /// esperando o overlay aparecer.
     pub fn publish(shots: &[MonitorShot], windows: &[WindowTarget]) -> Result<SharedShots> {
-        let bytes = encode(shots, windows);
-        let len = bytes.len();
+        let len = super::tamanho(shots, windows).2;
         let name = next_name();
         let wide_name = crate::platform::wide(&name);
 
         // SAFETY: cria um mapeamento anônimo em memória (INVALID_HANDLE_VALUE)
-        // do tamanho exato, mapeia a view, copia `bytes` e desfaz a view. O
-        // handle continua vivo em SharedShots.
+        // do tamanho exato, mapeia a view, escreve e desfaz a view. O slice
+        // cobre exatamente os `len` bytes que o `CreateFileMappingW` reservou e
+        // o `MapViewOfFile` mapeou, e `escreve` grava exatamente esse tanto —
+        // é o mesmo `tamanho` que dimensionou os três. O handle continua vivo
+        // em SharedShots.
         unsafe {
             let handle = CreateFileMappingW(
                 INVALID_HANDLE_VALUE,
@@ -263,7 +305,8 @@ mod imp {
                 CloseHandle(handle);
                 return Err(err!("MapViewOfFile falhou"));
             }
-            std::ptr::copy_nonoverlapping(bytes.as_ptr(), view.Value.cast::<u8>(), len);
+            let destino = std::slice::from_raw_parts_mut(view.Value.cast::<u8>(), len);
+            super::escreve(shots, windows, destino);
             UnmapViewOfFile(view);
             Ok(SharedShots { name, handle, len })
         }

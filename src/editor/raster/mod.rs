@@ -32,13 +32,18 @@ pub(super) fn blend(pixel: &mut [u8], color: [u8; 4], coverage: f32) {
     if alpha <= 0.0 {
         return;
     }
+    // `+ 0.5` no lugar de `.round()`: no alvo x86-64 padrão o `round` do f32
+    // é chamada de biblioteca (arredonda meio-para-longe-do-zero, que não tem
+    // instrução), e são quatro por pixel composto. Aqui os dois dão o mesmo
+    // byte porque o valor é sempre combinação convexa de bytes, logo está em
+    // 0..=255: para valor não negativo, truncar `x + 0.5` É arredondar.
     for i in 0..3 {
         let src = color[i] as f32;
         let dst = pixel[i] as f32;
-        pixel[i] = (src * alpha + dst * (1.0 - alpha)).round() as u8;
+        pixel[i] = (src * alpha + dst * (1.0 - alpha) + 0.5) as u8;
     }
     let dst_a = pixel[3] as f32 / 255.0;
-    pixel[3] = ((alpha + dst_a * (1.0 - alpha)) * 255.0).round() as u8;
+    pixel[3] = ((alpha + dst_a * (1.0 - alpha)) * 255.0 + 0.5) as u8;
 }
 
 /// Recorta um bounding box em coordenadas de pixel inteiras dentro da imagem.
@@ -66,6 +71,19 @@ pub(super) fn subsample_at(px: u32, py: u32, index: u32) -> P {
     )
 }
 
+/// Fração das 16 subamostras do pixel `(px, py)` que caem dentro da forma.
+#[inline]
+pub(super) fn coverage(px: u32, py: u32, inside: impl Fn(f32, f32) -> bool) -> f32 {
+    let mut hits = 0u32;
+    for s in 0..SUBSAMPLES {
+        let (x, y) = subsample_at(px, py, s);
+        if inside(x, y) {
+            hits += 1;
+        }
+    }
+    hits as f32 / SUBSAMPLES as f32
+}
+
 /// Varre o bounding box avaliando `inside` em 16 subamostras por pixel.
 pub(super) fn rasterize(
     img: &mut RgbaImage,
@@ -78,15 +96,9 @@ pub(super) fn rasterize(
     };
     for py in y0..y1 {
         for px in x0..x1 {
-            let mut hits = 0u32;
-            for s in 0..SUBSAMPLES {
-                let (x, y) = subsample_at(px, py, s);
-                if inside(x, y) {
-                    hits += 1;
-                }
-            }
-            if hits > 0 {
-                blend(img.pixel_mut(px, py), color, hits as f32 / SUBSAMPLES as f32);
+            let cov = coverage(px, py, &inside);
+            if cov > 0.0 {
+                blend(img.pixel_mut(px, py), color, cov);
             }
         }
     }
@@ -176,6 +188,28 @@ mod tests {
             let (x, y) = subsample_at(3, 7, s);
             assert!(x > 3.0 && x < 4.0, "subamostra {s} em x");
             assert!(y > 7.0 && y < 8.0, "subamostra {s} em y");
+        }
+    }
+
+    #[test]
+    fn blend_rounds_exactly_like_round() {
+        // Trava o `+ 0.5` que substituiu o `.round()` em `blend`: os dois têm
+        // de dar o mesmo byte em todo o domínio real da função.
+        for cov in [1.0_f32, 7.0 / 16.0] {
+            for a in 0..=255u32 {
+                for src in (0..=255u32).step_by(17) {
+                    for dst in (0..=255u32).step_by(17) {
+                        let mut pixel = [dst as u8; 4];
+                        blend(&mut pixel, [src as u8, 0, 0, a as u8], cov);
+                        let alpha = (a as f32 / 255.0) * cov;
+                        let cor = (src as f32 * alpha + dst as f32 * (1.0 - alpha)).round() as u8;
+                        let dst_a = dst as f32 / 255.0;
+                        let opacidade = ((alpha + dst_a * (1.0 - alpha)) * 255.0).round() as u8;
+                        assert_eq!(pixel[0], cor, "cor com src={src} dst={dst} a={a} cov={cov}");
+                        assert_eq!(pixel[3], opacidade, "alfa com dst={dst} a={a} cov={cov}");
+                    }
+                }
+            }
         }
     }
 

@@ -1,6 +1,8 @@
 //! Primitivas de preenchimento do rasterizador.
 
-use super::{blend, clip_bbox, inside_ellipse, inside_round_rect, rasterize, P};
+use super::{
+    blend, clamp_radius, clip_bbox, coverage, inside_ellipse, inside_round_rect, rasterize, P,
+};
 use crate::imgbuf::RgbaImage;
 
 /// Desenha `src` esticada no retângulo `min..max`, compondo src-over.
@@ -66,15 +68,44 @@ pub fn fill_triangle(img: &mut RgbaImage, p0: P, p1: P, p2: P, color: [u8; 4]) {
     });
 }
 
+/// Pixel `(px, py)` inteiramente contido no retângulo arredondado: basta cair
+/// na cruz das duas faixas centrais, `[min.x, max.x] × [min.y+r, max.y-r]`
+/// unida a `[min.x+r, max.x-r] × [min.y, max.y]`. Nelas o arco do canto nunca
+/// morde o pixel, então as 16 subamostras dariam todas "dentro".
+#[inline]
+fn pixel_coberto(px: u32, py: u32, min: P, max: P, r: f32) -> bool {
+    let (esq, dir) = (px as f32, px as f32 + 1.0);
+    let (topo, base) = (py as f32, py as f32 + 1.0);
+    (esq >= min.0 && dir <= max.0 && topo >= min.1 + r && base <= max.1 - r)
+        || (esq >= min.0 + r && dir <= max.0 - r && topo >= min.1 && base <= max.1)
+}
+
 /// Retângulo preenchido; `radius` acima de zero arredonda os cantos.
 pub fn fill_rect(img: &mut RgbaImage, min: P, max: P, radius: f32, color: [u8; 4]) {
     if min.0 >= max.0 || min.1 >= max.1 {
         return;
     }
     let bbox = (min.0 - 1.0, min.1 - 1.0, max.0 + 1.0, max.1 + 1.0);
-    rasterize(img, bbox, color, |x, y| {
-        inside_round_rect((x, y), min, max, radius)
-    });
+    let Some((x0, y0, x1, y1)) = clip_bbox(img, bbox) else {
+        return;
+    };
+    // O miolo é quase toda a área do retângulo, e ali superamostrar 16 vezes
+    // só reconfirma cobertura 1 — daí o atalho, em vez de chamar `rasterize`.
+    // Pesa porque a moldura decorativa empilha 36 retângulos do tamanho da
+    // captura para fazer a sombra.
+    let r = clamp_radius(min, max, radius);
+    for py in y0..y1 {
+        for px in x0..x1 {
+            let cov = if pixel_coberto(px, py, min, max, r) {
+                1.0
+            } else {
+                coverage(px, py, |x, y| inside_round_rect((x, y), min, max, radius))
+            };
+            if cov > 0.0 {
+                blend(img.pixel_mut(px, py), color, cov);
+            }
+        }
+    }
 }
 
 /// Elipse preenchida (também serve de disco, com `rx == ry`).
@@ -124,6 +155,34 @@ mod tests {
         assert_eq!(img.pixel(32, 32)[0], 255, "miolo preenchido");
         assert_eq!(img.pixel(17, 17), [0, 0, 0, 255], "canto recuado pelo raio");
         assert_eq!(img.pixel(32, 17)[0], 255, "meio da aresta continua cheio");
+    }
+
+    #[test]
+    fn rect_shortcut_matches_full_supersampling() {
+        // Trava o atalho do miolo de `fill_rect`: pixel a pixel, o resultado
+        // tem de ser o mesmo de superamostrar o retângulo inteiro.
+        let casos = [
+            ((16.0, 16.0), (48.0, 48.0), 0.0),
+            ((10.5, 12.25), (50.75, 44.5), 7.5),
+            ((16.0, 16.0), (48.0, 32.0), 100.0), // raio maior que o lado
+            ((-10.0, -10.0), (80.0, 80.0), 6.0), // recortado nas bordas
+        ];
+        for (min, max, radius) in casos {
+            let cor = [255, 0, 0, 160];
+            let mut rapido = canvas();
+            fill_rect(&mut rapido, min, max, radius, cor);
+            let mut lento = canvas();
+            let bbox = (min.0 - 1.0, min.1 - 1.0, max.0 + 1.0, max.1 + 1.0);
+            rasterize(&mut lento, bbox, cor, |x, y| {
+                inside_round_rect((x, y), min, max, radius)
+            });
+            for y in 0..rapido.height() {
+                for x in 0..rapido.width() {
+                    let esperado = lento.pixel(x, y);
+                    assert_eq!(rapido.pixel(x, y), esperado, "r={radius} em ({x}, {y})");
+                }
+            }
+        }
     }
 
     #[test]

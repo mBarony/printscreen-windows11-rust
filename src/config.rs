@@ -638,6 +638,14 @@ pub fn parse_color(hex: &str) -> [u8; 4] {
         u8::from_str_radix(s, 16).ok()
     }
     let h = hex.trim().trim_start_matches('#');
+    // `h.len()` conta bytes, e os cortes abaixo são por índice de byte: num
+    // valor com caractere multibyte de largura ímpar — `añbcd` tem 6 bytes e o
+    // corte `[0..2]` cai no meio do `ñ` — o fatiamento derrubava o processo.
+    // Aqui de todos os lugares: a leitura do config é o caminho que existe
+    // para tolerar arquivo estragado, não para morrer com ele.
+    if !h.is_ascii() {
+        return PADRAO_DE_COR;
+    }
     let parsed = match h.len() {
         6 => Some([byte(&h[0..2]), byte(&h[2..4]), byte(&h[4..6]), Some(255)]),
         8 => Some([byte(&h[0..2]), byte(&h[2..4]), byte(&h[4..6]), byte(&h[6..8])]),
@@ -646,9 +654,12 @@ pub fn parse_color(hex: &str) -> [u8; 4] {
     if let Some([Some(r), Some(g), Some(b), Some(a)]) = parsed {
         [r, g, b, a]
     } else {
-        [0xFF, 0x3B, 0x30, 0xFF]
+        PADRAO_DE_COR
     }
 }
+
+/// A cor que vale quando o valor no arquivo não serve.
+const PADRAO_DE_COR: [u8; 4] = [0xFF, 0x3B, 0x30, 0xFF];
 
 pub fn format_color(rgba: [u8; 4]) -> String {
     let [r, g, b, a] = rgba;
@@ -669,6 +680,10 @@ mod tests {
         assert_eq!(parse_color("ff3b30"), [0xFF, 0x3B, 0x30, 0xFF]);
         assert_eq!(parse_color("#11223344"), [0x11, 0x22, 0x33, 0x44]);
         assert_eq!(parse_color("banana"), [0xFF, 0x3B, 0x30, 0xFF]);
+        // Seis bytes, mas o corte por byte cai no meio do `ñ`: antes isto
+        // derrubava o processo em vez de recair no padrão.
+        assert_eq!(parse_color("añbcd"), [0xFF, 0x3B, 0x30, 0xFF]);
+        assert_eq!(parse_color("#çãbcdef"), [0xFF, 0x3B, 0x30, 0xFF]);
         assert_eq!(format_color([0xFF, 0x3B, 0x30, 0xFF]), "#FF3B30");
     }
 

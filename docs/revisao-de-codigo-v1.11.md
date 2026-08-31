@@ -101,7 +101,13 @@ Correção proposta: um contador monotônico de edições no `Document` (`u64` i
 
 `src/editor/ui/canvas.rs:440`. Um `return` de dentro da closure do `CentralPanel` pula o bloco de desenho, e o canvas fica sem pintura por um quadro.
 
-### Não verificados
+### Não verificados — os dois foram verificados em 31/08/2026
+
+**`parse_color` entra em pânico com caractere multibyte: CONFIRMADO e corrigido.** `h.len()` conta bytes e os cortes são por índice de byte, então basta um valor de seis bytes com um caractere de largura ímpar no meio — `añbcd` — para o corte `[0..2]` cair dentro do `ñ` e derrubar o processo. Aqui de todos os lugares: a leitura do config existe para tolerar arquivo estragado. A guarda é `h.is_ascii()`, e o teste foi provado falhando com ela desligada.
+
+**A heurística de formato colapsa em 1–4 colunas: REFUTADO.** A conta não fecha. O número de colunas visitadas é `largura / mdc(passo, largura)`, e nas resoluções reais dá 960 (1920×1080), 128 (2560×1440), 256 (3840×2160), 683 (1366×768), 3440 (3440×1440). O pior caso comum é 128 de 2560, não 1–4.
+
+O que era verdade no achado, por baixo do número errado: **o comentário prometia um passo "primo em relação à largura" e nada no código garantia isso** — a coprimalidade era sorte. Como 128 colunas ainda é 5% da imagem decidindo o formato de saída, a promessa virou código: o passo agora anda até ser coprimo com a largura, e um teste confere isso nas sete resoluções acima.
 
 - `src/config.rs:642` — `parse_color` fatia a string por índice de byte (`&h[0..2]`) depois de testar `h.len()`, que também é em bytes. Um caractere multibyte no valor de cor do `config.json` faz o fatiamento cair no meio de um code point e o processo entra em pânico. Plausível e barato de confirmar; a leitura do config é justamente o caminho que deveria ser tolerante a arquivo estragado.
 - `src/imgout.rs:88` — a amostragem da heurística que escolhe entre PNG e JPG colapsa em poucas colunas em resoluções comuns, ao contrário do que o comentário promete.
@@ -114,9 +120,23 @@ Registrados para não voltarem.
 
 **Vazamento de HGLOBAL quando `GlobalLock` falha** (`platform/dragdrop.rs:171`). O cenário alegado era memória esgotada durante o arrasto, e `GlobalLock` não aloca: com `GMEM_MOVEABLE` sem `GMEM_DISCARDABLE` o bloco já é comprometido no `GlobalAlloc`, e o Lock só incrementa uma contagem. O ramo de falha é inalcançável na prática.
 
-## Otimizações
+## Otimizações — quatro das seis aplicadas em 31/08/2026
 
-Em ordem de ganho medido.
+Em ordem de ganho medido. As quatro primeiras entraram, cada uma com teste que
+prende a equivalência de saída: `blend_rounds_exactly_like_round` percorre o
+domínio real da função; `rect_shortcut_matches_full_supersampling` compara pixel
+a pixel o atalho contra a superamostragem completa, com raio maior que o lado e
+com o retângulo cortado nas bordas; `mover_a_redacao_refaz_os_pixels_queimados`
+prova que a cache do replay percebe a mudança; e
+`o_indice_espacial_agrupa_igual_ao_laco_linear` compara bit a bit o resultado do
+índice espacial contra o laço quadrático que ele substituiu.
+
+**A quinta não foi aplicada** (`resident.rs:354`, a cópia da tela cheia). Evitá-la
+exige `save_in_background` passar a receber `Arc<RgbaImage>`, o que muda quatro
+pontos de chamada para servir a um. A cópia acontece uma vez por captura de tela
+cheia e fora do caminho interativo — os dois consumidores já são thread de
+trabalho —, e foi a única das seis que a revisão não mediu. Ficou de fora por
+isso, não por esquecimento.
 
 **`blend` chama `f32::round()` quatro vezes por pixel** (`src/editor/raster/mod.rs:38`). No alvo x86-64 padrão cada `round()` é uma chamada de biblioteca. Medido com o código real extraído para um binário otimizado, reproduzindo `paint_shadow` sobre um canvas de 2048×1208: 8,07 s contra 1,84 s trocando `.round() as u8` por `+ 0.5) as u8` — **4,4×**, com resultado de pixel idêntico, porque os operandos são sempre combinação convexa de bytes.
 
@@ -130,7 +150,22 @@ Em ordem de ganho medido.
 
 **Cópia integral da tela cheia no residente** quando o destino é "salvar e copiar" (`src/resident.rs:354`).
 
-## Simplificações
+## Simplificações — duas das quatro aplicadas em 31/08/2026
+
+As duas pequenas entraram: o `NativeOptions` duplicado (`run_event_loop` passou a
+ser o único dono da descrição da janela-raiz, e `run_event_loop_with`, que ficara
+com um chamador só, foi absorvido) e os dois doc comments presos ao campo errado.
+
+**As duas extrações grandes não entraram** — `canvas::draw` e `process_shared`.
+Elas não são defeito: são o critério de tamanho do projeto, e a decisão de
+deixá-las para um passo próprio é deliberada. O motivo é o que esta mesma revisão
+mostrou: mover 220 e 600 linhas de código de interação, que nenhum teste de
+comportamento cobre de ponta a ponta, no fim de uma sessão que já mudou oito
+arquivos, é exatamente o gesto que introduz a regressão seguinte. Uma refatoração
+sem mudança de comportamento merece um passo em que ela seja **a única coisa**
+acontecendo, para o diff dizer isso sozinho.
+
+O plano continua valendo, e está escrito abaixo.
 
 **`canvas::draw` tem 572 linhas** e complexidade ciclomática na casa das centenas (`src/editor/ui/canvas.rs:32`). Dois dos bugs desta revisão — a guarda de arrasto órfão e o `return` que pula o desenho — existem porque estão a centenas de linhas do código que depende deles. A extração proposta é mecânica: uma função por braço do match de interação, mais uma para o bloco de desenho.
 
@@ -156,4 +191,6 @@ Nenhum dos dois é defeito por si — são gatilhos de revisão, e estão regist
 
 Dois deles mereciam nota por serem de interface, que costuma ser a desculpa para não testar: o canvas e a barra do editor são exercitados por um `egui::Context` sem GPU e sem janela, com `ctx.run` e eventos de ponteiro sintéticos. Foi assim que a corrida de edição coalescida e o arrasto do campo de porcentagem viraram testes de verdade, em vez de raciocínio escrito no relatório.
 
-O que continua em aberto desta revisão: as seis otimizações, as quatro simplificações e os dois achados não verificados.
+**Depois de atacar o resto** (v1.11.3): 395 testes. Entraram quatro das seis otimizações, duas das quatro simplificações, e os dois achados pendentes foram verificados — um confirmado e corrigido, um refutado (mas com a promessa falsa do comentário transformada em código).
+
+Continua em aberto, e por decisão: a cópia da tela cheia no residente, e as duas extrações grandes. Os motivos estão nas seções acima.

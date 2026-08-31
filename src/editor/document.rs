@@ -401,19 +401,6 @@ impl Document {
         // O remendo vem antes da redação: ele reconstrói o fundo, e o que for
         // censurado depois não pode ser reconstruído a partir dele.
         let patches = heal_marks(&layers);
-        let redacted = if marks.is_empty() && lights.is_empty() && patches.is_empty() {
-            image.clone()
-        } else {
-            let mut burnt = (*image).clone();
-            for (min, max) in &patches {
-                heal::apply(&mut burnt, *min, *max);
-            }
-            for mark in &marks {
-                redact::apply(&mut burnt, mark.min, mark.max, mark.style, mark.seed);
-            }
-            spotlight::apply(&mut burnt, &lights);
-            Arc::new(burnt)
-        };
         // A moldura é a última coisa: ela emoldura o resultado de tudo.
         let backdrop = self.ops[..self.index]
             .iter()
@@ -423,18 +410,50 @@ impl Document {
                 _ => None,
             })
             .unwrap_or(BackdropStyle::None);
-        let framed = if backdrop == BackdropStyle::None {
-            redacted.clone()
-        } else {
-            Arc::new(backdrop::compose(&redacted, backdrop))
-        };
 
-        if reframed
+        // Estas quatro comparações mais o `reframed` já existiam logo abaixo —
+        // são o que decide se o selo dos pixels avança. O que mudou foi virem
+        // **antes** de queimar a imagem: quando nada disso mudou, `redacted` e
+        // `framed` sairiam idênticos aos que já estão guardados, e refazê-los é
+        // trabalho jogado fora. Antes, desenhar uma seta numa captura 1080p com
+        // moldura decorativa refazia redação, holofote, remendo e um
+        // `backdrop::compose` inteiro sobre 2048x1208.
+        //
+        // `crops` igual basta para garantir que os pixels de `image` são os
+        // mesmos: só recorte, corte e escala mexem na imagem, e as três entram
+        // nessa assinatura — inclusive quando o teto do histórico as assa na
+        // base.
+        let burn = reframed
             || marks != self.redactions
             || lights != self.spotlights
             || patches != self.patches
-            || backdrop != self.backdrop
-        {
+            || backdrop != self.backdrop;
+
+        let (redacted, framed) = if !burn {
+            (self.redacted.clone(), self.framed.clone())
+        } else {
+            let redacted = if marks.is_empty() && lights.is_empty() && patches.is_empty() {
+                image.clone()
+            } else {
+                let mut burnt = (*image).clone();
+                for (min, max) in &patches {
+                    heal::apply(&mut burnt, *min, *max);
+                }
+                for mark in &marks {
+                    redact::apply(&mut burnt, mark.min, mark.max, mark.style, mark.seed);
+                }
+                spotlight::apply(&mut burnt, &lights);
+                Arc::new(burnt)
+            };
+            let framed = if backdrop == BackdropStyle::None {
+                redacted.clone()
+            } else {
+                Arc::new(backdrop::compose(&redacted, backdrop))
+            };
+            (redacted, framed)
+        };
+
+        if burn {
             self.redactions = marks;
             self.spotlights = lights;
             self.patches = patches;
@@ -1197,6 +1216,34 @@ mod tests {
             style(),
         );
         assert_ne!(doc.pixels_version(), start, "a redação mexe");
+    }
+
+    #[test]
+    fn mover_a_redacao_refaz_os_pixels_queimados() {
+        // O replay reaproveita a imagem queimada quando redação, holofote,
+        // remendo, moldura e enquadramento continuam os mesmos — a linha
+        // abaixo cai justamente nesse caso. Mover a redação não cai, e uma
+        // cache que não percebesse a diferença deixaria a região antiga
+        // censurada e a nova a descoberto.
+        let mut doc = doc();
+        let limpo = doc.content_image().pixel(40, 30);
+        doc.push(
+            Shape::Redaction {
+                min: Point::new(4.0, 4.0),
+                max: Point::new(20.0, 20.0),
+                seed: 5,
+            },
+            Style { redaction: RedactionStyle::Solid, ..style() },
+        );
+        doc.push(line(), style());
+        assert_ne!(doc.content_image().pixel(10, 10), limpo, "censurada onde estava");
+
+        doc.begin_move();
+        doc.translate_all(&[0], 30.0, 20.0);
+        doc.end_move();
+
+        assert_eq!(doc.content_image().pixel(10, 10), limpo, "o lugar antigo voltou");
+        assert_ne!(doc.content_image().pixel(40, 30), limpo, "o novo foi censurado");
     }
 
     #[test]

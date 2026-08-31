@@ -4,6 +4,10 @@ Histórico de versões do RustShot. Datas em 2026.
 
 ## Não lançado
 
+## v1.11.0 — 31/08
+
+O atalho de reconhecer texto passou a ler também QR code, com decodificador próprio — e o item que faltava do núcleo fecha os marcos de paridade de anotação e paridade Windows.
+
 - **O comando de reconhecer texto também lê QR code.** `Ctrl+Alt+PrtScr` sobre um QR copia o conteúdo dele — endereço, texto, o que estiver lá — em vez do OCR dos quadradinhos. O QR é tentado primeiro porque é exato e barato: sem os três padrões localizadores a tentativa desiste em milissegundos, e aí o texto segue o caminho de sempre. O decodificador é próprio e não trouxe dependência nenhuma, nem entra na feature `ocr`: funciona também na build compilada sem reconhecimento de texto. Cobre os modos numérico, alfanumérico e byte (com UTF-8 antes de Latin-1, que é o que o mundo grava de verdade), as 40 versões, os quatro níveis de correção, símbolo girado e símbolo espelhado. Kanji é recusado em vez de lido pela metade. O teste que vale não é o de ida-e-volta contra o gerador embutido — esse passaria mesmo com os dois lados errados da mesma forma —, e sim os cinco símbolos publicados que o programa decodifica: três figuras do ISO/IEC 18004 e dois vetores de teste do zxing.
 
 ## v1.10.0 — 30/08

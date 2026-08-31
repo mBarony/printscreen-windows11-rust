@@ -53,7 +53,7 @@ Progresso: **32 de 60** (53%) — o total desconta o item cancelado.
 - [x] **[Seta em arco](nucleo/seta-em-arco.md)** · M
 - [x] **[Seta reversível](nucleo/seta-reversivel.md)** · P
 - [ ] **[Régua que acha os limites sozinha](nucleo/regua-com-limites.md)** · M
-- [ ] **[Toda tecla de atalho configurada pressionando](nucleo/atalhos-por-tecla.md)** · P
+- [ ] **[Todo atalho configurável, pressionando a tecla](nucleo/atalhos-por-tecla.md)** · G
 - [ ] **[Agrupamento a cada 5 botões na barra](nucleo/agrupamento-na-barra.md)** · P
 
 ## Windows
@@ -161,3 +161,4 @@ Itens que não são bloqueados por trabalho, e sim por uma escolha:
 | 31/08/2026 | Leitura de QR code, com decodificador próprio e símbolos de referência do ISO e do zxing |
 | 31/08/2026 | Marcos de paridade de anotação e paridade Windows fechados |
 | 31/08/2026 | Três itens novos no núcleo: régua com limites, atalhos por tecla e agrupamento na barra — os marcos de paridade reabrem |
+| 31/08/2026 | `nucleo/atalhos-por-tecla` reestimado de P para G: o inventário achou 46 atalhos, 40 fixos no código |

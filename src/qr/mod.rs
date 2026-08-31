@@ -104,4 +104,50 @@ mod tests {
         }
         assert!(decode(&img).is_none());
     }
+
+    /// Todas as versões, pelo caminho que o app usa de verdade.
+    ///
+    /// Existe por causa de um bug que passou batido: os testes cobriam versões
+    /// altas a partir da `Grade` pronta, e pela imagem só iam até a versão 5.
+    /// A estimativa do tamanho do módulo saía 2,4% baixa, o erro acumulava na
+    /// distância entre os localizadores, e de v13 em diante o símbolo era lido
+    /// com o lado de uma versão a mais — a v40 nem era achada.
+    #[test]
+    fn le_todas_as_versoes_pela_imagem() {
+        for versao in [1u8, 5, 8, 11, 13, 15, 20, 25, 32, 40] {
+            let cabe = tabelas::blocos(versao, Nivel::L).total_dados() - 4;
+            let texto = "x".repeat(cabe.min(120));
+            let g = gera::simbolo(&texto, versao, Nivel::L, 1);
+            for escala in [3u32, 6] {
+                let img = gera::imagem(&g, escala, 4);
+                assert_eq!(
+                    decode(&img).as_deref(),
+                    Some(texto.as_str()),
+                    "versão {versao} na escala {escala}"
+                );
+            }
+        }
+    }
+
+    /// Módulo de tamanho quebrado, que é o que uma captura com zoom produz.
+    ///
+    /// O símbolo é desenhado grande e reduzido por reamostragem, então a borda
+    /// de cada módulo carrega a cor do vizinho — é aí que amostrar no meio, e
+    /// não na borda, deixa de ser detalhe.
+    #[test]
+    fn le_com_modulo_de_tamanho_quebrado() {
+        let texto = "https://exemplo.com/x";
+        let g = gera::simbolo(texto, 3, Nivel::M, 4);
+        let grande = gera::imagem(&g, 12, 4);
+        let mut lidos = 0;
+        let mut tentados = 0;
+        for milesimos in [300u32, 350, 420, 500, 580, 660, 750] {
+            let reduzida = grande.resized(milesimos as f32 / 1000.0);
+            tentados += 1;
+            if decode(&reduzida).as_deref() == Some(texto) {
+                lidos += 1;
+            }
+        }
+        assert!(lidos >= tentados - 1, "leu {lidos} de {tentados} reduções");
+    }
 }

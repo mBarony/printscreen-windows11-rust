@@ -133,38 +133,52 @@ fn localizadores(escuro: &[bool], largura: usize, altura: usize) -> Vec<Canto> {
     for y in 0..altura {
         let mut faixas = [0usize; 5];
         let mut cor_atual = false; // começa contando claro
-        let mut x = 0usize;
+        let candidato = |faixas: [usize; 5], fim: usize, brutos: &mut Vec<Canto>| {
+            if faixas[0] == 0 {
+                return;
+            }
+            let Some(modulo) = proporcao(faixas) else {
+                return;
+            };
+            // `fim` é o primeiro pixel DEPOIS da última faixa; o meio 0,5 px
+            // atrás põe o centro em índice de pixel, que é a mesma unidade em
+            // que `confirma_vertical` devolve o dele.
+            let centro_x = fim as f32
+                - faixas[4] as f32
+                - faixas[3] as f32
+                - faixas[2] as f32 / 2.0
+                - 0.5;
+            if centro_x < 0.0 {
+                return;
+            }
+            if let Some(centro_y) =
+                confirma_vertical(escuro, largura, altura, centro_x as usize, y, modulo)
+            {
+                brutos.push(Canto { x: centro_x, y: centro_y, modulo });
+            }
+        };
 
-        while x < largura {
+        for x in 0..largura {
             let escuro_aqui = escuro[y * largura + x];
             if escuro_aqui == cor_atual {
                 faixas[4] += 1;
-            } else if escuro_aqui {
-                // Vira escuro: fecha a faixa clara e abre uma escura.
-                faixas.rotate_left(1);
-                faixas[4] = 1;
-                cor_atual = true;
-            } else {
-                faixas.rotate_left(1);
-                faixas[4] = 1;
-                cor_atual = false;
+                continue;
             }
-
-            // Só faz sentido conferir quando a última faixa é escura, que é o
-            // fim de um "escuro-claro-escuro-claro-escuro".
-            if cor_atual && faixas[0] > 0 {
-                if let Some(modulo) = proporcao(faixas) {
-                    let fim = x + 1;
-                    let centro_x = fim as f32 - faixas[4] as f32 - faixas[3] as f32
-                        - faixas[2] as f32 / 2.0;
-                    if let Some(centro_y) =
-                        confirma_vertical(escuro, largura, altura, centro_x as usize, y, modulo)
-                    {
-                        brutos.push(Canto { x: centro_x, y: centro_y, modulo });
-                    }
-                }
+            // A cor virou, então a faixa que estava sendo contada fechou. É o
+            // único momento em que a medida vale: conferir a proporção com a
+            // última faixa ainda crescendo aceita uma faixa truncada — ela
+            // passa na tolerância de meio módulo — e envenena a estimativa do
+            // tamanho do módulo, que é o que dá o tamanho do símbolo.
+            if cor_atual {
+                candidato(faixas, x, &mut brutos);
             }
-            x += 1;
+            faixas.rotate_left(1);
+            faixas[4] = 1;
+            cor_atual = escuro_aqui;
+        }
+        // Uma linha que termina em escuro fecha a última faixa na borda.
+        if cor_atual {
+            candidato(faixas, largura, &mut brutos);
         }
     }
 
@@ -359,25 +373,36 @@ fn amostra(
     let dx = ((tr.x - tl.x) / vao, (tr.y - tl.y) / vao);
     let dy = ((bl.x - tl.x) / vao, (bl.y - tl.y) / vao);
 
+    // O passo da amostragem é um quarto de módulo — em pixels da imagem, e não
+    // em pixels soltos: com o símbolo ampliado, meio pixel de folga não sai do
+    // lugar, e a votação viraria cinco leituras do mesmo pixel.
+    let passo = ((dx.0 * dx.0 + dx.1 * dx.1).sqrt() / 4.0).max(0.25);
+
     let mut g = Grade::nova(lado);
     for my in 0..lado {
         for mx in 0..lado {
-            let u = mx as f32 - 3.5;
-            let v = my as f32 - 3.5;
+            // O deslocamento é em CENTROS de módulo, não em bordas: o centro
+            // do localizador é o módulo de índice 3, e não a coordenada 3,5.
+            // Com 3,5 a amostra cai no primeiro pixel do módulo em vez do
+            // meio — funciona num símbolo desenhado 1:1 e erra assim que ele
+            // é reamostrado, porque a borda carrega a cor do vizinho.
+            let u = mx as f32 - 3.0;
+            let v = my as f32 - 3.0;
             let px = tl.x + u * dx.0 + v * dy.0;
             let py = tl.y + u * dx.1 + v * dy.1;
-            g.marca(mx, my, voto(escuro, largura, altura, px, py));
+            g.marca(mx, my, voto(escuro, largura, altura, px, py, passo));
         }
     }
     g
 }
 
-/// Maioria entre o centro do módulo e seus quatro vizinhos imediatos.
+/// Maioria entre o centro do módulo e seus quatro vizinhos a um quarto de
+/// módulo.
 ///
 /// Um pixel só bastaria num QR 1:1, mas basta o símbolo estar redimensionado
 /// com interpolação para o centro cair sobre a transição entre dois módulos.
-fn voto(escuro: &[bool], largura: usize, altura: usize, px: f32, py: f32) -> bool {
-    let amostras = [(0.0, 0.0), (-0.25, 0.0), (0.25, 0.0), (0.0, -0.25), (0.0, 0.25)];
+fn voto(escuro: &[bool], largura: usize, altura: usize, px: f32, py: f32, passo: f32) -> bool {
+    let amostras = [(0.0, 0.0), (-passo, 0.0), (passo, 0.0), (0.0, -passo), (0.0, passo)];
     let escuros = amostras
         .iter()
         .filter(|(ox, oy)| {
@@ -451,3 +476,4 @@ mod tests {
         assert!(grade(&listrada).is_none(), "listras não são localizadores");
     }
 }
+

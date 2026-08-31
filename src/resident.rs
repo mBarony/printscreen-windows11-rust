@@ -280,7 +280,7 @@ impl Resident {
     fn capture_scrolling(&mut self) {
         use crate::stitch::Stitcher;
 
-        let Some((x, y)) = crate::platform::scroll::cursor_pos() else {
+        let Some((x, y)) = crate::platform::capture::cursor_pos() else {
             notify::toast_error("Captura com rolagem", "Não foi possível ler o cursor.");
             return;
         };

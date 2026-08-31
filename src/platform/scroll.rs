@@ -37,26 +37,7 @@ pub fn wheel_at(x: i32, y: i32, notches: i32) -> bool {
     }
 }
 
-/// Onde o ponteiro está, em px de tela.
-#[cfg(windows)]
-pub fn cursor_pos() -> Option<(i32, i32)> {
-    use windows_sys::Win32::Foundation::POINT;
-    use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
-
-    let mut point = POINT { x: 0, y: 0 };
-    // SAFETY: escreve num POINT da pilha; devolve zero em falha.
-    if unsafe { GetCursorPos(&mut point) } == 0 {
-        return None;
-    }
-    Some((point.x, point.y))
-}
-
 #[cfg(not(windows))]
 pub fn wheel_at(_x: i32, _y: i32, _notches: i32) -> bool {
     false
-}
-
-#[cfg(not(windows))]
-pub fn cursor_pos() -> Option<(i32, i32)> {
-    None
 }

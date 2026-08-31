@@ -16,10 +16,6 @@
 //! pode ser usado de uma thread de trabalho (`crate::jobs`), nunca da thread
 //! da interface.
 
-// Módulo ainda não ligado à interface: por ora é a prova de conceito que
-// mede o custo real do OCR no binário. O allow sai junto com o botão.
-#![allow(dead_code)]
-
 use crate::error::Result;
 use crate::imgbuf::RgbaImage;
 
@@ -239,6 +235,9 @@ mod imp {
     }
 
     /// Idiomas com pacote de OCR instalado, em etiquetas BCP-47.
+    /// Só o teste de motor real usa isto, para dizer "instale um pacote de
+    /// idioma" em vez de falhar com "não reconheceu nada".
+    #[cfg(test)]
     pub fn available_languages() -> Vec<String> {
         let Ok(list) = OcrEngine::AvailableRecognizerLanguages() else {
             return Vec::new();
@@ -250,21 +249,17 @@ mod imp {
     }
 }
 
+/// A API do módulo são duas funções: o texto corrido e as caixas por palavra.
+/// `recognize_words` fica dentro de `imp` porque é o intermediário das duas, e
+/// exportá-la só aumentaria a superfície sem servir a ninguém.
 #[cfg(windows)]
-#[allow(unused_imports)]
-pub use imp::{available_languages, recognize, recognize_boxes, recognize_words};
+pub use imp::{recognize, recognize_boxes};
 
 /// Fora do Windows não há motor de OCR do sistema.
 #[cfg(not(windows))]
 #[allow(dead_code)]
 pub fn recognize(_image: &RgbaImage, _language: Option<&str>) -> Result<String> {
     Err(crate::error::err!("OCR disponível apenas no Windows"))
-}
-
-#[cfg(not(windows))]
-#[allow(dead_code)]
-pub fn available_languages() -> Vec<String> {
-    Vec::new()
 }
 
 #[cfg(test)]
@@ -371,7 +366,7 @@ mod tests {
     #[test]
     #[ignore]
     fn ocr_de_verdade() {
-        let idiomas = available_languages();
+        let idiomas = imp::available_languages();
         println!("idiomas com pacote de OCR: {idiomas:?}");
         assert!(
             !idiomas.is_empty(),

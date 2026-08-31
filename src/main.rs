@@ -56,10 +56,6 @@ mod tray;
 use config::APP_NAME;
 
 const SINGLE_INSTANCE_NAME: &str = "rustshot-single-instance-mutex";
-/// Alterar este valor re-rola o hash do exe quando o SAC bloquear o binário
-/// recém-compilado (veredito por hash é permanente; ver README, Build).
-#[allow(dead_code)]
-const SAC_EXE_SALT: u32 = 1;
 /// Acima disso o log é rotacionado para `rustshot.log.old`.
 const LOG_ROTATE_BYTES: u64 = 2 * 1024 * 1024;
 

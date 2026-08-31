@@ -185,10 +185,18 @@ fn segmentos(dados: &[u8], versao: u8) -> Option<String> {
             // antes de Latin-1 — ler e seguir cobre o caso comum.
             0b0111 => {
                 let primeiro = bits.le(8)?;
-                let extra = match primeiro >> 5 {
-                    0b110 => 8,
-                    0b111 => 16,
-                    _ => 0,
+                // O designador tem 1, 2 ou 3 bytes, e quem diz qual é o prefixo
+                // do primeiro: `0` sozinho, `10`, ou `110`. Ler menos do que
+                // ele ocupa não perde só o designador — desalinha todo o resto
+                // do fluxo, e o segmento seguinte vira lixo.
+                let extra = if primeiro & 0b1000_0000 == 0 {
+                    0
+                } else if primeiro & 0b0100_0000 == 0 {
+                    8
+                } else if primeiro & 0b0010_0000 == 0 {
+                    16
+                } else {
+                    return None;
                 };
                 if extra > 0 {
                     bits.le(extra)?;

@@ -42,9 +42,26 @@ Junto veio o meio pixel de viés em `centro_x`, que era calculado em coordenada 
 
 **`cursor_pos` duplicada** — existia com corpo idêntico em `platform/scroll.rs` e `platform/capture.rs`. Ficou a de `capture`, que já era reexportada; `scroll` volta a ter uma responsabilidade só, que é o que o cabeçalho do módulo promete.
 
-## Correções confirmadas e ainda não aplicadas
+## Correções confirmadas — todas aplicadas em 31/08/2026 (v1.11.2)
 
-Todas passaram pelo revisor adversarial. Estão em ordem de gravidade.
+Todas passaram pelo revisor adversarial, e todas foram corrigidas. O que está
+escrito abaixo é o diagnóstico como ele foi levantado; ficou de propósito, para
+o dia em que alguém quiser saber por que o código é como é.
+
+Ao corrigir, apareceram **três defeitos que a revisão não tinha visto**, cada um
+encostado num dos que ela viu:
+
+- as anotações consolidadas em `baseline.layers` quando o log estoura o teto
+  **não eram gravadas em lugar nenhum**, então a sessão recuperada voltava sem
+  as anotações mais antigas mesmo com a imagem certa;
+- o campo de porcentagem não só gravava uma operação por quadro: como ele
+  renascia em 100% a cada quadro, cada operação escalava de novo em cima da
+  anterior — arrastar até 50% **não dava metade**;
+- a seleção fantasma não era só do `perform_redo`. Outros três pontos limpavam
+  `selected` sem limpar `selection` (aplicar recorte, cortar faixa e o primeiro
+  `Esc`), e a correção foi tirar do par a possibilidade de divergir.
+
+Estão em ordem de gravidade.
 
 ### A recuperação de sessão para de gravar depois de 100 edições
 
@@ -133,4 +150,10 @@ Nenhum dos dois é defeito por si — são gatilhos de revisão, e estão regist
 
 ## Estado depois desta passagem
 
-381 testes passando, `clippy --all-targets` sem avisos, nas duas configurações de feature. As supressões de `dead_code` que restam são todas de stub `#[cfg(not(windows))]`, que existem para o porte e não escondem nada.
+**Ao fim da revisão** (v1.11.1): 381 testes passando, `clippy --all-targets` sem avisos, nas duas configurações de feature. As supressões de `dead_code` que restam são todas de stub `#[cfg(not(windows))]`, que existem para o porte e não escondem nada.
+
+**Depois de aplicar as nove correções** (v1.11.2): 389 testes, com 8 de regressão novos. Cada um foi provado falhando no código antigo antes de entrar — é o que separa um teste que cobre de um teste que acompanha.
+
+Dois deles mereciam nota por serem de interface, que costuma ser a desculpa para não testar: o canvas e a barra do editor são exercitados por um `egui::Context` sem GPU e sem janela, com `ctx.run` e eventos de ponteiro sintéticos. Foi assim que a corrida de edição coalescida e o arrasto do campo de porcentagem viraram testes de verdade, em vez de raciocínio escrito no relatório.
+
+O que continua em aberto desta revisão: as seis otimizações, as quatro simplificações e os dois achados não verificados.

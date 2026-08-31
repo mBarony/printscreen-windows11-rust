@@ -4,6 +4,10 @@ Histórico de versões do RustShot. Datas em 2026.
 
 ## Não lançado
 
+- **As nove correções confirmadas na revisão de código foram aplicadas.** A que mais importa: a recuperação de sessão **parava de gravar depois de 100 edições** — o índice do histórico trava no teto do log e era ele que servia de assinatura de sujeira, então morrer na edição 140 devolvia o documento da edição 100. Junto vinham dois defeitos que a revisão não tinha visto: a imagem de origem gravada envelhecia quando o teto assava uma operação na base, e as anotações consolidadas não eram gravadas em lugar nenhum — a sessão recuperada voltava sem as mais antigas. Também entraram: a captura com atraso, que empilhava o evento sem acordar o laço de mensagens e podia não disparar nunca numa máquina parada; o editor recuperado, que nunca era dado como encerrado e engolia o atalho seguinte; o remendo encostado na borda da imagem, que puxava a cor do próprio objeto em vez da do fundo e o reconstruía; a corrida de edição coalescida, que a guarda de arrasto órfão fechava em todo quadro sem botão pressionado, de modo que empurrar com as setas gerava um passo de desfazer por quadro; o campo de porcentagem, que gravava uma operação de escala por quadro arrastado e, por renascer em 100% a cada quadro, escalava de novo em cima do já escalado — arrastar até 50% não dava metade; a seleção fantasma depois de refazer, que na verdade estava em quatro pontos limpando `selected` sem limpar `selection`; e o caminho de ocultar só as palavras, que saía da closure do canvas e deixava o quadro sem pintura.
+
+- **Oito testes de regressão**, cada um provado falhando no código antigo antes de entrar. Dois deles são de interface, que costuma ser a desculpa para não testar: o canvas e a barra do editor passaram a ser exercitados por um `egui::Context` sem GPU e sem janela, com eventos de ponteiro sintéticos — foi assim que a corrida de edição coalescida e o arrasto do campo de porcentagem viraram teste, em vez de raciocínio no relatório.
+
 ## v1.11.1 — 31/08
 
 Correção do leitor de QR, que na v1.11.0 não lia nada acima da versão 7, e a revisão geral do código que a encontrou.

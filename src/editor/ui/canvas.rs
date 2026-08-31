@@ -187,9 +187,18 @@ pub(super) fn draw(ctx: &egui::Context, session: &mut EditorSession) {
             // trocou no meio, etc.): sem botão pressionado nem release a
             // processar neste frame, não há arrasto legítimo — descartar
             // evita um preview fantasma que viraria forma no próximo clique.
+            //
+            // O cancelamento vale só para um arrasto de fato aberto: o
+            // ponteiro fica solto na maior parte dos quadros, e chamar
+            // `cancel_move` aqui sem condição fechava junto a corrida de
+            // edição (ele começa por `close_edit_run`) no mesmo quadro em que
+            // ela nascia — o coalescimento dos empurrões por seta e dos
+            // ajustes pela roda nunca chegava a acontecer.
             if !primary_down && !primary_released {
                 session.drag = None;
-                cancel_move(session);
+                if session.move_drag.is_some() || session.resize_drag.is_some() {
+                    cancel_move(session);
+                }
             }
 
             if session.text_input.is_none() && !session.confirm_discard {
@@ -402,7 +411,7 @@ pub(super) fn draw(ctx: &egui::Context, session: &mut EditorSession) {
                                     if band.width() > 0 {
                                         session.doc.cut(band);
                                         reset_view(session);
-                                        session.selected = None;
+                                        session.clear_selection();
                                     }
                                 } else if session.tool == Tool::Crop {
                                     // Área pequena demais foi engano: nada a
@@ -433,22 +442,27 @@ pub(super) fn draw(ctx: &egui::Context, session: &mut EditorSession) {
                                         // Ocultar só as palavras: o retângulo
                                         // não vira anotação agora — ele espera
                                         // o OCR, que roda fora desta thread.
-                                        if session.redact_words {
-                                            if let Shape::Redaction { min, max, .. } = &shape {
+                                        // Sair daqui com `return` pulava o
+                                        // bloco de desenho lá embaixo, e o
+                                        // canvas ficava sem pintura por um
+                                        // quadro.
+                                        let so_palavras = session.redact_words
+                                            && matches!(shape, Shape::Redaction { .. });
+                                        if let Shape::Redaction { min, max, seed } = &mut shape {
+                                            if so_palavras {
                                                 session.redact_text = Some((*min, *max));
-                                                session.drag = None;
-                                                return;
+                                            } else {
+                                                // Uma redação minúscula não
+                                                // esconderia nada; e cada uma
+                                                // leva a própria semente.
+                                                max.x = max.x.max(min.x + REDACTION_MIN_SIDE);
+                                                max.y = max.y.max(min.y + REDACTION_MIN_SIDE);
+                                                *seed = redact::fresh_seed();
                                             }
                                         }
-                                        if let Shape::Redaction { min, max, seed } = &mut shape {
-                                            // Uma redação minúscula não
-                                            // esconderia nada; e cada uma leva
-                                            // a própria semente.
-                                            max.x = max.x.max(min.x + REDACTION_MIN_SIDE);
-                                            max.y = max.y.max(min.y + REDACTION_MIN_SIDE);
-                                            *seed = redact::fresh_seed();
+                                        if !so_palavras {
+                                            session.doc.push(shape, session.style());
                                         }
-                                        session.doc.push(shape, session.style());
                                     }
                                 }
                             }
@@ -600,4 +614,92 @@ pub(super) fn draw(ctx: &egui::Context, session: &mut EditorSession) {
                 Color32::from_gray(140),
             );
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::EditorConfig;
+    use crate::imgbuf::RgbaImage;
+
+    /// Contexto do egui sem GPU nem janela — o `run` tessela em memória. As
+    /// fontes vão à mão porque a crate entra sem `default_fonts`.
+    fn contexto() -> egui::Context {
+        let ctx = egui::Context::default();
+        crate::theme::install_fonts(&ctx);
+        ctx
+    }
+
+    fn sessao() -> EditorSession {
+        let image = RgbaImage::filled(64, 48, [255, 255, 255, 255]);
+        EditorSession::new(1, image, &EditorConfig::default())
+    }
+
+    fn entrada(events: Vec<egui::Event>) -> egui::RawInput {
+        egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(400.0, 300.0))),
+            events,
+            ..Default::default()
+        }
+    }
+
+    fn botao(pos: Pos2, pressed: bool) -> egui::Event {
+        egui::Event::PointerButton {
+            pos,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    /// Com o ponteiro solto — o caso de quase todo quadro — a corrida de
+    /// edição coalescida precisa atravessar o canvas viva; senão cada seta e
+    /// cada notch da roda vira um passo de desfazer.
+    #[test]
+    fn corrida_de_edicao_sobrevive_ao_ponteiro_solto() {
+        let ctx = contexto();
+        let mut session = sessao();
+        session.doc.begin_move();
+        session.edit_run_until = Some(1_000.0);
+
+        let _ = ctx.run(entrada(Vec::new()), |ctx| draw(ctx, &mut session));
+
+        assert!(
+            session.edit_run_until.is_some(),
+            "a guarda de arrasto órfão fechou a corrida de edição"
+        );
+    }
+
+    /// O release que manda a região para o OCR não pode abandonar o quadro:
+    /// sem o bloco de desenho, nem a imagem do canvas é pintada.
+    #[test]
+    fn ocultar_so_as_palavras_ainda_pinta_o_quadro() {
+        let ctx = contexto();
+        let mut session = sessao();
+        session.tool = Tool::Redact;
+        session.redact_words = true;
+        let (a, b) = (Pos2::new(190.0, 140.0), Pos2::new(220.0, 165.0));
+
+        // O `hovered` do egui vem do quadro anterior: o press só é aceito
+        // depois de um quadro com o ponteiro sobre o canvas.
+        let _ = ctx.run(entrada(vec![egui::Event::PointerMoved(a)]), |ctx| {
+            draw(ctx, &mut session)
+        });
+        let _ = ctx.run(entrada(vec![botao(a, true)]), |ctx| draw(ctx, &mut session));
+        assert!(session.drag.is_some(), "o arrasto não começou");
+
+        let saida = ctx.run(
+            entrada(vec![egui::Event::PointerMoved(b), botao(b, false)]),
+            |ctx| draw(ctx, &mut session),
+        );
+
+        assert!(session.redact_text.is_some(), "a região não foi ao OCR");
+        assert!(
+            saida
+                .shapes
+                .iter()
+                .any(|c| matches!(c.shape, egui::Shape::Mesh(_))),
+            "o quadro do release saiu sem a imagem do canvas"
+        );
+    }
 }

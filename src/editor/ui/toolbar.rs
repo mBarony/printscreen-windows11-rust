@@ -568,7 +568,7 @@ fn image_options(ui: &mut egui::Ui, session: &mut EditorSession) {
     //
     // Em porcentagem, arrastável: escalar é uma decisão de "quanto", não de
     // "mais um passo", e um campo diz melhor onde se está do que dois botões.
-    let mut percent = 100.0_f32;
+    let mut percent = session.scale_percent;
     let response = ui.add(
         egui::DragValue::new(&mut percent)
             .range(10.0..=400.0)
@@ -576,10 +576,17 @@ fn image_options(ui: &mut egui::Ui, session: &mut EditorSession) {
             .suffix("%")
             .fixed_decimals(0),
     );
-    if response.changed() {
-        // O campo volta sempre a 100%: o fator é relativo ao tamanho atual,
-        // e mostrar um acumulado exigiria guardar o original só para isso.
+    session.scale_percent = percent;
+    // O fator só é gravado quando o controle é solto. Escalar a cada quadro
+    // do arrasto deixava uma `Op::Scale` por quadro — dezenas de passos de
+    // desfazer, cada um refazendo o replay inteiro — e, como o campo voltava
+    // a 100% entre os quadros, cada uma escalava de novo em cima do que a
+    // anterior já tinha escalado: ir a 50% não dava metade.
+    if percent != 100.0 && !response.dragged() && !response.has_focus() {
         session.doc.scale(percent / 100.0);
+        // De volta a 100%: o fator é relativo ao tamanho atual, e mostrar um
+        // acumulado exigiria guardar o original só para isso.
+        session.scale_percent = 100.0;
     }
     response.on_hover_text("Redimensionar a imagem inteira, com as anotações junto");
 
@@ -728,6 +735,84 @@ mod tests {
     use crate::editor::icons::{geometry, Primitive};
 
     const PAD: f32 = 16.0;
+
+    /// Arrastar o campo de porcentagem de 100% até 50% é **um** passo de
+    /// desfazer, e chega mesmo à metade.
+    ///
+    /// Antes o `changed()` de cada quadro do arrasto chamava `Document::scale`,
+    /// e o campo renascia em 100% a cada quadro: sobravam dezenas de operações
+    /// de escala no histórico e o tamanho final era o produto dos incrementos,
+    /// não os 50% pedidos.
+    #[test]
+    fn arrastar_a_porcentagem_e_um_passo_de_desfazer() {
+        use crate::config::EditorConfig;
+        use crate::imgbuf::RgbaImage;
+
+        let ctx = egui::Context::default();
+        let mut session = EditorSession::new(
+            0,
+            RgbaImage::filled(200, 100, [10, 20, 30, 255]),
+            &EditorConfig::default(),
+        );
+        // Onde o campo caiu no último quadro: os eventos de ponteiro do quadro
+        // seguinte precisam de uma posição dentro dele.
+        let mut campo = Pos2::ZERO;
+        let quadro = |eventos: Vec<egui::Event>, session: &mut EditorSession, campo: &mut Pos2| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))),
+                events: eventos,
+                ..Default::default()
+            };
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    *campo = ui.next_widget_position() + Vec2::new(10.0, 5.0);
+                    image_options(ui, session);
+                });
+            });
+        };
+        let pressao = |pos: Pos2, pressed: bool| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+
+        quadro(Vec::new(), &mut session, &mut campo);
+        let origem = campo;
+        quadro(
+            vec![egui::Event::PointerMoved(origem), pressao(origem, true)],
+            &mut session,
+            &mut campo,
+        );
+        // Dez quadros de arrasto, 5 px à esquerda em cada: 50 px × speed 1,0.
+        let mut ponta = origem;
+        for _ in 0..10 {
+            ponta.x -= 5.0;
+            quadro(
+                vec![egui::Event::PointerMoved(ponta)],
+                &mut session,
+                &mut campo,
+            );
+        }
+        // O que o campo mostra ao ser solto é o que a escala tem de valer —
+        // uma vez, e não uma composição dos passos do arrasto.
+        let alvo = session.scale_percent;
+        assert!(alvo < 60.0, "o arrasto chegou perto de 50%, veio {alvo}");
+        quadro(vec![pressao(ponta, false)], &mut session, &mut campo);
+
+        assert_eq!(
+            session.doc.visible_image().width(),
+            (200.0 * alvo / 100.0).round() as u32,
+            "a imagem ficou no tamanho que o campo pedia ({alvo}%)"
+        );
+        assert_eq!(session.scale_percent, 100.0, "o campo volta a 100%");
+        session.doc.undo();
+        assert_eq!(
+            session.doc.visible_image().width(),
+            200,
+            "um desfazer devolve o tamanho original"
+        );
+    }
 
     /// Prévia da barra montada, sem GPU e sem Windows — o mesmo truque que
     /// `icons::tests::svg_preview` usa para os ícones soltos, aqui aplicado

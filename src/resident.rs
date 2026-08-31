@@ -220,6 +220,12 @@ impl Resident {
             std::thread::sleep(std::time::Duration::from_secs(CAPTURE_DELAY_SECS));
             events::push(shell::ShellEvent::Menu(tray::MENU_CAPTURE_FULLSCREEN));
         });
+        // Sem o despertador a fila só seria drenada no próximo evento a chegar
+        // por acaso — um clique na bandeja, um atalho —, e numa máquina parada
+        // a captura podia não acontecer nunca. Ele fica armado durante a espera
+        // porque a thread conta em `jobs::pending`, e o `poll_background` o
+        // desliga sozinho quando não sobra nada em curso.
+        shell::set_poll_timer(true);
     }
 
     /// Recaptura o mesmo retângulo da última região, sem passar pelo overlay.
@@ -587,6 +593,10 @@ impl Resident {
                 // Já entra como edição: há trabalho do usuário dentro dela
                 // desde o primeiro quadro.
                 self.capture_gui = Some(GuiChild { child, editing: true, _shots: None });
+                // Sem o despertador ninguém repara que o editor recuperado
+                // encerrou: o residente seguia se achando ocupado e ignorava o
+                // atalho seguinte.
+                shell::set_poll_timer(true);
             }
             Err(err) => notify::toast_error("Falha ao recuperar", &format!("{err:#}")),
         }

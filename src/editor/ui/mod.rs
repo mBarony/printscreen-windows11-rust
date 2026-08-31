@@ -196,8 +196,7 @@ pub(super) fn select_tool(session: &mut EditorSession, tool: Tool) {
         session.tool_before_eyedropper = Some(session.tool);
     } else {
         session.tool_before_eyedropper = None;
-        session.selected = None;
-        session.selection.clear();
+        session.clear_selection();
     }
     session.marquee = None;
     session.tool = tool;
@@ -235,8 +234,7 @@ pub(super) fn perform_undo(session: &mut EditorSession) {
         session.doc.undo();
         refit_if_image_changed(session, before);
     }
-    session.selected = None;
-    session.selection.clear();
+    session.clear_selection();
 }
 
 pub(super) fn perform_redo(session: &mut EditorSession) {
@@ -244,7 +242,7 @@ pub(super) fn perform_redo(session: &mut EditorSession) {
     let before = session.doc.image_version();
     session.doc.redo();
     refit_if_image_changed(session, before);
-    session.selected = None;
+    session.clear_selection();
 }
 
 // ---------------------------------------------------------------------------
@@ -268,7 +266,7 @@ pub(super) fn apply_crop(session: &mut EditorSession) {
 
     session.doc.crop(x, y, w, h);
     reset_view(session);
-    session.selected = None;
+    session.clear_selection();
 }
 
 /// A imagem mudou de enquadramento: recria a textura e reajusta a vista.
@@ -469,9 +467,9 @@ pub(super) fn request_close(session: &mut EditorSession) {
         return;
     }
     cancel_move(session);
-    if session.selected.take().is_some() {
+    if session.selected.is_some() {
         // Primeiro Esc apenas desfaz a seleção.
-        session.selection.clear();
+        session.clear_selection();
         return;
     }
     if session.dirty() {
@@ -510,24 +508,29 @@ pub(super) fn confirm_discard_modal(ctx: &egui::Context, session: &mut EditorSes
 /// Grava a sessão em disco quando ela muda, para um fechamento inesperado
 /// não levar o trabalho junto.
 ///
-/// A imagem de origem vai uma vez só — ela não muda, e reescrever dezenas de
-/// MB a cada anotação seria absurdo. O log, que é pequeno, vai sempre que o
-/// número de operações aplicadas muda.
+/// A imagem de origem vai uma vez só — reescrever dezenas de MB a cada
+/// anotação seria absurdo —, e de novo quando o teto do histórico a muda. O
+/// log, que é pequeno, vai a cada edição.
+///
+/// A assinatura de sujeira é a revisão do documento, e não o número de
+/// operações aplicadas: com o log no teto esse número fica parado em
+/// `MAX_OPS`, e tudo a partir da 101ª edição deixava de ser gravado.
 fn persist_session(session: &mut EditorSession) {
-    let applied = session.doc.applied();
-    if session.saved_ops == Some(applied) {
+    let revision = session.doc.revision();
+    if session.saved_revision == Some(revision) {
         return;
     }
     let dir = crate::config::state_dir();
-    if !session.source_saved {
+    let baseline = session.doc.baseline_version();
+    if session.saved_baseline != Some(baseline) {
         if let Err(err) = super::session_file::save_source(&session.doc, &dir) {
             // Falhar aqui não pode atrapalhar a edição: perde-se a rede de
             // segurança, não o trabalho em andamento.
             log::warn!("sessão não pôde ser gravada: {err:#}");
-            session.saved_ops = Some(applied);
+            session.saved_revision = Some(revision);
             return;
         }
-        session.source_saved = true;
+        session.saved_baseline = Some(baseline);
     }
     // As imagens coladas vão antes do log: recuperar uma sessão cujo log
     // aponta para pixels que não estão no disco deixaria buracos na tela.
@@ -537,10 +540,52 @@ fn persist_session(session: &mut EditorSession) {
     if let Err(err) = super::session_file::save_log(&session.doc, &dir) {
         log::warn!("log da sessão não pôde ser gravado: {err:#}");
     }
-    session.saved_ops = Some(applied);
+    session.saved_revision = Some(revision);
 }
 
 /// Apaga a sessão gravada: o editor terminou por vontade do usuário.
 pub(super) fn forget_session() {
     super::session_file::clear(&crate::config::state_dir());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::EditorConfig;
+    use crate::imgbuf::RgbaImage;
+
+    fn sessao_com_duas_linhas() -> EditorSession {
+        let mut session = EditorSession::new(
+            1,
+            RgbaImage::filled(32, 24, [0, 0, 0, 255]),
+            &EditorConfig::default(),
+        );
+        let style = session.style();
+        for i in 0..2 {
+            let y = 4.0 + i as f32 * 8.0;
+            session
+                .doc
+                .push(Shape::Line { a: Point::new(2.0, y), b: Point::new(20.0, y) }, style);
+        }
+        session
+    }
+
+    /// Refazer traz anotações de volta e mexe nos índices, então a seleção
+    /// tem de cair inteira. Enquanto só o `selected` caía, o contorno das
+    /// anotações em `selection` continuava desenhado — sem alças e surdo às
+    /// teclas.
+    #[test]
+    fn refazer_limpa_a_selecao_inteira() {
+        let mut session = sessao_com_duas_linhas();
+        perform_undo(&mut session);
+
+        // Com a segunda linha desfeita, o usuário seleciona a que restou e
+        // só então manda refazer.
+        session.selected = Some(0);
+        session.selection = vec![0];
+        perform_redo(&mut session);
+
+        assert_eq!(session.selected, None);
+        assert!(session.selection.is_empty(), "nada continua marcado como selecionado");
+    }
 }

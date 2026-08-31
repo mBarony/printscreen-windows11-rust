@@ -38,18 +38,17 @@ pub fn apply(img: &mut RgbaImage, min: Point, max: Point) {
     // As quatro arestas de fora do buraco. Onde o buraco encosta na moldura
     // da imagem não há vizinho: vale a aresta oposta, que é o que faz um
     // retângulo colado na borda ainda ter de onde puxar cor.
+    let (lin_acima, lin_abaixo) = vizinhas(y0, y1, ih);
+    let (col_esquerda, col_direita) = vizinhas(x0, x1, iw);
     let amostra = |x: u32, y: u32| -> [f32; 4] {
-        let p = img.pixel(x.min(iw - 1), y.min(ih - 1));
+        let p = img.pixel(x, y);
         [p[0] as f32, p[1] as f32, p[2] as f32, p[3] as f32]
     };
-    let acima: Vec<[f32; 4]> = (x0..x1)
-        .map(|x| amostra(x, y0.saturating_sub(1)))
-        .collect();
-    let abaixo: Vec<[f32; 4]> = (x0..x1).map(|x| amostra(x, y1)).collect();
-    let esquerda: Vec<[f32; 4]> = (y0..y1)
-        .map(|y| amostra(x0.saturating_sub(1), y))
-        .collect();
-    let direita: Vec<[f32; 4]> = (y0..y1).map(|y| amostra(x1, y)).collect();
+    let acima: Vec<[f32; 4]> = (x0..x1).map(|x| amostra(x, lin_acima)).collect();
+    let abaixo: Vec<[f32; 4]> = (x0..x1).map(|x| amostra(x, lin_abaixo)).collect();
+    let esquerda: Vec<[f32; 4]> =
+        (y0..y1).map(|y| amostra(col_esquerda, y)).collect();
+    let direita: Vec<[f32; 4]> = (y0..y1).map(|y| amostra(col_direita, y)).collect();
 
     // Chute inicial: média das quatro arestas ponderada pelo inverso da
     // distância a cada uma. Num fundo chapado isto já é a resposta final, e
@@ -124,6 +123,23 @@ pub fn apply(img: &mut RgbaImage, min: Point, max: Point) {
     }
 }
 
+/// As duas linhas (ou colunas) de fora do buraco num eixo, dado que ele ocupa
+/// `inicio..fim` dentro de `0..limite`.
+///
+/// Encostado na moldura o buraco não tem vizinho daquele lado, e aí vale a
+/// aresta oposta. Prender o índice ao limite — o que `saturating_sub(1)` e o
+/// clamp faziam — devolvia a primeira linha de DENTRO do buraco: a condição de
+/// contorno virava a cor do próprio objeto e o remendo o reconstruía.
+fn vizinhas(inicio: u32, fim: u32, limite: u32) -> (u32, u32) {
+    match (inicio > 0, fim < limite) {
+        (true, true) => (inicio - 1, fim),
+        (true, false) => (inicio - 1, inicio - 1),
+        (false, true) => (fim, fim),
+        // O buraco cobre o eixo inteiro: não sobrou fundo de onde puxar cor.
+        (false, false) => (inicio, fim - 1),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,6 +198,26 @@ mod tests {
         assert_eq!(img.pixel(2, 2), [10, 200, 10, 255]);
         apply(&mut img, p(15.0, 15.0), p(40.0, 40.0));
         assert_eq!(img.pixel(18, 18), [10, 200, 10, 255]);
+    }
+
+    #[test]
+    fn um_objeto_colado_na_borda_some_em_vez_de_voltar() {
+        // Com o objeto encostado no topo, a linha "de cima" do buraco é a
+        // linha 0, que é o próprio objeto. Tomá-la como contorno pintava o
+        // remendo de vermelho — o objeto reaparecia em vez de sumir.
+        let fundo = [30, 60, 90, 255];
+        let mut img = RgbaImage::filled(20, 20, fundo);
+        for y in 0..6u32 {
+            for x in 4..16u32 {
+                img.pixel_mut(x, y).copy_from_slice(&[255, 0, 0, 255]);
+            }
+        }
+        apply(&mut img, p(4.0, 0.0), p(16.0, 6.0));
+        for y in 0..6u32 {
+            for x in 4..16u32 {
+                assert_eq!(img.pixel(x, y), fundo, "sobrou objeto em ({x}, {y})");
+            }
+        }
     }
 
     #[test]

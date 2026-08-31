@@ -132,6 +132,16 @@ pub struct Document {
     ops: Vec<Op>,
     /// Quantas operações do log estão aplicadas — tudo à frente é o "refazer".
     index: usize,
+    /// Quantas edições aconteceram, contando desfazer e refazer. Só sobe, e
+    /// é a assinatura de sujeira da gravação de sessão. O `index` não serve
+    /// para isso: com o log no teto ele fica parado em `MAX_OPS`, e nada a
+    /// partir da 101ª edição chegava ao disco.
+    edits: u64,
+    /// Sobe quando o teto assa a operação mais antiga na base. A imagem de
+    /// origem e as anotações consolidadas gravadas na sessão envelhecem
+    /// nesse instante: sem regravá-las, a recuperação parte de uma base que
+    /// não é mais a do documento.
+    baseline_version: u64,
     next_id: u64,
 
     /// Pixels das imagens coladas, referenciados por `Shape::Image`. Ficam
@@ -223,6 +233,8 @@ impl Document {
             },
             ops: Vec::new(),
             index: 0,
+            edits: 0,
+            baseline_version: 0,
             next_id: 1,
             images: ImageSources::new(),
             next_image: 1,
@@ -290,19 +302,41 @@ impl Document {
         self.index
     }
 
+    /// Assinatura de sujeira da gravação de sessão: anda a cada edição e
+    /// nunca recua.
+    pub fn revision(&self) -> u64 {
+        self.edits
+    }
+
+    /// Selo da base: anda quando o teto do histórico consolida a operação
+    /// mais antiga. Quem gravou a base com um selo antigo precisa regravá-la.
+    pub fn baseline_version(&self) -> u64 {
+        self.baseline_version
+    }
+
+    /// Anotações já assadas na imagem de origem. Não estão em `ops()`, então
+    /// a gravação de sessão tem de guardá-las à parte — sem elas a sessão
+    /// recuperada volta sem as anotações mais antigas.
+    pub fn baseline_layers(&self) -> &[Layer] {
+        &self.baseline.layers
+    }
+
     pub fn next_id(&self) -> u64 {
         self.next_id
     }
 
-    /// Recria um documento a partir da imagem de origem e de um log gravado.
+    /// Recria um documento a partir da base gravada (imagem de origem e as
+    /// anotações já consolidadas nela) e de um log gravado.
     pub fn restore(
         image: RgbaImage,
+        base_layers: Vec<Layer>,
         ops: Vec<Op>,
         index: usize,
         next_id: u64,
         images: Vec<(u32, RgbaImage)>,
     ) -> Self {
         let mut doc = Self::new(image);
+        doc.baseline.layers = base_layers;
         doc.index = index.min(ops.len());
         doc.ops = ops;
         doc.next_id = next_id.max(1);
@@ -425,12 +459,26 @@ impl Document {
         self.ops.truncate(self.index);
         self.ops.push(op);
         self.index = self.ops.len();
+        self.edits += 1;
         while self.ops.len() > MAX_OPS {
             let oldest = self.ops.remove(0);
+            // Recortar, cortar faixa e escalar são as únicas que mexem nos
+            // pixels da base, e por isso as únicas que obrigam a regravar a
+            // imagem da sessão — que custa dezenas de MB. Consolidar uma
+            // anotação muda só as camadas, e elas viajam no log, que é barato.
             match oldest {
-                Op::Crop { x, y, w, h } => self.baseline.crops.push(Reframe::Crop(x, y, w, h)),
-                Op::Cut(band) => self.baseline.crops.push(Reframe::Cut(band)),
-                Op::Scale(f) => self.baseline.crops.push(Reframe::Scale(f.to_bits())),
+                Op::Crop { x, y, w, h } => {
+                    self.baseline.crops.push(Reframe::Crop(x, y, w, h));
+                    self.baseline_version += 1;
+                }
+                Op::Cut(band) => {
+                    self.baseline.crops.push(Reframe::Cut(band));
+                    self.baseline_version += 1;
+                }
+                Op::Scale(f) => {
+                    self.baseline.crops.push(Reframe::Scale(f.to_bits()));
+                    self.baseline_version += 1;
+                }
                 _ => {}
             }
             apply(&oldest, &mut self.baseline.image, &mut self.baseline.layers);
@@ -596,6 +644,7 @@ impl Document {
         self.ops.truncate(self.index);
         self.ops.retain(|op| !matches!(op, Op::Crop { .. }));
         self.index = self.ops.len();
+        self.edits += 1;
         self.replay();
         true
     }
@@ -679,6 +728,7 @@ impl Document {
     pub fn undo(&mut self) {
         if self.index > 0 {
             self.index -= 1;
+            self.edits += 1;
             self.replay();
         }
     }
@@ -686,6 +736,7 @@ impl Document {
     pub fn redo(&mut self) {
         if self.index < self.ops.len() {
             self.index += 1;
+            self.edits += 1;
             self.replay();
         }
     }
@@ -1351,5 +1402,48 @@ mod tests {
             doc.layers().iter().any(|l| l.id == first),
             "a anotação mais antiga foi assada na base e não some"
         );
+    }
+
+    #[test]
+    fn the_revision_keeps_moving_after_the_history_cap() {
+        // A gravação da sessão usa a revisão como assinatura de sujeira. Com
+        // o `applied` no lugar dela, tudo a partir da 101ª edição deixava de
+        // chegar ao disco: o índice trava no teto e a sessão parecia limpa.
+        let mut doc = doc();
+        for _ in 0..MAX_OPS {
+            doc.push(line(), style());
+        }
+        let (travado, revisao) = (doc.applied(), doc.revision());
+        for _ in 0..5 {
+            doc.push(line(), style());
+        }
+        assert_eq!(doc.applied(), travado, "o índice trava no teto");
+        assert_eq!(doc.revision(), revisao + 5);
+    }
+
+    #[test]
+    fn the_baseline_version_moves_when_the_log_overflows() {
+        // É o sinal de que a IMAGEM da base gravada na sessão envelheceu, e
+        // ele só vale para as operações que mexem em pixel. Consolidar
+        // anotação muda só as camadas, que vão no log — e regravar a imagem
+        // por causa delas custaria dezenas de MB por edição.
+        let mut doc = doc();
+        // O recorte é a operação mais antiga; as anotações completam o teto
+        // sem estourá-lo.
+        doc.crop(0, 0, 8, 8);
+        for _ in 0..MAX_OPS - 1 {
+            doc.push(line(), style());
+        }
+        assert_eq!(doc.baseline_version(), 0, "nada foi assado na base ainda");
+
+        // A operação mais antiga é o recorte: assá-la muda os pixels da base.
+        doc.push(line(), style());
+        assert_eq!(doc.baseline_version(), 1);
+
+        // As seguintes são anotações, e não movem o selo.
+        for _ in 0..5 {
+            doc.push(line(), style());
+        }
+        assert_eq!(doc.baseline_version(), 1, "anotação consolidada não mexe em pixel");
     }
 }

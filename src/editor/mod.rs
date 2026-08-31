@@ -199,6 +199,9 @@ pub struct EditorSession {
     /// Opacidade da imagem exportada, 0,1–1,0. Abaixo de 1 a saída é
     /// forçada a PNG: o JPG não tem canal alfa.
     pub opacity: f32,
+    /// Valor do campo de redimensionar, em %, enquanto ele está sendo
+    /// arrastado ou digitado. Volta a 100 assim que o fator é aplicado.
+    pub scale_percent: f32,
     pub guides: Vec<Guide>,
     /// Último ponto do cursor sobre a imagem, em px — é onde uma guia nova
     /// nasce. O atalho é tratado longe do canvas, que é quem sabe a posição.
@@ -233,10 +236,11 @@ pub struct EditorSession {
     pub pin_requested: bool,
     /// Sessão terminou (salvou ou descartou); a janela fecha no próximo frame.
     pub finished: bool,
-    /// Quantas operações já foram gravadas em disco, e se a imagem de origem
-    /// já foi. A imagem não muda, então vai uma vez só.
-    pub saved_ops: Option<usize>,
-    pub source_saved: bool,
+    /// Qual revisão do documento já foi gravada em disco, e com qual selo de
+    /// base a imagem de origem foi. A imagem quase nunca muda, então vai uma
+    /// vez só — mas muda quando o teto do histórico consolida na base.
+    pub saved_revision: Option<u64>,
+    pub saved_baseline: Option<u64>,
 }
 
 impl EditorSession {
@@ -279,6 +283,7 @@ impl EditorSession {
             resize_drag: None,
             edit_run_until: None,
             opacity: 1.0,
+            scale_percent: 100.0,
             guides: Vec::new(),
             guide_hint: None,
             crop_pending: None,
@@ -291,8 +296,8 @@ impl EditorSession {
             redact_words: false,
             pin_requested: false,
             finished: false,
-            saved_ops: None,
-            source_saved: false,
+            saved_revision: None,
+            saved_baseline: None,
         }
     }
 
@@ -310,6 +315,15 @@ impl EditorSession {
             spotlight: self.spotlight,
             magnification: self.magnification,
         }
+    }
+
+    /// Desfaz a seleção inteira. Os dois campos andam em par: limpar só o
+    /// `selected` deixava o conjunto em `selection` desenhado como
+    /// selecionado, mas sem alças e surdo às teclas — a seleção fantasma que
+    /// sobrava depois de refazer, recortar ou cortar.
+    pub fn clear_selection(&mut self) {
+        self.selected = None;
+        self.selection.clear();
     }
 
     /// Há edições que seriam perdidas ao fechar sem salvar? Qualquer ponto

@@ -37,8 +37,11 @@ fn log_path(dir: &Path) -> PathBuf {
     dir.join("session.json")
 }
 
-/// Grava a imagem de origem. Só precisa acontecer uma vez por sessão: ela
-/// não muda, e reescrever dezenas de MB a cada anotação seria absurdo.
+/// Grava a imagem de origem. Quase sempre acontece uma vez por sessão —
+/// reescrever dezenas de MB a cada anotação seria absurdo —, mas ela **muda**
+/// quando o teto do histórico assa a operação mais antiga na base; quem chama
+/// acompanha `Document::baseline_version` para regravá-la nessa hora, ou o
+/// log passa a apontar para uma imagem que não é mais a base do documento.
 pub fn save_source(doc: &Document, dir: &Path) -> Result<()> {
     let image = doc.source_image();
     std::fs::write(image_path(dir), encode_raw(image)).context("gravando a imagem da sessão")
@@ -106,6 +109,12 @@ pub fn save_log(doc: &Document, dir: &Path) -> Result<()> {
         ("version", json::n(FORMAT_VERSION)),
         ("applied", json::n(doc.applied() as f64)),
         ("next_id", json::n(doc.next_id() as f64)),
+        // As anotações consolidadas na base saíram do log: sem elas aqui, uma
+        // sessão longa voltaria sem as anotações mais antigas.
+        (
+            "base_layers",
+            json::arr(doc.baseline_layers().iter().map(encode_layer).collect()),
+        ),
         ("ops", json::arr(doc.ops().iter().map(encode_op).collect())),
     ]);
     std::fs::write(log_path(dir), json::to_string_pretty(&value))
@@ -143,9 +152,22 @@ pub fn load(dir: &Path) -> Option<Document> {
         .iter()
         .map(decode_op)
         .collect::<Option<Vec<Op>>>()?;
+    // Ausente numa sessão gravada por um binário anterior: a base volta sem
+    // as anotações consolidadas, que é como era.
+    let base_layers = match value.get("base_layers").and_then(Value::as_array) {
+        Some(items) => items.iter().map(decode_layer).collect::<Option<Vec<Layer>>>()?,
+        None => Vec::new(),
+    };
     let applied = value.get("applied").and_then(Value::as_f64).unwrap_or(0.0) as usize;
     let next_id = value.get("next_id").and_then(Value::as_f64).unwrap_or(1.0) as u64;
-    Some(Document::restore(image, ops, applied, next_id, load_pasted(dir)))
+    Some(Document::restore(
+        image,
+        base_layers,
+        ops,
+        applied,
+        next_id,
+        load_pasted(dir),
+    ))
 }
 
 /// Há uma sessão gravada esperando?
@@ -672,6 +694,47 @@ mod tests {
             !dir.join(format!("pasted-{source}.rsraw")).exists(),
             "sem o log, os pixels não têm quem os referencie"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn uma_sessao_longa_volta_com_a_base_que_estava_na_tela() {
+        let dir = std::env::temp_dir().join(format!(
+            "rustshot-session-longa-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let mut base = RgbaImage::filled(16, 16, [10, 20, 30, 255]);
+        base.pixel_mut(5, 5).copy_from_slice(&[9, 8, 7, 255]);
+        let mut doc = Document::new(base);
+        doc.crop(4, 4, 8, 8);
+        // Mais edições que o teto do histórico: o recorte e as anotações mais
+        // antigas saem do log e viram parte da base.
+        for numero in 0..120u32 {
+            doc.push(
+                Shape::Marker { center: p((numero % 8) as f32, 1.0), number: numero },
+                style(),
+            );
+        }
+        assert!(doc.baseline_version() > 0, "o log tem de ter estourado o teto");
+
+        save(&doc, &dir).unwrap();
+        let restaurado = load(&dir).expect("sessão recuperada");
+
+        // A recuperação não pode devolver um documento diferente do que estava
+        // na tela: as anotações consolidadas não estão no log, e sem gravá-las
+        // à parte a sessão longa voltava sem as mais antigas.
+        assert_eq!(restaurado.layers(), doc.layers());
+        assert_eq!(
+            (restaurado.visible_image().width(), restaurado.visible_image().height()),
+            (8, 8),
+            "o recorte consolidado veio junto"
+        );
+        assert_eq!(restaurado.visible_image().pixel(1, 1), [9, 8, 7, 255]);
+
+        clear(&dir);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

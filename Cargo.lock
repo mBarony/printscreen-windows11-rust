@@ -1724,7 +1724,7 @@ dependencies = [
 
 [[package]]
 name = "rustshot"
-version = "1.11.0"
+version = "1.11.1"
 dependencies = [
  "ab_glyph",
  "eframe",

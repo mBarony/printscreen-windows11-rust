@@ -4,6 +4,10 @@ Histórico de versões do RustShot. Datas em 2026.
 
 ## Não lançado
 
+## v1.11.1 — 31/08
+
+Correção do leitor de QR, que na v1.11.0 não lia nada acima da versão 7, e a revisão geral do código que a encontrou.
+
 - **O leitor de QR não lia nada acima da versão 7.** Três defeitos somados no detector, todos encontrados na revisão geral do código e todos no que saiu na v1.11.0 no mesmo dia: a proporção 1:1:3:1:1 era conferida antes de a última faixa fechar, e a faixa truncada envenenava a estimativa do tamanho do módulo em 2,4% — erro que a distância entre os localizadores multiplica até virar uma versão inteira; a amostragem mirava a borda do módulo em vez do meio, o que funciona num símbolo desenhado 1:1 e falha assim que ele é reamostrado; e o voto de vizinhança amostrava a um quarto de **pixel** quando devia ser a um quarto de **módulo**, então os cinco votos caíam no mesmo pixel. Junto foi o designador ECI de 2 bytes, que era lido com 8 bits a menos e desalinhava todo o resto do fluxo. O que deixou isso passar foi o teste: o caminho da imagem só era exercitado até a versão 5, e as versões altas eram testadas a partir da grade pronta, que pula o detector inteiro. Agora há um teste de v1 a v40 em duas escalas e outro com módulo de tamanho quebrado — os dois falham no código anterior.
 
 - **Revisão geral do código**, em [docs/revisao-de-codigo-v1.11.md](docs/revisao-de-codigo-v1.11.md): 27 mil linhas em seis fatias, com verificação adversarial de todo achado que alegava bug. Saíram quatro pedaços de código morto — a constante `SAC_EXE_SALT`, que prometia re-rolar o hash do exe e nem chegava ao binário; a supressão de `dead_code` do módulo de OCR, do tempo em que ele era prova de conceito, e as duas reexportações que ela escondia; o bloco de criação de guias duplicado, que numa das entradas roubava a tecla do campo de texto em foco; e a segunda cópia de `cursor_pos`. O que foi confirmado e não corrigido está no documento, com cenário e proposta: nove correções pendentes, seis otimizações (a maior, 4,4× no caminho de composição de pixel) e quatro simplificações.

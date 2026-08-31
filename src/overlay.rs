@@ -106,10 +106,17 @@ struct Drag {
     current: (f32, f32),
 }
 
+/// Teto de quadros pintados às escuras antes de exibir a janela de qualquer
+/// jeito — rede contra uma geometria que nunca converge (ver `mostrar`).
+const MAX_QUADROS_OCULTOS: u8 = 4;
+
 /// Um monitor participando do overlay.
 pub struct OverlayMonitor {
     pub shot: MonitorShot,
     texture: Option<egui::TextureHandle>,
+    /// Quantos quadros a janela já pintou enquanto ainda estava oculta;
+    /// `None` depois de exibida. Ver `mostrar`.
+    ocultos: Option<u8>,
 }
 
 /// Sessão de seleção de região (estado compartilhado entre os viewports).
@@ -166,7 +173,7 @@ impl SelectSession {
                         color,
                         TextureOptions::NEAREST,
                     );
-                    OverlayMonitor { shot, texture: Some(texture) }
+                    OverlayMonitor { shot, texture: Some(texture), ocultos: Some(0) }
                 })
                 .collect(),
             drag: None,
@@ -185,6 +192,12 @@ impl SelectSession {
             .with_resizable(false)
             .with_taskbar(false)
             .with_always_on_top()
+            // Nasce oculta: o winit cria toda janela com `CW_USEDEFAULT` e só
+            // depois aplica tamanho e posição, então uma janela visível de
+            // saída aparece em branco, no tamanho e no lugar errados, e salta
+            // para o monitor um quadro depois. Quem a exibe é `mostrar`, com a
+            // geometria já certa e o conteúdo já pintado.
+            .with_visible(false)
             .with_position(Pos2::new(shot.x as f32 / scale, shot.y as f32 / scale))
             .with_inner_size(Vec2::new(
                 shot.width as f32 / scale,
@@ -228,7 +241,17 @@ fn window_rect_on(
 pub fn overlay_ui(ctx: &egui::Context, session: &mut SelectSession, idx: usize) {
     let ppp = ctx.input(|i| i.pixels_per_point());
 
-    ensure_geometry(ctx, session, idx, ppp);
+    // Exibir a janela faz o winit reescrever o `GWL_EXSTYLE` inteiro a partir
+    // das flags dele, levando junto o `WS_EX_LAYERED` que a raiz aplicou — e a
+    // raiz, que dorme durante a seleção, só o repõe quadros depois. Reaplicar
+    // aqui, no quadro seguinte ao da exibição, fecha o intervalo em que o
+    // overlay fica topo-de-tudo, de tela cheia e sem camada (a condição do
+    // apagão da v1.1). A função é idempotente: só escreve quando falta.
+    #[cfg(windows)]
+    crate::app::make_overlays_layered();
+
+    let redimensionou = ensure_geometry(ctx, session, idx, ppp);
+    mostrar(ctx, &mut session.monitors[idx], redimensionou);
 
     let (img_w, img_h) = {
         let shot = &session.monitors[idx].shot;
@@ -642,8 +665,35 @@ fn draw_selection(
     sel_pts
 }
 
+/// Exibe a janela do overlay, uma vez, no quadro certo.
+///
+/// O eframe roda a UI, pinta o quadro e **só então** aplica os
+/// `ViewportCommand`. Logo o `Visible(true)` enviado aqui mostra a janela já
+/// com o conteúdo deste quadro e já na geometria que `ensure_geometry` acabou
+/// de pedir — os comandos valem na ordem em que foram enviados.
+///
+/// Esperar mais um quadro só é seguro enquanto há garantia de que ele virá.
+/// Janela oculta não recebe `WM_PAINT`, e é dele que sai todo
+/// `RedrawRequested` no Windows: `request_repaint` não acorda janela oculta.
+/// O que ainda acorda é o `InnerSize` — vira `WM_SIZE`/`Resized`, e nesse
+/// evento o eframe repinta o viewport na hora. Daí a regra: enquanto pedimos
+/// tamanho novo, esperamos; no primeiro quadro sem pedido de tamanho,
+/// aparecemos, porque esse quadro pode ser o último.
+fn mostrar(ctx: &egui::Context, monitor: &mut OverlayMonitor, redimensionou: bool) {
+    let Some(quadros) = monitor.ocultos else {
+        return;
+    };
+    if redimensionou && quadros < MAX_QUADROS_OCULTOS {
+        monitor.ocultos = Some(quadros + 1);
+        return;
+    }
+    monitor.ocultos = None;
+    ctx.send_viewport_cmd(ViewportCommand::Visible(true));
+}
+
 /// Confere posição/tamanho físicos e corrige via comandos de viewport.
-fn ensure_geometry(ctx: &egui::Context, session: &SelectSession, idx: usize, ppp: f32) {
+/// Devolve `true` quando pediu tamanho novo — o que garante outro quadro.
+fn ensure_geometry(ctx: &egui::Context, session: &SelectSession, idx: usize, ppp: f32) -> bool {
     let shot = &session.monitors[idx].shot;
     let target_pos = (shot.x as f32, shot.y as f32);
     let target_size = (shot.width as f32, shot.height as f32);
@@ -672,6 +722,7 @@ fn ensure_geometry(ctx: &egui::Context, session: &SelectSession, idx: usize, ppp
         )));
         ctx.request_repaint();
     }
+    !size_ok
 }
 
 fn ordered(a: f32, b: f32) -> (f32, f32) {

@@ -557,8 +557,12 @@ pub fn app_icon_data() -> egui::IconData {
 
 /// Aplica `WS_EX_LAYERED` (alfa 255, opaco) a toda janela de overlay de
 /// seleção. Idempotente: só escreve quando o estilo ainda não está aplicado.
+///
+/// Chamada de dois lugares, e os dois são necessários: daqui, a cada quadro da
+/// raiz, e do próprio `overlay_ui`, porque exibir a janela faz o winit
+/// reescrever o `GWL_EXSTYLE` inteiro e a raiz dorme durante a seleção.
 #[cfg(windows)]
-fn make_overlays_layered() {
+pub(crate) fn make_overlays_layered() {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         FindWindowExW, GetWindowLongPtrW, SetLayeredWindowAttributes, SetWindowLongPtrW,
         GWL_EXSTYLE, LWA_ALPHA, WS_EX_LAYERED,

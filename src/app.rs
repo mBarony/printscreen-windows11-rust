@@ -168,8 +168,11 @@ impl GuiApp {
                                     crate::storage::SaveTarget::from_config(&shared.config),
                                 )
                             };
+                            // Uma imagem, duas threads: a `Arc` evita a cópia
+                            // inteira que o "salvar e copiar" cobrava.
+                            let cropped = std::sync::Arc::new(cropped);
                             if destino.copies() {
-                                let copia = cropped.clone();
+                                let copia = std::sync::Arc::clone(&cropped);
                                 jobs::spawn(move || match crate::clipboard::copy_image(&copia) {
                                     Ok(()) => notify::toast(
                                         "Copiado para a área de transferência",

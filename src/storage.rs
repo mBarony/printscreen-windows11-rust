@@ -187,7 +187,12 @@ pub fn write_gif(target: &SaveTarget, frames: &[&RgbaImage], delay_cs: u16) -> R
 
 /// Salva em thread de trabalho e notifica o resultado (toast RF-07/§14). Via
 /// `jobs`, para o processo não encerrar no meio da gravação.
-pub fn save_in_background(target: SaveTarget, image: RgbaImage) {
+///
+/// Recebe `Arc` porque nos três fluxos em que o destino é "salvar **e** copiar"
+/// a mesma captura vai para duas threads. Com a imagem por valor, uma delas
+/// levava uma cópia inteira — 33 MB numa tela 4K, só para ser lida e jogada
+/// fora.
+pub fn save_in_background(target: SaveTarget, image: std::sync::Arc<RgbaImage>) {
     crate::jobs::spawn(move || match write_image(&target, &image) {
         Ok(path) => {
             log::info!("captura salva em {}", path.display());

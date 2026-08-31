@@ -260,8 +260,11 @@ impl Resident {
         let h = h.min(shot.height - local_y);
         let image = capture::crop(&shot.image, local_x, local_y, w, h);
         let destino = self.config.after_region;
+        // Uma imagem, duas threads: a `Arc` evita a cópia inteira que o
+        // "salvar e copiar" cobrava.
+        let image = std::sync::Arc::new(image);
         if destino.copies() {
-            let copia = image.clone();
+            let copia = std::sync::Arc::clone(&image);
             crate::jobs::spawn(move || match crate::clipboard::copy_image(&copia) {
                 Ok(()) => notify::toast(
                     "Copiado para a área de transferência",
@@ -342,7 +345,7 @@ impl Resident {
 
         let altura = costura.height();
         let imagem = costura.finish();
-        storage::save_in_background(SaveTarget::from_config(&self.config), imagem);
+        storage::save_in_background(SaveTarget::from_config(&self.config), std::sync::Arc::new(imagem));
         notify::toast("Captura com rolagem", &format!("{altura} px de altura."));
         shell::set_poll_timer(true);
     }
@@ -355,10 +358,13 @@ impl Resident {
         match capture::capture_fullscreen(self.config.fullscreen_scope) {
             Ok(image) => {
                 let destino = self.config.after_fullscreen;
+                // Uma imagem, duas threads: a `Arc` evita a cópia inteira que
+                // o "salvar e copiar" cobrava — 33 MB numa tela 4K.
+                let image = std::sync::Arc::new(image);
                 if destino.copies() {
                     // A cópia primeiro: ela é rápida e é o que o usuário está
                     // esperando para colar. O arquivo pode demorar a codificar.
-                    let copia = image.clone();
+                    let copia = std::sync::Arc::clone(&image);
                     crate::jobs::spawn(move || {
                         if let Err(err) = crate::clipboard::copy_image(&copia) {
                             notify::toast_error("Falha ao copiar", &format!("{err:#}"));

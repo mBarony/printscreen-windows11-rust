@@ -4,6 +4,10 @@ Histórico de versões do RustShot. Datas em 2026.
 
 ## Não lançado
 
+## v1.10.0 — 30/08
+
+Duas mudanças, uma de cada lado da captura: a imagem anotada sai do editor arrastada direto para outro programa, e a seleção de região parou de piscar a tela ao abrir.
+
 - **A tela não pisca mais ao abrir a seleção de região.** A janela do overlay nascia visível e vazia: o winit cria toda janela com `CW_USEDEFAULT` nas quatro coordenadas e só depois aplica tamanho e posição — e, pior, mostra a janela **antes** disso ("Set visible before setting the size", diz o comentário dele). O resultado era um retângulo branco de meia tela, com barra de título e botão de fechar de verdade (janela sem decoração no Windows nasce com `WS_CAPTION` e só finge não ter, por `WM_NCCALCSIZE`), que saltava, crescia até cobrir o monitor e só então pintava a captura congelada. Medido no vídeo do relato: 420 ms de retângulo branco. Agora o overlay nasce oculto e se exibe sozinho no primeiro quadro em que já não pede tamanho novo — os comandos de viewport valem na ordem em que são enviados, então quando o `Visible(true)` chega a geometria já foi corrigida e o conteúdo já foi pintado. A condição não é "a geometria está certa": janela oculta não recebe `WM_PAINT`, e no Windows é dele que sai todo `RedrawRequested`, então esperar por um quadro que ninguém vai pedir deixaria o overlay invisível para sempre. O que ainda acorda uma janela oculta é o `WM_SIZE`, e é por isso que a espera é atrelada ao pedido de tamanho, com teto de quatro quadros para o caso de uma geometria que não convirja.
 
 - **O overlay não fica mais um segundo sem `WS_EX_LAYERED`.** Exibir a janela faz o winit reescrever o `GWL_EXSTYLE` inteiro a partir das flags dele, levando junto a camada que a raiz aplicou — e a raiz dorme enquanto a seleção roda, então ela só repunha o estilo mais de um segundo depois. Nesse intervalo o overlay é uma janela de tela cheia, topo-de-tudo e sem camada, que é exatamente a condição do apagão de monitor investigado na v1.1. A reaplicação passou a sair do quadro do próprio overlay, que é quem com certeza roda logo depois. O buraco já existia antes desta versão, em menor escala.

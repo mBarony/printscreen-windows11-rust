@@ -131,8 +131,32 @@ impl GuiApp {
     // Transições pendentes vindas dos viewports
     // -----------------------------------------------------------------------
 
+    /// A sequência de transições do quadro, uma por etapa.
+    ///
+    /// A ordem é semântica, não arbitrária: `step_quit` só pode ser a última,
+    /// porque lê bandeiras que as anteriores levantam e baixam; e a publicação
+    /// do `config.json` vem depois da limpeza das janelas passageiras, que é
+    /// onde ela estava quando isto era uma função só.
+    ///
+    /// Cada etapa abre e fecha o próprio escopo de lock, como antes. Juntar
+    /// duas num lock só mudaria o comportamento sob concorrência, e uma
+    /// extração não pode mudar comportamento nenhum.
     fn process_shared(&mut self) {
-        // Resultado do overlay de seleção.
+        self.step_overlay_outcome();
+        self.step_editor_ocr();
+        self.step_editor_redact();
+        self.step_editor_pin();
+        self.step_editor_finished();
+        let pending = self.step_settings();
+        self.step_transient_windows();
+        if let Some(new_config) = pending {
+            self.publish_config(new_config);
+        }
+        self.step_quit();
+    }
+
+    /// Resultado do overlay de seleção.
+    fn step_overlay_outcome(&mut self) {
         let outcome_step = {
             let mut shared = self.shared.lock().unwrap();
             match &mut shared.flow {
@@ -145,205 +169,202 @@ impl GuiApp {
                 _ => None,
             }
         };
-        if let Some((session, outcome)) = outcome_step {
-            match outcome {
-                Outcome::Cancelled => {
-                    log::info!("seleção de região cancelada");
-                }
-                Outcome::Selected { monitor, rect: (x, y, w, h), action } => {
-                    let shot = &session.monitors[monitor].shot;
-                    let cropped = capture::crop(&shot.image, x, y, w, h);
-                    // Em coordenadas do desktop virtual, para o residente
-                    // poder repetir a região mesmo com outra lista de
-                    // monitores.
-                    crate::last_region::save((shot.x + x as i32, shot.y + y as i32, w, h));
-                    match action {
-                        // Capturar região: salva e/ou copia, conforme as
-                        // Configurações, e encerra sem passar pelo editor.
-                        SelectedAction::CopyToClipboard => {
-                            let (destino, alvo) = {
-                                let shared = self.shared.lock().unwrap();
-                                (
-                                    shared.config.after_region,
-                                    crate::storage::SaveTarget::from_config(&shared.config),
-                                )
-                            };
-                            // Uma imagem, duas threads: a `Arc` evita a cópia
-                            // inteira que o "salvar e copiar" cobrava.
-                            let cropped = std::sync::Arc::new(cropped);
-                            if destino.copies() {
-                                let copia = std::sync::Arc::clone(&cropped);
-                                jobs::spawn(move || match crate::clipboard::copy_image(&copia) {
-                                    Ok(()) => notify::toast(
-                                        "Copiado para a área de transferência",
-                                        "A região selecionada está pronta para colar.",
-                                    ),
-                                    Err(err) => {
-                                        notify::toast_error("Falha ao copiar", &format!("{err:#}"))
-                                    }
-                                });
-                            }
-                            if destino.saves() {
-                                crate::storage::save_in_background(alvo, cropped);
-                            }
-                        }
-                        SelectedAction::OpenEditor => {
-                            // A partir daqui há trabalho do usuário nesta
-                            // janela: o residente precisa saber, para o
-                            // atalho não a encerrar como faz com o overlay.
-                            crate::resident_link::editor_opened();
-                            let mut shared = self.shared.lock().unwrap();
-                            let defaults = shared.config.editor.clone();
-                            shared.flow = Flow::Editing(Box::new(EditorSession::new(
-                                next_serial(),
-                                cropped,
-                                &defaults,
-                            )));
-                        }
-                        // Reconhecer texto: o OCR bloqueia a thread que o
-                        // chama (é assim que a API WinRT funciona) e uma tela
-                        // cheia leva centenas de milissegundos, então vai
-                        // para thread de trabalho. O texto é copiado lá, e o
-                        // aviso só aparece depois — a cópia não espera por
-                        // janela nenhuma.
-                        SelectedAction::RecognizeText => {
-                            // Alto e centro do monitor onde a seleção
-                            // aconteceu: é a tela para onde o usuário está
-                            // olhando, e sai de graça porque já a temos aqui.
-                            let anchor = {
-                                let scale = shot.scale.max(0.5);
-                                (
-                                    shot.x as f32 / scale + shot.width as f32 / scale / 2.0
-                                        - crate::ocr_popup::SIZE.0 / 2.0,
-                                    shot.y as f32 / scale + crate::ocr_popup::TOP_MARGIN,
-                                )
-                            };
-                            let shared = self.shared.clone();
-                            let ctx = self.ctx.clone();
-                            shared.lock().unwrap().ocr_running = true;
-                            jobs::spawn(move || {
-                                recognize_and_copy(&cropped, &shared, anchor, &ctx)
-                            });
-                        }
-                    }
-                }
+        let Some((session, outcome)) = outcome_step else {
+            return;
+        };
+        let Outcome::Selected { monitor, rect: (x, y, w, h), action } = outcome else {
+            log::info!("seleção de região cancelada");
+            return;
+        };
+
+        let shot = &session.monitors[monitor].shot;
+        let cropped = capture::crop(&shot.image, x, y, w, h);
+        // Em coordenadas do desktop virtual, para o residente poder repetir a
+        // região mesmo com outra lista de monitores.
+        crate::last_region::save((shot.x + x as i32, shot.y + y as i32, w, h));
+
+        match action {
+            SelectedAction::CopyToClipboard => self.region_to_destination(cropped),
+            SelectedAction::OpenEditor => self.region_to_editor(cropped),
+            SelectedAction::RecognizeText => {
+                // Alto e centro do monitor onde a seleção aconteceu: é a tela
+                // para onde o usuário está olhando, e sai de graça porque já a
+                // temos aqui.
+                let scale = shot.scale.max(0.5);
+                let anchor = (
+                    shot.x as f32 / scale + shot.width as f32 / scale / 2.0
+                        - crate::ocr_popup::SIZE.0 / 2.0,
+                    shot.y as f32 / scale + crate::ocr_popup::TOP_MARGIN,
+                );
+                self.region_to_recognition(cropped, anchor);
             }
         }
+    }
 
-        // Pedido de reconhecimento vindo da barra do editor. Termina no mesmo
-        // lugar que o do atalho — mesma cópia, mesmo aviso.
-        {
-            let pedido = {
-                let mut shared = self.shared.lock().unwrap();
-                match &mut shared.flow {
-                    Flow::Editing(session) if session.ocr_requested => {
-                        session.ocr_requested = false;
-                        log::info!("reconhecendo o texto da imagem do editor");
-                        Some(session.doc.visible_image().clone())
-                    }
-                    _ => None,
-                }
-            };
-            if let Some(image) = pedido {
-                // O editor não sabe em que monitor está, e descobrir custaria
-                // uma captura. A largura do monitor da raiz basta para o caso
-                // comum de uma tela só; com várias, o aviso sai centrado na
-                // principal em vez da que tem o editor.
-                let anchor = match self.ctx.input(|i| i.viewport().monitor_size) {
-                    Some(size) => (
-                        size.x / 2.0 - crate::ocr_popup::SIZE.0 / 2.0,
-                        crate::ocr_popup::TOP_MARGIN,
-                    ),
-                    None => (crate::ocr_popup::TOP_MARGIN, crate::ocr_popup::TOP_MARGIN),
-                };
-                let shared = self.shared.clone();
-                let ctx = self.ctx.clone();
-                shared.lock().unwrap().ocr_running = true;
-                jobs::spawn(move || recognize_and_copy(&image, &shared, anchor, &ctx));
-            }
+    /// Capturar região: salva e/ou copia, conforme as Configurações, e encerra
+    /// sem passar pelo editor.
+    fn region_to_destination(&mut self, cropped: crate::imgbuf::RgbaImage) {
+        let (destino, alvo) = {
+            let shared = self.shared.lock().unwrap();
+            (
+                shared.config.after_region,
+                crate::storage::SaveTarget::from_config(&shared.config),
+            )
+        };
+        // Uma imagem, duas threads: a `Arc` evita a cópia inteira que o
+        // "salvar e copiar" cobrava.
+        let cropped = std::sync::Arc::new(cropped);
+        if destino.copies() {
+            let copia = std::sync::Arc::clone(&cropped);
+            jobs::spawn(move || match crate::clipboard::copy_image(&copia) {
+                Ok(()) => notify::toast(
+                    "Copiado para a área de transferência",
+                    "A região selecionada está pronta para colar.",
+                ),
+                Err(err) => notify::toast_error("Falha ao copiar", &format!("{err:#}")),
+            });
         }
-
-        // Ocultar só as palavras de uma região: o OCR bloqueia, então o
-        // retângulo arrastado vira redações depois, de volta nesta thread.
-        {
-            let pedido = {
-                let mut shared = self.shared.lock().unwrap();
-                match &mut shared.flow {
-                    Flow::Editing(session) => session.redact_text.take().map(|regiao| {
-                        (regiao, session.doc.content_image().clone(), session.style())
-                    }),
-                    _ => None,
-                }
-            };
-            if let Some(((min, max), image, style)) = pedido {
-                let shared = self.shared.clone();
-                let ctx = self.ctx.clone();
-                shared.lock().unwrap().ocr_running = true;
-                jobs::spawn(move || redact_words(&image, (min, max), style, &shared, &ctx));
-            }
+        if destino.saves() {
+            crate::storage::save_in_background(alvo, cropped);
         }
+    }
 
-        // Pedido de fixar vindo da barra do editor: a imagem visível vira uma
-        // janela sempre no topo, e o editor fecha — como copiar e salvar.
-        {
+    fn region_to_editor(&mut self, cropped: crate::imgbuf::RgbaImage) {
+        // A partir daqui há trabalho do usuário nesta janela: o residente
+        // precisa saber, para o atalho não a encerrar como faz com o overlay.
+        crate::resident_link::editor_opened();
+        let mut shared = self.shared.lock().unwrap();
+        let defaults = shared.config.editor.clone();
+        shared.flow = Flow::Editing(Box::new(EditorSession::new(
+            next_serial(),
+            cropped,
+            &defaults,
+        )));
+    }
+
+    /// Reconhecer texto: o OCR bloqueia a thread que o chama (é assim que a API
+    /// WinRT funciona) e uma tela cheia leva centenas de milissegundos, então
+    /// vai para thread de trabalho. O texto é copiado lá, e o aviso só aparece
+    /// depois — a cópia não espera por janela nenhuma.
+    fn region_to_recognition(&mut self, cropped: crate::imgbuf::RgbaImage, anchor: (f32, f32)) {
+        let shared = self.shared.clone();
+        let ctx = self.ctx.clone();
+        shared.lock().unwrap().ocr_running = true;
+        jobs::spawn(move || recognize_and_copy(&cropped, &shared, anchor, &ctx));
+    }
+
+    /// Pedido de reconhecimento vindo da barra do editor. Termina no mesmo
+    /// lugar que o do atalho — mesma cópia, mesmo aviso.
+    fn step_editor_ocr(&mut self) {
+        let pedido = {
             let mut shared = self.shared.lock().unwrap();
-            let pedido = match &mut shared.flow {
-                Flow::Editing(session) if session.pin_requested => {
-                    session.pin_requested = false;
+            match &mut shared.flow {
+                Flow::Editing(session) if session.ocr_requested => {
+                    session.ocr_requested = false;
+                    log::info!("reconhecendo o texto da imagem do editor");
                     Some(session.doc.visible_image().clone())
                 }
                 _ => None,
-            };
-            if let Some(image) = pedido {
-                log::info!("fixando a imagem do editor na tela");
-                // Um canto qualquer perto do alto: a janela é arrastável, e
-                // adivinhar melhor exigiria saber em que monitor o editor
-                // está — que é a mesma limitação do aviso do OCR.
-                let anchor = (120.0, 120.0);
-                shared.pinned = Some(crate::pinned::PinnedShot::new(image, anchor));
+            }
+        };
+        let Some(image) = pedido else {
+            return;
+        };
+        // O editor não sabe em que monitor está, e descobrir custaria uma
+        // captura. A largura do monitor da raiz basta para o caso comum de uma
+        // tela só; com várias, o aviso sai centrado na principal em vez da que
+        // tem o editor.
+        let anchor = match self.ctx.input(|i| i.viewport().monitor_size) {
+            Some(size) => (
+                size.x / 2.0 - crate::ocr_popup::SIZE.0 / 2.0,
+                crate::ocr_popup::TOP_MARGIN,
+            ),
+            None => (crate::ocr_popup::TOP_MARGIN, crate::ocr_popup::TOP_MARGIN),
+        };
+        let shared = self.shared.clone();
+        let ctx = self.ctx.clone();
+        shared.lock().unwrap().ocr_running = true;
+        jobs::spawn(move || recognize_and_copy(&image, &shared, anchor, &ctx));
+    }
+
+    /// Ocultar só as palavras de uma região: o OCR bloqueia, então o retângulo
+    /// arrastado vira redações depois, de volta nesta thread.
+    fn step_editor_redact(&mut self) {
+        let pedido = {
+            let mut shared = self.shared.lock().unwrap();
+            match &mut shared.flow {
+                Flow::Editing(session) => session
+                    .redact_text
+                    .take()
+                    .map(|regiao| (regiao, session.doc.content_image().clone(), session.style())),
+                _ => None,
+            }
+        };
+        if let Some(((min, max), image, style)) = pedido {
+            let shared = self.shared.clone();
+            let ctx = self.ctx.clone();
+            shared.lock().unwrap().ocr_running = true;
+            jobs::spawn(move || redact_words(&image, (min, max), style, &shared, &ctx));
+        }
+    }
+
+    /// Pedido de fixar vindo da barra do editor: a imagem visível vira uma
+    /// janela sempre no topo, e o editor fecha — como copiar e salvar.
+    fn step_editor_pin(&mut self) {
+        let mut shared = self.shared.lock().unwrap();
+        let pedido = match &mut shared.flow {
+            Flow::Editing(session) if session.pin_requested => {
+                session.pin_requested = false;
+                Some(session.doc.visible_image().clone())
+            }
+            _ => None,
+        };
+        if let Some(image) = pedido {
+            log::info!("fixando a imagem do editor na tela");
+            // Um canto qualquer perto do alto: a janela é arrastável, e
+            // adivinhar melhor exigiria saber em que monitor o editor está —
+            // que é a mesma limitação do aviso do OCR.
+            let anchor = (120.0, 120.0);
+            shared.pinned = Some(crate::pinned::PinnedShot::new(image, anchor));
+            shared.flow = Flow::Idle;
+        }
+    }
+
+    /// Editor concluído (salvou ou descartou).
+    fn step_editor_finished(&mut self) {
+        let mut shared = self.shared.lock().unwrap();
+        if let Flow::Editing(session) = &shared.flow {
+            if session.finished {
                 shared.flow = Flow::Idle;
             }
         }
+    }
 
-        // Editor concluído (salvou ou descartou).
-        {
-            let mut shared = self.shared.lock().unwrap();
-            if let Flow::Editing(session) = &shared.flow {
-                if session.finished {
-                    shared.flow = Flow::Idle;
-                }
-            }
+    /// Janela de configurações: recolhe o rascunho e/ou fecha. O rascunho é
+    /// gravado depois, por quem chamou — a ordem é a de antes.
+    fn step_settings(&mut self) -> Option<Config> {
+        let mut shared = self.shared.lock().unwrap();
+        let pending = shared.settings.as_mut().and_then(|s| s.pending_apply.take());
+        if shared.settings.as_ref().is_some_and(|s| s.close_requested) {
+            shared.settings = None;
         }
+        pending
+    }
 
-        // Janela de configurações: publicar o rascunho e/ou fechar.
-        let pending = {
-            let mut shared = self.shared.lock().unwrap();
-            let pending = shared
-                .settings
-                .as_mut()
-                .and_then(|s| s.pending_apply.take());
-            if shared.settings.as_ref().is_some_and(|s| s.close_requested) {
-                shared.settings = None;
-            }
-            pending
-        };
-
-        // Aviso do reconhecimento: some quando o tempo acaba ou quando fecham.
-        // A captura fixada só sai quando fecham — é o ponto dela.
-        {
-            let mut shared = self.shared.lock().unwrap();
-            if shared.ocr_popup.as_ref().is_some_and(|popup| popup.closed) {
-                shared.ocr_popup = None;
-            }
-            if shared.pinned.as_ref().is_some_and(|pin| pin.closed) {
-                shared.pinned = None;
-            }
+    /// Aviso do reconhecimento: some quando o tempo acaba ou quando fecham. A
+    /// captura fixada só sai quando fecham — é o ponto dela.
+    fn step_transient_windows(&mut self) {
+        let mut shared = self.shared.lock().unwrap();
+        if shared.ocr_popup.as_ref().is_some_and(|popup| popup.closed) {
+            shared.ocr_popup = None;
         }
-        if let Some(new_config) = pending {
-            self.publish_config(new_config);
+        if shared.pinned.as_ref().is_some_and(|pin| pin.closed) {
+            shared.pinned = None;
         }
+    }
 
-        // Tarefa cumprida: o processo de GUI existe só enquanto há janela.
+    /// Tarefa cumprida: o processo de GUI existe só enquanto há janela.
+    fn step_quit(&mut self) {
         let mut shared = self.shared.lock().unwrap();
         if matches!(shared.flow, Flow::Idle)
             && shared.settings.is_none()

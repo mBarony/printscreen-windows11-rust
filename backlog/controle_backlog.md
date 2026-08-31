@@ -14,13 +14,13 @@ no arquivo da feature é a fonte da verdade; esta página é o resumo.
 
 | Plataforma | Total | Falta | Parcial | Concluído | Cancelado | Em aberto |
 |---|---:|---:|---:|---:|---:|---:|
-| Núcleo (vale para as três plataformas) | 26 | 0 | 0 | 26 | 0 | 0 |
+| Núcleo (vale para as três plataformas) | 29 | 3 | 0 | 26 | 0 | 0 |
 | Windows | 7 | 0 | 0 | 6 | 1 | 0 |
 | Linux (Hyprland + Wayland) | 12 | 11 | 0 | 0 | 0 | 1 |
 | macOS | 13 | 13 | 0 | 0 | 0 | 0 |
-| **Total** | **58** | **24** | **0** | **32** | **1** | **1** |
+| **Total** | **61** | **27** | **0** | **32** | **1** | **1** |
 
-Progresso: **32 de 57** (56%) — o total desconta o item cancelado.
+Progresso: **32 de 60** (53%) — o total desconta o item cancelado.
 
 ---
 
@@ -52,6 +52,9 @@ Progresso: **32 de 57** (56%) — o total desconta o item cancelado.
 - [x] **[Semitransparência](nucleo/semitransparencia.md)** · P
 - [x] **[Seta em arco](nucleo/seta-em-arco.md)** · M
 - [x] **[Seta reversível](nucleo/seta-reversivel.md)** · P
+- [ ] **[Régua que acha os limites sozinha](nucleo/regua-com-limites.md)** · M
+- [ ] **[Toda tecla de atalho configurada pressionando](nucleo/atalhos-por-tecla.md)** · P
+- [ ] **[Agrupamento a cada 5 botões na barra](nucleo/agrupamento-na-barra.md)** · P
 
 ## Windows
 
@@ -100,8 +103,8 @@ Progresso: **32 de 57** (56%) — o total desconta o item cancelado.
 
 | Marco | Critério | Estado |
 |---|---|---|
-| Paridade de anotação | todo o `nucleo/` concluído | [x] |
-| Paridade Windows | `nucleo/` + `windows/` concluídos ou cancelados | [x] |
+| Paridade de anotação | todo o `nucleo/` concluído | [ ] |
+| Paridade Windows | `nucleo/` + `windows/` concluídos ou cancelados | [ ] |
 | Porte habilitado | camada de plataforma extraída (ver README) | [ ] |
 | Release Linux | todo o `linux/` concluído e empacotado | [ ] |
 | Release macOS | todo o `macos/` concluído, assinado e notarizado | [ ] |
@@ -157,3 +160,4 @@ Itens que não são bloqueados por trabalho, e sim por uma escolha:
 | 30/08/2026 | Arrastar a captura do editor para outro programa, por OLE drag & drop |
 | 31/08/2026 | Leitura de QR code, com decodificador próprio e símbolos de referência do ISO e do zxing |
 | 31/08/2026 | Marcos de paridade de anotação e paridade Windows fechados |
+| 31/08/2026 | Três itens novos no núcleo: régua com limites, atalhos por tecla e agrupamento na barra — os marcos de paridade reabrem |

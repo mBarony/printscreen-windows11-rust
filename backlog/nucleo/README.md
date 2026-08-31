@@ -30,3 +30,6 @@ Portáteis: uma implementação serve às três plataformas. É onde mora a maio
 | [Salvar e copiar automáticos](salvar-copiar-automaticos.md) | feito | P |
 | [Captura com atraso](captura-com-atraso.md) | falta | P |
 | [Repetir a última região](repetir-ultima-regiao.md) | falta | P |
+| [Régua que acha os limites sozinha](regua-com-limites.md) | falta | M |
+| [Toda tecla de atalho configurada pressionando](atalhos-por-tecla.md) | falta | P |
+| [Agrupamento a cada 5 botões na barra](agrupamento-na-barra.md) | falta | P |

@@ -621,16 +621,62 @@ fn remove_root_from_alt_tab() {
 /// procura janelas por título e não deve encontrar a raiz do filho.
 pub const ROOT_TITLE: &str = "RustShot GUI";
 
-/// Reconhece o texto do recorte e o põe na área de transferência.
+/// Lê o recorte e põe o resultado na área de transferência.
 ///
-/// Roda em thread de trabalho por contrato do módulo: a API do WinRT é
+/// **QR primeiro, texto depois.** Quem seleciona um QR quer o endereço que ele
+/// carrega, não o OCR dos quadradinhos, e a tentativa é barata: sem os três
+/// padrões localizadores ela desiste em milissegundos. O QR não depende da
+/// feature `ocr` — é código próprio, sem WinRT —, então este caminho funciona
+/// mesmo numa build compilada sem reconhecimento de texto.
+///
+/// Roda em thread de trabalho por contrato do módulo de OCR: a API do WinRT é
 /// assíncrona e `ocr::recognize` espera o resultado, então chamá-la da thread
 /// da interface congelaria a janela por centenas de milissegundos.
-///
-/// Nenhuma janela se abre em nenhum dos desfechos — o aviso de sistema é toda
-/// a resposta que este fluxo dá.
-#[cfg(feature = "ocr")]
 fn recognize_and_copy(
+    image: &crate::imgbuf::RgbaImage,
+    shared: &Arc<Mutex<AppShared>>,
+    anchor: (f32, f32),
+    ctx: &egui::Context,
+) {
+    if let Some(conteudo) = crate::qr::decode(image) {
+        entregar(conteudo, shared, anchor, ctx);
+        return;
+    }
+    recognize_text(image, shared, anchor, ctx);
+}
+
+/// Copia o que foi lido e abre o aviso. É o desfecho comum do QR e do OCR.
+fn entregar(
+    texto: String,
+    shared: &Arc<Mutex<AppShared>>,
+    anchor: (f32, f32),
+    ctx: &egui::Context,
+) {
+    if let Err(err) = crate::clipboard::copy_text(&texto) {
+        notify::toast_error("Falha ao copiar o texto", &format!("{err:#}"));
+        shared.lock().unwrap().ocr_running = false;
+        ctx.request_repaint();
+        return;
+    }
+
+    // Copiado. Só agora o aviso aparece, e ele é opcional por natureza: se
+    // esta janela falhasse em nascer, o texto já estaria na área de
+    // transferência do mesmo jeito.
+    {
+        let mut shared = shared.lock().unwrap();
+        shared.ocr_popup = Some(crate::ocr_popup::OcrPopup::new(texto, anchor));
+        shared.ocr_running = false;
+    }
+    // A raiz está dormindo — esta thread é a única que sabe que há janela nova.
+    ctx.request_repaint();
+}
+
+/// Reconhece o texto do recorte pelo motor do Windows.
+///
+/// Nenhuma janela se abre quando não há o que reconhecer — o aviso de sistema
+/// é toda a resposta que esse desfecho dá.
+#[cfg(feature = "ocr")]
+fn recognize_text(
     image: &crate::imgbuf::RgbaImage,
     shared: &Arc<Mutex<AppShared>>,
     anchor: (f32, f32),
@@ -647,23 +693,7 @@ fn recognize_and_copy(
             return;
         }
     };
-    if let Err(err) = crate::clipboard::copy_text(&text) {
-        notify::toast_error("Falha ao copiar o texto", &format!("{err:#}"));
-        shared.lock().unwrap().ocr_running = false;
-        ctx.request_repaint();
-        return;
-    }
-
-    // Copiado. Só agora o aviso aparece, e ele é opcional por natureza: se
-    // esta janela falhasse em nascer, o texto já estaria na área de
-    // transferência do mesmo jeito.
-    {
-        let mut shared = shared.lock().unwrap();
-        shared.ocr_popup = Some(crate::ocr_popup::OcrPopup::new(text, anchor));
-        shared.ocr_running = false;
-    }
-    // A raiz está dormindo — esta thread é a única que sabe que há janela nova.
-    ctx.request_repaint();
+    entregar(text, shared, anchor, ctx);
 }
 
 /// Folga em volta de cada palavra, em px da imagem.
@@ -773,10 +803,11 @@ fn redact_words(
     ctx.request_repaint();
 }
 
-/// Sem a feature `ocr` o atalho continua existindo, mas avisa em vez de fingir
-/// que funcionou — silêncio aqui seria pior que a mensagem.
+/// Sem a feature `ocr` o atalho continua existindo — e continua lendo QR, que
+/// é código próprio —, mas avisa em vez de fingir que reconheceu texto:
+/// silêncio aqui seria pior que a mensagem.
 #[cfg(not(feature = "ocr"))]
-fn recognize_and_copy(
+fn recognize_text(
     _image: &crate::imgbuf::RgbaImage,
     shared: &Arc<Mutex<AppShared>>,
     _anchor: (f32, f32),

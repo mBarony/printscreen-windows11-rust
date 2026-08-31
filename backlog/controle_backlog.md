@@ -1,6 +1,6 @@
 # Controle do backlog
 
-Painel de andamento. Atualizado em 30/08/2026.
+Painel de andamento. Atualizado em 31/08/2026.
 
 Marque a caixa ao concluir e mova a linha para a data no rodapé. O estado
 no arquivo da feature é a fonte da verdade; esta página é o resumo.
@@ -14,13 +14,13 @@ no arquivo da feature é a fonte da verdade; esta página é o resumo.
 
 | Plataforma | Total | Falta | Parcial | Concluído | Cancelado | Em aberto |
 |---|---:|---:|---:|---:|---:|---:|
-| Núcleo (vale para as três plataformas) | 26 | 1 | 0 | 25 | 0 | 0 |
+| Núcleo (vale para as três plataformas) | 26 | 0 | 0 | 26 | 0 | 0 |
 | Windows | 7 | 0 | 0 | 6 | 1 | 0 |
 | Linux (Hyprland + Wayland) | 12 | 11 | 0 | 0 | 0 | 1 |
 | macOS | 13 | 13 | 0 | 0 | 0 | 0 |
-| **Total** | **58** | **25** | **0** | **31** | **1** | **1** |
+| **Total** | **58** | **24** | **0** | **32** | **1** | **1** |
 
-Progresso: **31 de 57** (54%) — o total desconta o item cancelado.
+Progresso: **32 de 57** (56%) — o total desconta o item cancelado.
 
 ---
 
@@ -39,7 +39,7 @@ Progresso: **31 de 57** (54%) — o total desconta o item cancelado.
 - [x] **[Outros formatos de cor](nucleo/formatos-de-cor.md)** · P
 - [x] **[GIF antes e depois](nucleo/gif-antes-depois.md)** · M
 - [x] **[Guias de alinhamento](nucleo/guias.md)** · P
-- [ ] **[Leitura de QR code](nucleo/leitura-de-qr-code.md)** · G
+- [x] **[Leitura de QR code](nucleo/leitura-de-qr-code.md)** · G
 - [x] **[Mover o objeto durante o desenho](nucleo/mover-durante-desenho.md)** · P
 - [x] **[Ocultar só o texto](nucleo/ocultar-so-o-texto.md)** · M
 - [x] **[Reconstruir colunas no OCR](nucleo/reconstruir-colunas.md)** · G
@@ -100,8 +100,8 @@ Progresso: **31 de 57** (54%) — o total desconta o item cancelado.
 
 | Marco | Critério | Estado |
 |---|---|---|
-| Paridade de anotação | todo o `nucleo/` concluído | [ ] |
-| Paridade Windows | `nucleo/` + `windows/` concluídos ou cancelados | [ ] |
+| Paridade de anotação | todo o `nucleo/` concluído | [x] |
+| Paridade Windows | `nucleo/` + `windows/` concluídos ou cancelados | [x] |
 | Porte habilitado | camada de plataforma extraída (ver README) | [ ] |
 | Release Linux | todo o `linux/` concluído e empacotado | [ ] |
 | Release macOS | todo o `macos/` concluído, assinado e notarizado | [ ] |
@@ -155,3 +155,5 @@ Itens que não são bloqueados por trabalho, e sim por uma escolha:
 | 28/08/2026 | Captura com rolagem, com a costura por correlação de faixa |
 | 28/08/2026 | `windows/upload-s3` cancelado: o app não fala com a rede, e isso é auditável |
 | 30/08/2026 | Arrastar a captura do editor para outro programa, por OLE drag & drop |
+| 31/08/2026 | Leitura de QR code, com decodificador próprio e símbolos de referência do ISO e do zxing |
+| 31/08/2026 | Marcos de paridade de anotação e paridade Windows fechados |

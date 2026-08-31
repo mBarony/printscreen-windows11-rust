@@ -35,11 +35,15 @@ mod jpeg;
 mod last_region;
 mod json;
 mod notify;
+// Só serve ao motor de OCR, que é feature: sem ela este módulo não compila,
+// porque o `TextBox` que ele arruma vem de `platform::ocr`.
+#[cfg(feature = "ocr")]
 mod ocr_layout;
 mod ocr_popup;
 mod overlay;
 mod pinned;
 mod platform;
+mod qr;
 mod resident;
 mod resident_link;
 mod settings;

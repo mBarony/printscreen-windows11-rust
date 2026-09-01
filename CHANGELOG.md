@@ -4,6 +4,10 @@ Histórico de versões do RustShot. Datas em 2026.
 
 ## Não lançado
 
+- **Os três itens que a revisão tinha deixado de fora foram feitos, um por commit.** A captura deixou de ser copiada para ir a duas threads quando o destino é "salvar e copiar" — eu tinha descartado esse item com o argumento de que mudar quatro pontos de chamada para servir a um não se paga, e o argumento estava errado por um detalhe de contagem: o padrão está em três lugares, não num. São 33 MB numa tela 4K.
+
+- **Duas funções grandes viraram o que já eram por dentro.** `process_shared` (~220 linhas, complexidade 28) virou a lista das oito etapas que executava, cada uma um método, com os escopos de lock preservados um a um — juntar dois num lock só mudaria o comportamento sob concorrência. E `canvas::draw` foi de 572 para 173 linhas: monta a textura, resolve zoom e pan, e despacha para `interact` e `paint_frame`; a complexidade da closure, que era 85, saiu da lista. Nada mudou de comportamento nas duas: o corpo foi movido literalmente. Fica dito o que não foi feito — `interact` ainda está em 56, e baixar disso exige reorganizar a interação por modo, o que é redesenho e merece decisão própria.
+
 ## v1.11.3 — 31/08
 
 O resto da revisão de código: quatro otimizações medidas, os dois achados que faltava verificar, e as duplicações que sobravam.

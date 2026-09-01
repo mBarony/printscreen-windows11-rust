@@ -131,12 +131,13 @@ prova que a cache do replay percebe a mudança; e
 `o_indice_espacial_agrupa_igual_ao_laco_linear` compara bit a bit o resultado do
 índice espacial contra o laço quadrático que ele substituiu.
 
-**A quinta não foi aplicada** (`resident.rs:354`, a cópia da tela cheia). Evitá-la
-exige `save_in_background` passar a receber `Arc<RgbaImage>`, o que muda quatro
-pontos de chamada para servir a um. A cópia acontece uma vez por captura de tela
-cheia e fora do caminho interativo — os dois consumidores já são thread de
-trabalho —, e foi a única das seis que a revisão não mediu. Ficou de fora por
-isso, não por esquecimento.
+**A quinta entrou depois** (`resident.rs:354`, a cópia da tela cheia). Ela tinha
+ficado de fora com o argumento de que mudar quatro pontos de chamada para servir
+a um não se paga. O argumento estava errado por um detalhe de contagem: a revisão
+registrou o padrão "clona para o clipboard, move para a gravação" num lugar só, e
+ele está em **três** — a região, a repetição da última região e a tela cheia.
+Quatro pontos ajustados servindo a três é outro negócio. `save_in_background`
+passou a receber `Arc<RgbaImage>`.
 
 **`blend` chama `f32::round()` quatro vezes por pixel** (`src/editor/raster/mod.rs:38`). No alvo x86-64 padrão cada `round()` é uma chamada de biblioteca. Medido com o código real extraído para um binário otimizado, reproduzindo `paint_shadow` sobre um canvas de 2048×1208: 8,07 s contra 1,84 s trocando `.round() as u8` por `+ 0.5) as u8` — **4,4×**, com resultado de pixel idêntico, porque os operandos são sempre combinação convexa de bytes.
 
@@ -156,16 +157,25 @@ As duas pequenas entraram: o `NativeOptions` duplicado (`run_event_loop` passou 
 ser o único dono da descrição da janela-raiz, e `run_event_loop_with`, que ficara
 com um chamador só, foi absorvido) e os dois doc comments presos ao campo errado.
 
-**As duas extrações grandes não entraram** — `canvas::draw` e `process_shared`.
-Elas não são defeito: são o critério de tamanho do projeto, e a decisão de
-deixá-las para um passo próprio é deliberada. O motivo é o que esta mesma revisão
-mostrou: mover 220 e 600 linhas de código de interação, que nenhum teste de
-comportamento cobre de ponta a ponta, no fim de uma sessão que já mudou oito
-arquivos, é exatamente o gesto que introduz a regressão seguinte. Uma refatoração
-sem mudança de comportamento merece um passo em que ela seja **a única coisa**
-acontecendo, para o diff dizer isso sozinho.
+**As duas extrações grandes entraram depois**, cada uma no seu commit — que era
+a condição que eu tinha posto para fazê-las: uma refatoração sem mudança de
+comportamento merece um passo em que ela seja a única coisa acontecendo, para o
+diff dizer isso sozinho.
 
-O plano continua valendo, e está escrito abaixo.
+`process_shared` virou a lista das oito etapas que ela executava, cada uma um
+método, com os escopos de lock preservados um a um — juntar dois num lock só
+mudaria o comportamento sob concorrência. O braço da seleção também se dividiu
+por destino, senão a etapa nasceria acima do mesmo teto que ela existe para
+respeitar. `clippy::cognitive_complexity` não a acusa mais.
+
+`canvas::draw` foi de 572 para 173 linhas: monta a textura, resolve zoom e pan, e
+despacha para `interact` e `paint_frame`. A complexidade da closure caiu de 85
+para fora da lista.
+
+**O que continua acima do teto: `interact`, em 56.** Baixar disso exige
+reorganizar a lógica de interação por modo, e isso é redesenho, não extração —
+merece decisão própria, e não um efeito colateral de uma refatoração mecânica.
+O plano abaixo continua valendo para quem for atacá-la.
 
 **`canvas::draw` tem 572 linhas** e complexidade ciclomática na casa das centenas (`src/editor/ui/canvas.rs:32`). Dois dos bugs desta revisão — a guarda de arrasto órfão e o `return` que pula o desenho — existem porque estão a centenas de linhas do código que depende deles. A extração proposta é mecânica: uma função por braço do match de interação, mais uma para o bloco de desenho.
 
@@ -193,4 +203,6 @@ Dois deles mereciam nota por serem de interface, que costuma ser a desculpa para
 
 **Depois de atacar o resto** (v1.11.3): 395 testes. Entraram quatro das seis otimizações, duas das quatro simplificações, e os dois achados pendentes foram verificados — um confirmado e corrigido, um refutado (mas com a promessa falsa do comentário transformada em código).
 
-Continua em aberto, e por decisão: a cópia da tela cheia no residente, e as duas extrações grandes. Os motivos estão nas seções acima.
+**Depois dos três que faltavam** (v1.11.4): a cópia da tela cheia e as duas extrações grandes entraram, cada uma no seu commit. Os 34 achados desta revisão estão resolvidos, com uma exceção declarada — `interact` continua em 56 de complexidade, e baixar disso é redesenho, não extração.
+
+`clippy::cognitive_complexity` acusa hoje dois pontos: `interact` (56) e a closure de `overlay.rs:330` (38). Nenhum dos dois estava na revisão original; o segundo entra na lista da próxima.

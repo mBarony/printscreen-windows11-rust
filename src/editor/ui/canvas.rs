@@ -163,448 +163,35 @@ pub(super) fn draw(ctx: &egui::Context, session: &mut EditorSession) {
 
             session.guide_hint = response.hover_pos().map(|p| to_screen.inverse(p));
 
-            // --- Interação (botão primário) ---
-            //
-            // O arrasto é rastreado manualmente pelo estado do ponteiro: o
-            // `drag_started_by` do egui só dispara após ~6 pt de movimento
-            // (desambiguação clique×arrasto do `Sense::click_and_drag`), o
-            // que atrasava o preview e fazia a forma nascer deslocada do
-            // ponto exato do press (issue #3). `press_origin` preserva esse
-            // ponto desde o primeiro frame.
-            let clamp_img = |p: Point| Point::new(p.x.clamp(0.0, img_w), p.y.clamp(0.0, img_h));
-            let (primary_down, primary_pressed, primary_released, press_origin, latest_pos) =
-                ui.input(|i| {
-                    (
-                        i.pointer.primary_down(),
-                        i.pointer.primary_pressed(),
-                        i.pointer.primary_released(),
-                        i.pointer.press_origin(),
-                        i.pointer.latest_pos(),
-                    )
-                });
+            let quadro = Quadro {
+                to_screen,
+                canvas: canvas_rect,
+                conteudo: (img_w, img_h),
+                moldura: (frame_w, frame_h),
+                offset: frame_offset,
+            };
+            interact(ctx, ui, session, &quadro, &response);
 
-            // Arrasto órfão (o release foi engolido por um modal, a ferramenta
-            // trocou no meio, etc.): sem botão pressionado nem release a
-            // processar neste frame, não há arrasto legítimo — descartar
-            // evita um preview fantasma que viraria forma no próximo clique.
-            //
-            // O cancelamento vale só para um arrasto de fato aberto: o
-            // ponteiro fica solto na maior parte dos quadros, e chamar
-            // `cancel_move` aqui sem condição fechava junto a corrida de
-            // edição (ele começa por `close_edit_run`) no mesmo quadro em que
-            // ela nascia — o coalescimento dos empurrões por seta e dos
-            // ajustes pela roda nunca chegava a acontecer.
-            if !primary_down && !primary_released {
-                session.drag = None;
-                if session.move_drag.is_some() || session.resize_drag.is_some() {
-                    cancel_move(session);
-                }
-            }
-
-            if session.text_input.is_none() && !session.confirm_discard {
-                match session.tool {
-                    // Amostra a cor e devolve a ferramenta. Um clique pega o
-                    // pixel; com Shift, o tom mais escuro por perto (a cor da
-                    // letra, quando se clica sobre texto); arrastando, a média
-                    // do retângulo, para áreas com ruído ou gradiente.
-                    Tool::Eyedropper => {
-                        if response.hovered() {
-                            ctx.output_mut(|o| o.cursor_icon = CursorIcon::Crosshair);
-                        }
-                        let ponto = |r: &egui::Response| {
-                            r.interact_pointer_pos()
-                                .or_else(|| r.hover_pos())
-                                .map(|p| clamp_img(to_screen.inverse(p)))
-                        };
-                        if response.drag_started() {
-                            session.eyedropper_origin = ponto(&response);
-                        }
-                        if response.drag_stopped() {
-                            if let (Some(inicio), Some(fim)) =
-                                (session.eyedropper_origin.take(), ponto(&response))
-                            {
-                                pick_color(ctx, session, fim, PickMode::Average(inicio));
-                            }
-                        }
-                        if response.clicked_by(PointerButton::Primary) {
-                            if let Some(p) = ponto(&response) {
-                                let mode = if ctx.input(|i| i.modifiers.shift) {
-                                    PickMode::TextColor
-                                } else {
-                                    PickMode::Point
-                                };
-                                pick_color(ctx, session, p, mode);
-                            }
-                        }
-                    }
-                    // O contador é carimbado num clique, sem arrasto.
-                    Tool::Marker => {
-                        if response.hovered() {
-                            ctx.output_mut(|o| o.cursor_icon = CursorIcon::Crosshair);
-                        }
-                        if response.clicked_by(PointerButton::Primary) {
-                            if let Some(p) = response
-                                .interact_pointer_pos()
-                                .or_else(|| response.hover_pos())
-                                .map(|p| clamp_img(to_screen.inverse(p)))
-                            {
-                                let shape = Shape::Marker {
-                                    center: p,
-                                    number: session.doc.next_marker(),
-                                };
-                                session.doc.push(shape, session.style());
-                            }
-                        }
-                    }
-                    Tool::Text => {
-                        if response.hovered() {
-                            ctx.output_mut(|o| o.cursor_icon = CursorIcon::Text);
-                        }
-                        if response.clicked_by(PointerButton::Primary) {
-                            if let Some(p) = response
-                                .interact_pointer_pos()
-                                .or_else(|| response.hover_pos())
-                                .map(|p| to_screen.inverse(p))
-                            {
-                                session.text_input = Some(TextInput {
-                                    anchor: clamp_img(p),
-                                    buffer: String::new(),
-                                    focus_requested: false,
-                                });
-                            }
-                        }
-                    }
-                    Tool::Select => {
-                        let hover_handle = (session.move_drag.is_none()
-                            && session.resize_drag.is_none())
-                        .then(|| latest_pos.and_then(|pos| handle_at(session, to_screen, pos)))
-                        .flatten();
-                        if response.hovered() {
-                            let icon = match (&session.resize_drag, &session.move_drag) {
-                                (Some(rz), _) => handle_cursor(rz.handle),
-                                (None, Some(_)) => CursorIcon::Grabbing,
-                                _ => hover_handle
-                                    .map(|(_, h)| handle_cursor(h))
-                                    .unwrap_or(CursorIcon::Default),
-                            };
-                            ctx.output_mut(|o| o.cursor_icon = icon);
-                        }
-                        if session.move_drag.is_none()
-                            && session.resize_drag.is_none()
-                            && primary_pressed
-                            && response.hovered()
-                        {
-                            // `press_origin` já foi limpo se o release chegou
-                            // no mesmo frame (clique coalescido) — o clique
-                            // ainda deve selecionar.
-                            if let Some(origin) =
-                                press_origin.or_else(|| response.interact_pointer_pos())
-                            {
-                                begin_select_drag(ctx, session, to_screen, origin);
-                            }
-                        }
-                        if session.marquee.is_some() {
-                            if let Some(pos) = latest_pos {
-                                let p = to_screen.inverse(pos);
-                                if let Some((_, to)) = &mut session.marquee {
-                                    *to = p;
-                                }
-                            }
-                        }
-                        if let Some(rz) = &session.resize_drag {
-                            if let Some(pos) = latest_pos {
-                                let constrain = ui.input(|i| i.modifiers.shift);
-                                let p = to_screen.inverse(pos);
-                                session.doc.resize(rz.index, rz.handle, p, constrain);
-                            }
-                        }
-                        // Move o conjunto inteiro, não só a anotação clicada.
-                        if let (Some(mv), Some(pos)) = (&session.move_drag, latest_pos) {
-                            let p = to_screen.inverse(pos);
-                            let (dx, dy) = (p.x - mv.last.x, p.y - mv.last.y);
-                            if dx != 0.0 || dy != 0.0 {
-                                let picked = session.selection.clone();
-                                session.doc.translate_all(&picked, dx, dy);
-                                if let Some(mv) = &mut session.move_drag {
-                                    mv.travel += (dx * dx + dy * dy).sqrt();
-                                    mv.last = p;
-                                }
-                            }
-                        }
-                        if primary_released {
-                            finish_marquee(session);
-                            // Um arrasto de alça que não mudou nada não vira
-                            // histórico: `end_move` só registra o que mudou.
-                            if session.resize_drag.take().is_some() {
-                                session.doc.end_move();
-                            }
-                            if let Some(mv) = session.move_drag.take() {
-                                // Clique parado (sem arrasto real) só
-                                // seleciona: nem o undo nem o redo mudam.
-                                if mv.travel * to_screen.scale < 2.0 {
-                                    session.doc.abort_move();
-                                } else {
-                                    session.doc.end_move();
-                                }
-                            }
-                        }
-                    }
-                    // Desenho de formas e marcação da área de recorte: mesma
-                    // mecânica de arrasto, destinos diferentes no release.
-                    _ => {
-                        if response.hovered() {
-                            ctx.output_mut(|o| o.cursor_icon = CursorIcon::Crosshair);
-                        }
-                        // Relidos a cada quadro: dá para ligar e desligar a
-                        // restrição no meio do arrasto, sem recomeçar.
-                        let (shift, alt) = ui.input(|i| (i.modifiers.shift, i.modifiers.alt));
-                        if session.drag.is_none() && primary_pressed && response.hovered() {
-                            if let Some(origin) =
-                                press_origin.or_else(|| response.interact_pointer_pos())
-                            {
-                                let p = clamp_img(to_screen.inverse(origin));
-                                session.drag = Some(DragPreview {
-                                    start: p,
-                                    current: p,
-                                    shift,
-                                    alt,
-                                    samples: vec![p],
-                                });
-                                // Começar uma área nova descarta a anterior.
-                                session.crop_pending = None;
-                            }
-                        }
-                        // Espaço segurado reposiciona a forma em vez de
-                        // esticá-la: errar o ponto de partida de um retângulo
-                        // grande custaria refazer o gesto inteiro.
-                        let moving = ctx.input(|i| i.key_down(egui::Key::Space));
-                        if let Some(drag) = &mut session.drag {
-                            if let Some(pos) = latest_pos {
-                                let novo = clamp_img(to_screen.inverse(pos));
-                                if moving {
-                                    let dx = novo.x - drag.current.x;
-                                    let dy = novo.y - drag.current.y;
-                                    drag.start = clamp_img(Point::new(
-                                        drag.start.x + dx,
-                                        drag.start.y + dy,
-                                    ));
-                                    for s in &mut drag.samples {
-                                        *s = Point::new(s.x + dx, s.y + dy);
-                                    }
-                                }
-                                drag.current = novo;
-                                if session.tool.is_stroke() && !moving {
-                                    push_sample(&mut drag.samples, drag.current);
-                                }
-                            }
-                            drag.shift = shift;
-                            drag.alt = alt;
-                        }
-                        if primary_released {
-                            if let Some(drag) = session.drag.take() {
-                                let dx = (drag.current.x - drag.start.x).abs();
-                                let dy = (drag.current.y - drag.start.y).abs();
-                                if session.tool == Tool::Cut {
-                                    // Diferente do recorte, o corte não
-                                    // espera confirmação: o gesto já diz tudo.
-                                    let band = Band::from_drag(drag.start, drag.current);
-                                    if band.width() > 0 {
-                                        session.doc.cut(band);
-                                        reset_view(session);
-                                        session.clear_selection();
-                                    }
-                                } else if session.tool == Tool::Crop {
-                                    // Área pequena demais foi engano: nada a
-                                    // confirmar (o recorte só sai no Enter).
-                                    if dx >= CROP_MIN_SIDE && dy >= CROP_MIN_SIDE {
-                                        session.crop_pending =
-                                            Some(normalize(drag.start, drag.current));
-                                    }
-                                } else if session.tool.is_stroke() {
-                                    // Um rabisco é medido pelo caminho
-                                    // percorrido, não pela distância entre as
-                                    // pontas: um círculo começa e termina no
-                                    // mesmo lugar e nem por isso é um clique.
-                                    if let Some(shape) =
-                                        stroke_from_samples(session.tool, &drag.samples)
-                                    {
-                                        session.doc.push(shape, session.style());
-                                    }
-                                } else if dx >= 2.0 || dy >= 2.0 {
-                                    // Ignora cliques sem arrasto real.
-                                    if let Some(mut shape) = shape_from_drag(
-                                        session.tool,
-                                        drag.start,
-                                        drag.current,
-                                        drag.shift,
-                                        drag.alt,
-                                    ) {
-                                        // Ocultar só as palavras: o retângulo
-                                        // não vira anotação agora — ele espera
-                                        // o OCR, que roda fora desta thread.
-                                        // Sair daqui com `return` pulava o
-                                        // bloco de desenho lá embaixo, e o
-                                        // canvas ficava sem pintura por um
-                                        // quadro.
-                                        let so_palavras = session.redact_words
-                                            && matches!(shape, Shape::Redaction { .. });
-                                        if let Shape::Redaction { min, max, seed } = &mut shape {
-                                            if so_palavras {
-                                                session.redact_text = Some((*min, *max));
-                                            } else {
-                                                // Uma redação minúscula não
-                                                // esconderia nada; e cada uma
-                                                // leva a própria semente.
-                                                max.x = max.x.max(min.x + REDACTION_MIN_SIDE);
-                                                max.y = max.y.max(min.y + REDACTION_MIN_SIDE);
-                                                *seed = redact::fresh_seed();
-                                            }
-                                        }
-                                        if !so_palavras {
-                                            session.doc.push(shape, session.style());
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // --- Desenho: imagem + formas confirmadas + preview ---
-            let painter = ui.painter_at(canvas_rect);
-            // O retângulo da textura inclui a moldura; o do conteúdo é o que
-            // recorta as anotações.
-            let image_rect = Rect::from_min_size(
-                to_screen.pos(Point::new(0.0, 0.0)),
-                Vec2::new(img_w, img_h) * to_screen.scale,
-            );
-            let frame_rect = Rect::from_min_size(
-                to_screen.pos(Point::new(-frame_offset, -frame_offset)),
-                Vec2::new(frame_w, frame_h) * to_screen.scale,
-            );
-            painter.image(
+            paint_frame(
+                ctx,
+                ui,
+                session,
+                &Quadro {
+                    to_screen,
+                    canvas: canvas_rect,
+                    conteudo: (img_w, img_h),
+                    moldura: (frame_w, frame_h),
+                    offset: frame_offset,
+                },
                 tex_id,
-                frame_rect,
-                Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-                Color32::WHITE,
             );
-
-            // As anotações são clipadas à imagem: o que vaza para fora não
-            // entra no arquivo salvo (o rasterizador clipa), então também
-            // não pode aparecer no editor — WYSIWYG inclusive depois de um
-            // recorte ou de arrastar uma anotação para fora.
-            let shape_painter = ui.painter_at(image_rect.intersect(canvas_rect));
-            for layer in session.doc.layers() {
-                paint_shape(&shape_painter, layer, to_screen, &session.image_textures);
-            }
-            if session.tool == Tool::Cut {
-                if let Some(drag) = &session.drag {
-                    draw_cut_preview(&shape_painter, drag, to_screen, img_w, img_h);
-                }
-            }
-            if let Some(drag) = &session.drag {
-                let in_progress = if session.tool.is_stroke() {
-                    stroke_from_samples(session.tool, &drag.samples)
-                } else {
-                    shape_from_drag(session.tool, drag.start, drag.current, drag.shift, drag.alt)
-                };
-                if let Some(shape) = in_progress {
-                    let burnt_area = match &shape {
-                        Shape::Redaction { min, max, .. } => Some((*min, *max)),
-                        Shape::Spotlight { center, rx, ry } => Some((
-                            Point::new(center.x - rx, center.y - ry),
-                            Point::new(center.x + rx, center.y + ry),
-                        )),
-                        _ => None,
-                    };
-                    if let Some((min, max)) = burnt_area {
-                        // Redação e holofote só existem depois de queimados
-                        // na imagem; durante o arrasto, o que se mostra é a
-                        // área que eles vão ocupar.
-                        let area = Rect::from_min_max(to_screen.pos(min), to_screen.pos(max));
-                        shape_painter.rect_filled(
-                            area,
-                            CornerRadius::ZERO,
-                            Color32::from_black_alpha(170),
-                        );
-                        shape_painter.rect_stroke(
-                            area,
-                            CornerRadius::ZERO,
-                            Stroke::new(1.5_f32, Color32::WHITE),
-                            StrokeKind::Middle,
-                        );
-                    } else {
-                        // A pré-visualização ainda não é uma anotação do
-                        // documento: recebe um id provisório só para reusar o
-                        // mesmo desenho da forma já criada.
-                        let preview = Layer { id: 0, shape, style: session.style() };
-                        paint_shape(&shape_painter, &preview, to_screen, &session.image_textures);
-                    }
-                }
-            }
-
-            // Contorno tracejado da anotação selecionada (ferramenta Mover) —
-            // no painter sem clip, para continuar visível se a anotação foi
-            // arrastada para fora da imagem.
-            if session.tool == Tool::Select {
-                let color = ui.visuals().selection.stroke.color;
-                for index in &session.selection {
-                    if let Some(layer) = session.doc.layers().get(*index) {
-                        draw_selection_outline(ctx, &painter, layer, to_screen, color);
-                    }
-                }
-                // Alças só com uma anotação: com várias, não haveria o que
-                // redimensionar sem inventar uma regra.
-                if session.selection.len() == 1 {
-                    if let Some(layer) =
-                        session.selected.and_then(|i| session.doc.layers().get(i))
-                    {
-                        draw_handles(&painter, layer, to_screen, ui.visuals().selection.bg_fill);
-                    }
-                }
-                if let Some((from, to)) = session.marquee {
-                    let area = Rect::from_two_pos(to_screen.pos(from), to_screen.pos(to));
-                    painter.rect_filled(
-                        area,
-                        CornerRadius::ZERO,
-                        ui.visuals().selection.bg_fill.gamma_multiply(0.25),
-                    );
-                    painter.rect_stroke(
-                        area,
-                        CornerRadius::ZERO,
-                        Stroke::new(1.0_f32, color),
-                        StrokeKind::Inside,
-                    );
-                }
-            }
-
-            // Área do recorte: véu sobre o que será descartado (issue #5).
-            if session.tool == Tool::Crop {
-                let region = session
-                    .drag
-                    .as_ref()
-                    .map(|d| normalize(d.start, d.current))
-                    .or(session.crop_pending);
-                if let Some((min, max)) = region {
-                    let selection =
-                        Rect::from_min_max(to_screen.pos(min), to_screen.pos(max));
-                    draw_crop_overlay(
-                        &painter,
-                        image_rect,
-                        selection,
-                        (max.x - min.x, max.y - min.y),
-                        session.crop_pending.is_some(),
-                    );
-                }
-            }
-
             // --- Caixa de texto inline (ferramenta Texto) ---
             if session.text_input.is_some() {
                 text_input_overlay(ctx, session, to_screen);
             }
 
             // Rodapé discreto com o zoom atual.
+            let painter = ui.painter_at(canvas_rect);
             let label = format!("{:.0}%", zoom * 100.0);
             painter.text(
                 canvas_rect.right_bottom() - Vec2::new(8.0, 6.0),
@@ -701,5 +288,495 @@ mod tests {
                 .any(|c| matches!(c.shape, egui::Shape::Mesh(_))),
             "o quadro do release saiu sem a imagem do canvas"
         );
+    }
+}
+
+/// Geometria do quadro: onde a imagem cai na tela e de que tamanho.
+///
+/// Não é abstração nova — é o nome do punhado de valores que o desenho já
+/// recebia soltos de `draw`.
+#[derive(Clone, Copy)]
+struct Quadro {
+    to_screen: ToScreen,
+    canvas: Rect,
+    /// Largura e altura do conteúdo, sem a moldura decorativa.
+    conteudo: (f32, f32),
+    /// Largura e altura com a moldura.
+    moldura: (f32, f32),
+    /// Quanto a moldura avança para fora do conteúdo.
+    offset: f32,
+}
+
+/// Desenha o quadro: a imagem, as anotações confirmadas e o preview do que
+/// está sendo arrastado.
+///
+/// Só lê a sessão. Saiu de `draw`, que passava das 570 linhas — e os dois bugs
+/// corrigidos na v1.11.2 lá dentro (a guarda de arrasto órfão e o `return` que
+/// pulava justamente este bloco) existiam porque estavam a centenas de linhas
+/// do código que dependia deles.
+fn paint_frame(
+    ctx: &egui::Context,
+    ui: &egui::Ui,
+    session: &EditorSession,
+    q: &Quadro,
+    tex_id: egui::TextureId,
+) {
+    let (canvas_rect, to_screen) = (q.canvas, q.to_screen);
+    let (img_w, img_h) = q.conteudo;
+    let (frame_w, frame_h) = q.moldura;
+    let frame_offset = q.offset;
+
+    let painter = ui.painter_at(canvas_rect);
+    // O retângulo da textura inclui a moldura; o do conteúdo é o que
+    // recorta as anotações.
+    let image_rect = Rect::from_min_size(
+        to_screen.pos(Point::new(0.0, 0.0)),
+        Vec2::new(img_w, img_h) * to_screen.scale,
+    );
+    let frame_rect = Rect::from_min_size(
+        to_screen.pos(Point::new(-frame_offset, -frame_offset)),
+        Vec2::new(frame_w, frame_h) * to_screen.scale,
+    );
+    painter.image(
+        tex_id,
+        frame_rect,
+        Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+        Color32::WHITE,
+    );
+
+    // As anotações são clipadas à imagem: o que vaza para fora não
+    // entra no arquivo salvo (o rasterizador clipa), então também
+    // não pode aparecer no editor — WYSIWYG inclusive depois de um
+    // recorte ou de arrastar uma anotação para fora.
+    let shape_painter = ui.painter_at(image_rect.intersect(canvas_rect));
+    for layer in session.doc.layers() {
+        paint_shape(&shape_painter, layer, to_screen, &session.image_textures);
+    }
+    if session.tool == Tool::Cut {
+        if let Some(drag) = &session.drag {
+            draw_cut_preview(&shape_painter, drag, to_screen, img_w, img_h);
+        }
+    }
+    if let Some(drag) = &session.drag {
+        let in_progress = if session.tool.is_stroke() {
+            stroke_from_samples(session.tool, &drag.samples)
+        } else {
+            shape_from_drag(session.tool, drag.start, drag.current, drag.shift, drag.alt)
+        };
+        if let Some(shape) = in_progress {
+            let burnt_area = match &shape {
+                Shape::Redaction { min, max, .. } => Some((*min, *max)),
+                Shape::Spotlight { center, rx, ry } => Some((
+                    Point::new(center.x - rx, center.y - ry),
+                    Point::new(center.x + rx, center.y + ry),
+                )),
+                _ => None,
+            };
+            if let Some((min, max)) = burnt_area {
+                // Redação e holofote só existem depois de queimados
+                // na imagem; durante o arrasto, o que se mostra é a
+                // área que eles vão ocupar.
+                let area = Rect::from_min_max(to_screen.pos(min), to_screen.pos(max));
+                shape_painter.rect_filled(
+                    area,
+                    CornerRadius::ZERO,
+                    Color32::from_black_alpha(170),
+                );
+                shape_painter.rect_stroke(
+                    area,
+                    CornerRadius::ZERO,
+                    Stroke::new(1.5_f32, Color32::WHITE),
+                    StrokeKind::Middle,
+                );
+            } else {
+                // A pré-visualização ainda não é uma anotação do
+                // documento: recebe um id provisório só para reusar o
+                // mesmo desenho da forma já criada.
+                let preview = Layer { id: 0, shape, style: session.style() };
+                paint_shape(&shape_painter, &preview, to_screen, &session.image_textures);
+            }
+        }
+    }
+
+    // Contorno tracejado da anotação selecionada (ferramenta Mover) —
+    // no painter sem clip, para continuar visível se a anotação foi
+    // arrastada para fora da imagem.
+    if session.tool == Tool::Select {
+        let color = ui.visuals().selection.stroke.color;
+        for index in &session.selection {
+            if let Some(layer) = session.doc.layers().get(*index) {
+                draw_selection_outline(ctx, &painter, layer, to_screen, color);
+            }
+        }
+        // Alças só com uma anotação: com várias, não haveria o que
+        // redimensionar sem inventar uma regra.
+        if session.selection.len() == 1 {
+            if let Some(layer) =
+                session.selected.and_then(|i| session.doc.layers().get(i))
+            {
+                draw_handles(&painter, layer, to_screen, ui.visuals().selection.bg_fill);
+            }
+        }
+        if let Some((from, to)) = session.marquee {
+            let area = Rect::from_two_pos(to_screen.pos(from), to_screen.pos(to));
+            painter.rect_filled(
+                area,
+                CornerRadius::ZERO,
+                ui.visuals().selection.bg_fill.gamma_multiply(0.25),
+            );
+            painter.rect_stroke(
+                area,
+                CornerRadius::ZERO,
+                Stroke::new(1.0_f32, color),
+                StrokeKind::Inside,
+            );
+        }
+    }
+
+    // Área do recorte: véu sobre o que será descartado (issue #5).
+    if session.tool == Tool::Crop {
+        let region = session
+            .drag
+            .as_ref()
+            .map(|d| normalize(d.start, d.current))
+            .or(session.crop_pending);
+        if let Some((min, max)) = region {
+            let selection =
+                Rect::from_min_max(to_screen.pos(min), to_screen.pos(max));
+            draw_crop_overlay(
+                &painter,
+                image_rect,
+                selection,
+                (max.x - min.x, max.y - min.y),
+                session.crop_pending.is_some(),
+            );
+        }
+    }
+
+}
+
+/// Todo o tratamento do botão primário: escolher, arrastar, desenhar,
+/// confirmar. É a outra metade do que `draw` fazia sozinha.
+///
+/// O arrasto é rastreado manualmente pelo estado do ponteiro: o
+/// `drag_started_by` do egui só dispara após ~6 pt de movimento (desambiguação
+/// clique×arrasto do `Sense::click_and_drag`), o que atrasava o preview e fazia
+/// a forma nascer deslocada do ponto exato do press (issue #3). `press_origin`
+/// preserva esse ponto desde o primeiro quadro.
+fn interact(
+    ctx: &egui::Context,
+    ui: &egui::Ui,
+    session: &mut EditorSession,
+    q: &Quadro,
+    response: &egui::Response,
+) {
+    let to_screen = q.to_screen;
+    let (img_w, img_h) = q.conteudo;
+
+    //
+    // O arrasto é rastreado manualmente pelo estado do ponteiro: o
+    // `drag_started_by` do egui só dispara após ~6 pt de movimento
+    // (desambiguação clique×arrasto do `Sense::click_and_drag`), o
+    // que atrasava o preview e fazia a forma nascer deslocada do
+    // ponto exato do press (issue #3). `press_origin` preserva esse
+    // ponto desde o primeiro frame.
+    let clamp_img = |p: Point| Point::new(p.x.clamp(0.0, img_w), p.y.clamp(0.0, img_h));
+    let (primary_down, primary_pressed, primary_released, press_origin, latest_pos) =
+        ui.input(|i| {
+            (
+                i.pointer.primary_down(),
+                i.pointer.primary_pressed(),
+                i.pointer.primary_released(),
+                i.pointer.press_origin(),
+                i.pointer.latest_pos(),
+            )
+        });
+
+    // Arrasto órfão (o release foi engolido por um modal, a ferramenta
+    // trocou no meio, etc.): sem botão pressionado nem release a
+    // processar neste frame, não há arrasto legítimo — descartar
+    // evita um preview fantasma que viraria forma no próximo clique.
+    //
+    // O cancelamento vale só para um arrasto de fato aberto: o
+    // ponteiro fica solto na maior parte dos quadros, e chamar
+    // `cancel_move` aqui sem condição fechava junto a corrida de
+    // edição (ele começa por `close_edit_run`) no mesmo quadro em que
+    // ela nascia — o coalescimento dos empurrões por seta e dos
+    // ajustes pela roda nunca chegava a acontecer.
+    if !primary_down && !primary_released {
+        session.drag = None;
+        if session.move_drag.is_some() || session.resize_drag.is_some() {
+            cancel_move(session);
+        }
+    }
+
+    if session.text_input.is_none() && !session.confirm_discard {
+        match session.tool {
+            // Amostra a cor e devolve a ferramenta. Um clique pega o
+            // pixel; com Shift, o tom mais escuro por perto (a cor da
+            // letra, quando se clica sobre texto); arrastando, a média
+            // do retângulo, para áreas com ruído ou gradiente.
+            Tool::Eyedropper => {
+                if response.hovered() {
+                    ctx.output_mut(|o| o.cursor_icon = CursorIcon::Crosshair);
+                }
+                let ponto = |r: &egui::Response| {
+                    r.interact_pointer_pos()
+                        .or_else(|| r.hover_pos())
+                        .map(|p| clamp_img(to_screen.inverse(p)))
+                };
+                if response.drag_started() {
+                    session.eyedropper_origin = ponto(response);
+                }
+                if response.drag_stopped() {
+                    if let (Some(inicio), Some(fim)) =
+                        (session.eyedropper_origin.take(), ponto(response))
+                    {
+                        pick_color(ctx, session, fim, PickMode::Average(inicio));
+                    }
+                }
+                if response.clicked_by(PointerButton::Primary) {
+                    if let Some(p) = ponto(response) {
+                        let mode = if ctx.input(|i| i.modifiers.shift) {
+                            PickMode::TextColor
+                        } else {
+                            PickMode::Point
+                        };
+                        pick_color(ctx, session, p, mode);
+                    }
+                }
+            }
+            // O contador é carimbado num clique, sem arrasto.
+            Tool::Marker => {
+                if response.hovered() {
+                    ctx.output_mut(|o| o.cursor_icon = CursorIcon::Crosshair);
+                }
+                if response.clicked_by(PointerButton::Primary) {
+                    if let Some(p) = response
+                        .interact_pointer_pos()
+                        .or_else(|| response.hover_pos())
+                        .map(|p| clamp_img(to_screen.inverse(p)))
+                    {
+                        let shape = Shape::Marker {
+                            center: p,
+                            number: session.doc.next_marker(),
+                        };
+                        session.doc.push(shape, session.style());
+                    }
+                }
+            }
+            Tool::Text => {
+                if response.hovered() {
+                    ctx.output_mut(|o| o.cursor_icon = CursorIcon::Text);
+                }
+                if response.clicked_by(PointerButton::Primary) {
+                    if let Some(p) = response
+                        .interact_pointer_pos()
+                        .or_else(|| response.hover_pos())
+                        .map(|p| to_screen.inverse(p))
+                    {
+                        session.text_input = Some(TextInput {
+                            anchor: clamp_img(p),
+                            buffer: String::new(),
+                            focus_requested: false,
+                        });
+                    }
+                }
+            }
+            Tool::Select => {
+                let hover_handle = (session.move_drag.is_none()
+                    && session.resize_drag.is_none())
+                .then(|| latest_pos.and_then(|pos| handle_at(session, to_screen, pos)))
+                .flatten();
+                if response.hovered() {
+                    let icon = match (&session.resize_drag, &session.move_drag) {
+                        (Some(rz), _) => handle_cursor(rz.handle),
+                        (None, Some(_)) => CursorIcon::Grabbing,
+                        _ => hover_handle
+                            .map(|(_, h)| handle_cursor(h))
+                            .unwrap_or(CursorIcon::Default),
+                    };
+                    ctx.output_mut(|o| o.cursor_icon = icon);
+                }
+                if session.move_drag.is_none()
+                    && session.resize_drag.is_none()
+                    && primary_pressed
+                    && response.hovered()
+                {
+                    // `press_origin` já foi limpo se o release chegou
+                    // no mesmo frame (clique coalescido) — o clique
+                    // ainda deve selecionar.
+                    if let Some(origin) =
+                        press_origin.or_else(|| response.interact_pointer_pos())
+                    {
+                        begin_select_drag(ctx, session, to_screen, origin);
+                    }
+                }
+                if session.marquee.is_some() {
+                    if let Some(pos) = latest_pos {
+                        let p = to_screen.inverse(pos);
+                        if let Some((_, to)) = &mut session.marquee {
+                            *to = p;
+                        }
+                    }
+                }
+                if let Some(rz) = &session.resize_drag {
+                    if let Some(pos) = latest_pos {
+                        let constrain = ui.input(|i| i.modifiers.shift);
+                        let p = to_screen.inverse(pos);
+                        session.doc.resize(rz.index, rz.handle, p, constrain);
+                    }
+                }
+                // Move o conjunto inteiro, não só a anotação clicada.
+                if let (Some(mv), Some(pos)) = (&session.move_drag, latest_pos) {
+                    let p = to_screen.inverse(pos);
+                    let (dx, dy) = (p.x - mv.last.x, p.y - mv.last.y);
+                    if dx != 0.0 || dy != 0.0 {
+                        let picked = session.selection.clone();
+                        session.doc.translate_all(&picked, dx, dy);
+                        if let Some(mv) = &mut session.move_drag {
+                            mv.travel += (dx * dx + dy * dy).sqrt();
+                            mv.last = p;
+                        }
+                    }
+                }
+                if primary_released {
+                    finish_marquee(session);
+                    // Um arrasto de alça que não mudou nada não vira
+                    // histórico: `end_move` só registra o que mudou.
+                    if session.resize_drag.take().is_some() {
+                        session.doc.end_move();
+                    }
+                    if let Some(mv) = session.move_drag.take() {
+                        // Clique parado (sem arrasto real) só
+                        // seleciona: nem o undo nem o redo mudam.
+                        if mv.travel * to_screen.scale < 2.0 {
+                            session.doc.abort_move();
+                        } else {
+                            session.doc.end_move();
+                        }
+                    }
+                }
+            }
+            // Desenho de formas e marcação da área de recorte: mesma
+            // mecânica de arrasto, destinos diferentes no release.
+            _ => {
+                if response.hovered() {
+                    ctx.output_mut(|o| o.cursor_icon = CursorIcon::Crosshair);
+                }
+                // Relidos a cada quadro: dá para ligar e desligar a
+                // restrição no meio do arrasto, sem recomeçar.
+                let (shift, alt) = ui.input(|i| (i.modifiers.shift, i.modifiers.alt));
+                if session.drag.is_none() && primary_pressed && response.hovered() {
+                    if let Some(origin) =
+                        press_origin.or_else(|| response.interact_pointer_pos())
+                    {
+                        let p = clamp_img(to_screen.inverse(origin));
+                        session.drag = Some(DragPreview {
+                            start: p,
+                            current: p,
+                            shift,
+                            alt,
+                            samples: vec![p],
+                        });
+                        // Começar uma área nova descarta a anterior.
+                        session.crop_pending = None;
+                    }
+                }
+                // Espaço segurado reposiciona a forma em vez de
+                // esticá-la: errar o ponto de partida de um retângulo
+                // grande custaria refazer o gesto inteiro.
+                let moving = ctx.input(|i| i.key_down(egui::Key::Space));
+                if let Some(drag) = &mut session.drag {
+                    if let Some(pos) = latest_pos {
+                        let novo = clamp_img(to_screen.inverse(pos));
+                        if moving {
+                            let dx = novo.x - drag.current.x;
+                            let dy = novo.y - drag.current.y;
+                            drag.start = clamp_img(Point::new(
+                                drag.start.x + dx,
+                                drag.start.y + dy,
+                            ));
+                            for s in &mut drag.samples {
+                                *s = Point::new(s.x + dx, s.y + dy);
+                            }
+                        }
+                        drag.current = novo;
+                        if session.tool.is_stroke() && !moving {
+                            push_sample(&mut drag.samples, drag.current);
+                        }
+                    }
+                    drag.shift = shift;
+                    drag.alt = alt;
+                }
+                if primary_released {
+                    if let Some(drag) = session.drag.take() {
+                        let dx = (drag.current.x - drag.start.x).abs();
+                        let dy = (drag.current.y - drag.start.y).abs();
+                        if session.tool == Tool::Cut {
+                            // Diferente do recorte, o corte não
+                            // espera confirmação: o gesto já diz tudo.
+                            let band = Band::from_drag(drag.start, drag.current);
+                            if band.width() > 0 {
+                                session.doc.cut(band);
+                                reset_view(session);
+                                session.clear_selection();
+                            }
+                        } else if session.tool == Tool::Crop {
+                            // Área pequena demais foi engano: nada a
+                            // confirmar (o recorte só sai no Enter).
+                            if dx >= CROP_MIN_SIDE && dy >= CROP_MIN_SIDE {
+                                session.crop_pending =
+                                    Some(normalize(drag.start, drag.current));
+                            }
+                        } else if session.tool.is_stroke() {
+                            // Um rabisco é medido pelo caminho
+                            // percorrido, não pela distância entre as
+                            // pontas: um círculo começa e termina no
+                            // mesmo lugar e nem por isso é um clique.
+                            if let Some(shape) =
+                                stroke_from_samples(session.tool, &drag.samples)
+                            {
+                                session.doc.push(shape, session.style());
+                            }
+                        } else if dx >= 2.0 || dy >= 2.0 {
+                            // Ignora cliques sem arrasto real.
+                            if let Some(mut shape) = shape_from_drag(
+                                session.tool,
+                                drag.start,
+                                drag.current,
+                                drag.shift,
+                                drag.alt,
+                            ) {
+                                // Ocultar só as palavras: o retângulo
+                                // não vira anotação agora — ele espera
+                                // o OCR, que roda fora desta thread.
+                                // Sair daqui com `return` pulava o
+                                // bloco de desenho lá embaixo, e o
+                                // canvas ficava sem pintura por um
+                                // quadro.
+                                let so_palavras = session.redact_words
+                                    && matches!(shape, Shape::Redaction { .. });
+                                if let Shape::Redaction { min, max, seed } = &mut shape {
+                                    if so_palavras {
+                                        session.redact_text = Some((*min, *max));
+                                    } else {
+                                        // Uma redação minúscula não
+                                        // esconderia nada; e cada uma
+                                        // leva a própria semente.
+                                        max.x = max.x.max(min.x + REDACTION_MIN_SIDE);
+                                        max.y = max.y.max(min.y + REDACTION_MIN_SIDE);
+                                        *seed = redact::fresh_seed();
+                                    }
+                                }
+                                if !so_palavras {
+                                    session.doc.push(shape, session.style());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }

@@ -10,6 +10,10 @@
 //! barra de status ficam parados quando o resto rola — uma faixa tirada de
 //! lá casaria em deslocamento zero e a costura pararia no primeiro quadro.
 
+// Só é alcançado pelo caminho `cfg(windows)`. Fora do Windows compila e
+// é testado — é lógica pura —, mas ninguém o chama.
+#![cfg_attr(not(windows), allow(dead_code))]
+
 use crate::imgbuf::RgbaImage;
 
 /// Altura da faixa de referência, em px. Curta demais casa em qualquer lugar

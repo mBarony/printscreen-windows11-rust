@@ -9,6 +9,10 @@
 //! quebra o esquema até alguém registrar de novo — é o preço de ser portátil,
 //! e o mesmo que já vale para "Iniciar com o Windows".
 
+// Fora do Windows o módulo existe como stub, para o resto do código
+// compilar; ninguém o chama.
+#![cfg_attr(not(windows), allow(dead_code))]
+
 use crate::error::Result;
 
 /// Nome do esquema, sem `://`.

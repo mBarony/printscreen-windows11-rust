@@ -12,6 +12,10 @@
 //! elemento. O texto e os ícones de dentro ficam como buracos na região, e
 //! não atrapalham: a caixa os contém.
 
+// Só é alcançado pelo caminho `cfg(windows)`. Fora do Windows compila e
+// é testado — é lógica pura —, mas ninguém o chama.
+#![cfg_attr(not(windows), allow(dead_code))]
+
 use crate::imgbuf::RgbaImage;
 
 /// Alcance da busca a partir do cursor, em px da imagem. É o que impede um

@@ -16,6 +16,11 @@
 //! pode ser usado de uma thread de trabalho (`crate::jobs`), nunca da thread
 //! da interface.
 
+// A ampliação e as constantes só são usadas pelo `imp`, que é
+// `cfg(windows)`. Fora do Windows continuam compilando e sendo testadas —
+// são lógica pura de imagem —, mas ninguém as chama.
+#![cfg_attr(not(windows), allow(dead_code))]
+
 use crate::error::Result;
 use crate::imgbuf::RgbaImage;
 
@@ -259,6 +264,12 @@ pub use imp::{recognize, recognize_boxes};
 #[cfg(not(windows))]
 #[allow(dead_code)]
 pub fn recognize(_image: &RgbaImage, _language: Option<&str>) -> Result<String> {
+    Err(crate::error::err!("OCR disponível apenas no Windows"))
+}
+
+#[cfg(not(windows))]
+#[allow(dead_code)]
+pub fn recognize_boxes(_image: &RgbaImage, _language: Option<&str>) -> Result<Vec<TextBox>> {
     Err(crate::error::err!("OCR disponível apenas no Windows"))
 }
 

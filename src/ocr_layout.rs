@@ -14,6 +14,10 @@
 //! encher de tabulações um texto corrido seria estragar o caso comum para
 //! atender o raro.
 
+// Só é alcançado pelo caminho `cfg(windows)`, que é quem tem motor de OCR.
+// Fora do Windows o módulo compila e é testado, mas ninguém o chama.
+#![cfg_attr(not(windows), allow(dead_code))]
+
 use crate::platform::ocr::TextBox;
 
 /// Largura mínima de uma faixa vazia para ela contar como divisória, em

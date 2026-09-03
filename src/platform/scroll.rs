@@ -8,6 +8,10 @@
 //! janela de topo: numa janela com painéis, quem rola é o controle sob o
 //! cursor, e o de topo costuma ignorar a roda.
 
+// Fora do Windows o módulo existe como stub, para o resto do código
+// compilar; ninguém o chama.
+#![cfg_attr(not(windows), allow(dead_code))]
+
 /// Um "clique" da roda, na unidade do Windows.
 #[cfg(windows)]
 const WHEEL_DELTA: i16 = 120;

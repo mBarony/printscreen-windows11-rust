@@ -198,7 +198,90 @@ const TOOL_GROUPS: [&[Tool]; 5] = [
     &[Tool::Eyedropper],
 ];
 
+/// Largura que um bloco de `n` botões ocupa, com as folgas entre eles.
+fn largura_de_botoes(n: usize) -> f32 {
+    n as f32 * ICON_BUTTON + n.saturating_sub(1) as f32 * TIGHT
+}
+
+/// Largura de uma fronteira entre grupos: folga, traço, folga.
+fn largura_de_fronteira() -> f32 {
+    LOOSE * 2.0 + 1.0
+}
+
+/// Espaço que os blocos de opções pedem para caber na mesma linha.
+///
+/// É uma estimativa, e é assim de propósito: as opções mudam com a
+/// ferramenta ativa (o holofote traz duas a mais, o texto três) e medir o
+/// caso exato exigiria montar o layout duas vezes por quadro.
+///
+/// O valor cobre o pior caso — cor, amostra e valor do traço, estilo de
+/// linha e os controles contextuais mais largos, mais os dois campos
+/// numéricos e os três botões do bloco de imagem. Deliberadamente folgado:
+/// descer cedo demais custa uma faixa a mais na tela, e a alternativa é o
+/// defeito que isto conserta.
+const LARGURA_DAS_OPCOES: f32 = 520.0;
+
+/// As opções cabem ao lado das ferramentas, ou têm de descer?
+///
+/// Enquanto tudo ficava na mesma linha, o `horizontal_wrapped` quebrava para
+/// uma segunda dentro de um painel de altura fixa — e os botões da segunda
+/// linha saíam por cima dos da primeira. Descer o que não cabe resolve sem
+/// esconder controle nenhum.
+fn opcoes_cabem_em_cima(disponivel: f32, ferramentas: usize, grupos: usize, saida: usize) -> bool {
+    let necessario = largura_de_botoes(ferramentas)
+        + largura_de_botoes(saida)
+        // Divisórias internas das famílias de ferramentas, as fronteiras
+        // entre blocos e a folga do painel.
+        + grupos.saturating_sub(1) as f32 * (TIGHT * 2.0 + 1.0)
+        + largura_de_fronteira() * 3.0
+        + 16.0
+        + LARGURA_DAS_OPCOES;
+    disponivel >= necessario
+}
+
+/// Quantos botões a barra de ferramentas mostra agora.
+fn conta_ferramentas(session: &EditorSession) -> usize {
+    let base: usize = TOOL_GROUPS.iter().map(|g| g.len()).sum();
+    // A confirmação do recorte só aparece com a ferramenta ativa.
+    base + usize::from(session.tool == Tool::Crop)
+}
+
 pub(super) fn draw(ctx: &egui::Context, session: &mut EditorSession, target: &SaveTarget) {
+    // Decidido antes de desenhar: os dois painéis precisam concordar sobre
+    // quem mostra as opções, e o de baixo é criado primeiro para reservar a
+    // sua faixa antes de o canvas tomar o resto.
+    let em_cima = opcoes_cabem_em_cima(
+        ctx.screen_rect().width(),
+        conta_ferramentas(session),
+        TOOL_GROUPS.len(),
+        BOTOES_DE_SAIDA,
+    );
+
+    if !em_cima {
+        egui::TopBottomPanel::bottom("editor_options")
+            .frame(egui::Frame::default().inner_margin(egui::Margin::symmetric(8, 5)))
+            .show(ctx, |ui| {
+                ui.spacing_mut().item_spacing = Vec2::new(0.0, TIGHT);
+                ui.horizontal(|ui| {
+                    group(ui, |ui| tool_options(ctx, ui, session));
+                    group_divider(ui);
+                    group(ui, |ui| image_options(ui, session));
+                });
+            });
+    }
+
+    draw_top(ctx, session, target, em_cima);
+}
+
+/// Quantos botões o lado direito mostra — histórico e saída.
+const BOTOES_DE_SAIDA: usize = 8;
+
+fn draw_top(
+    ctx: &egui::Context,
+    session: &mut EditorSession,
+    target: &SaveTarget,
+    opcoes_em_cima: bool,
+) {
     egui::TopBottomPanel::top("editor_toolbar")
         .frame(egui::Frame::default().inner_margin(egui::Margin::symmetric(8, 5)))
         .show(ctx, |ui| {
@@ -222,9 +305,13 @@ pub(super) fn draw(ctx: &egui::Context, session: &mut EditorSession, target: &Sa
                 ui,
                 |ui| {
                     ui.spacing_mut().item_spacing = Vec2::new(0.0, TIGHT);
-                    ui.horizontal_wrapped(|ui| {
+                    // `horizontal`, não `horizontal_wrapped`: quebrar linha
+                    // aqui é o que fazia os botões se sobreporem. O que não
+                    // cabe desce para a barra de baixo, e não para uma
+                    // segunda linha desta.
+                    ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing = Vec2::new(0.0, TIGHT);
-                        left_side(ctx, ui, session);
+                        left_side(ctx, ui, session, opcoes_em_cima);
                     });
                 },
                 |ui| {
@@ -337,7 +424,12 @@ fn right_side(ui: &mut egui::Ui, can_undo: bool, can_redo: bool) -> Option<Right
 }
 
 /// Ferramentas, cor, traço e os controles da ferramenta ativa.
-fn left_side(ctx: &egui::Context, ui: &mut egui::Ui, session: &mut EditorSession) {
+fn left_side(
+    ctx: &egui::Context,
+    ui: &mut egui::Ui,
+    session: &mut EditorSession,
+    com_opcoes: bool,
+) {
     // --- Bloco 1: as ferramentas, com divisórias internas por família ---
     group(ui, |ui| {
         for (index, tools) in TOOL_GROUPS.iter().enumerate() {
@@ -370,6 +462,10 @@ fn left_side(ctx: &egui::Context, ui: &mut egui::Ui, session: &mut EditorSession
             }
         }
     });
+
+    if !com_opcoes {
+        return;
+    }
 
     group_divider(ui);
 
@@ -731,6 +827,49 @@ pub(super) fn stroke_preview(ui: &mut egui::Ui, width: f32, line: LineStyle) {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn numa_janela_larga_as_opcoes_ficam_em_cima() {
+        // 1920 px é a largura mais comum: tudo cabe numa linha só.
+        assert!(opcoes_cabem_em_cima(1920.0, 15, 5, 8));
+    }
+
+    #[test]
+    fn numa_janela_estreita_as_opcoes_descem() {
+        // Uma janela de 800 pt não comporta ferramentas, saída e opções.
+        assert!(!opcoes_cabem_em_cima(800.0, 15, 5, 8));
+    }
+
+    #[test]
+    fn a_decisao_acompanha_o_numero_de_ferramentas() {
+        // Mesma largura, mais botões: em algum ponto deixa de caber, e nunca
+        // volta a caber ao crescer.
+        let largura = 1100.0;
+        let mut viu_falso = false;
+        for n in 5..40 {
+            let cabe = opcoes_cabem_em_cima(largura, n, 5, 8);
+            if !cabe {
+                viu_falso = true;
+            }
+            assert!(!(viu_falso && cabe), "não pode voltar a caber com {n} botões");
+        }
+        assert!(viu_falso, "com 40 botões já não deveria caber");
+    }
+
+    #[test]
+    fn a_largura_de_um_bloco_conta_as_folgas_internas() {
+        assert_eq!(largura_de_botoes(0), 0.0);
+        assert_eq!(largura_de_botoes(1), ICON_BUTTON);
+        assert_eq!(largura_de_botoes(3), ICON_BUTTON * 3.0 + TIGHT * 2.0);
+    }
+
+    #[test]
+    fn janela_minuscula_nunca_tenta_manter_as_opcoes_em_cima() {
+        for largura in [0.0, 100.0, 320.0] {
+            assert!(!opcoes_cabem_em_cima(largura, 15, 5, 8), "largura {largura}");
+        }
+    }
+
     use super::*;
     use crate::editor::icons::{geometry, Primitive};
 

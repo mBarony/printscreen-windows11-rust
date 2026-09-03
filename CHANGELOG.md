@@ -4,6 +4,17 @@ Histórico de versões do RustShot. Datas em 2026.
 
 ## Não lançado
 
+- **Nenhum botão da barra do editor sobrepõe outro.** Quando a janela é
+  estreita demais para tudo caber numa linha, as configurações — cor,
+  espessura, estilo de linha, os campos numéricos e as opções da imagem —
+  descem para uma faixa no rodapé do editor, em vez de quebrarem para uma
+  segunda linha dentro de um painel de altura fixa, que era o que fazia os
+  controles se atropelarem. Numa tela de 1366 pontos ou mais tudo continua
+  em cima, como antes; abaixo disso a faixa de baixo aparece. Nenhum
+  controle é escondido em nenhum dos casos.
+
+## Não lançado
+
 ## v1.11.4 — 31/08
 
 Os três itens que a revisão de código tinha deixado de fora, cada um no seu commit.
